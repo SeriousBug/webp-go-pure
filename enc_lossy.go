@@ -1,6 +1,9 @@
 package webp
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 const (
 	elossyMaxWebpDimension    = 1 << 14
@@ -130,8 +133,23 @@ func elossyValidateOptions(options *LossyOptions) error {
 	return nil
 }
 
+// elossyBaseQuantizerFromQuality maps a 0..=100 quality to a VP8 base
+// quantizer index. It mirrors libwebp's nonlinear quality->compression curve
+// (QualityToCompression in quant_enc.c): file size scales roughly with the
+// cube of the quantizer, so the mapping cube-roots a linearized quality before
+// inverting to a 0..=127 index. A prior linear map over-quantized the top of
+// the range (q90 landed at index 13 vs libwebp's ~9).
 func elossyBaseQuantizerFromQuality(quality uint8) int32 {
-	return (((100 - int32(quality)) * 127) + 50) / 100
+	c := float64(quality) / 100.0
+	var linearC float64
+	if c < 0.75 {
+		linearC = c * (2.0 / 3.0)
+	} else {
+		linearC = 2.0*c - 1.0
+	}
+	compression := math.Cbrt(linearC)
+	q := int32(127.0 * (1.0 - compression))
+	return elossyClampI32(q, 0, 127)
 }
 
 func elossyClampI32(value, lo, hi int32) int32 {
