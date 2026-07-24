@@ -295,18 +295,41 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 		endY = height
 	}
 
+	// Read each pixel's neighbours once and score all 14 predictor modes from
+	// them, instead of re-reading neighbours per mode.
+	var costs [elosslessNumPredictorModes]uint64
+	for y := startY; y < endY; y++ {
+		for x := startX; x < endX; x++ {
+			actual := argb[y*width+x]
+			if y == 0 || x == 0 {
+				pred := elosslessPredictorForMode(argb, width, x, y, 0)
+				e := uint64(elosslessPredictorError(actual, pred))
+				for mode := range costs {
+					costs[mode] += e
+				}
+				continue
+			}
+			left := argb[y*width+x-1]
+			top := argb[(y-1)*width+x]
+			topLeft := argb[(y-1)*width+x-1]
+			var topRight uint32
+			if x+1 < width {
+				topRight = argb[(y-1)*width+x+1]
+			} else {
+				topRight = argb[y*width]
+			}
+			for mode := uint8(0); mode < elosslessNumPredictorModes; mode++ {
+				pred := elosslessPredictor(mode, left, top, topLeft, topRight)
+				costs[mode] += uint64(elosslessPredictorError(actual, pred))
+			}
+		}
+	}
+
 	bestMode := uint8(11)
 	bestCost := ^uint64(0)
 	for mode := uint8(0); mode < elosslessNumPredictorModes; mode++ {
-		cost := uint64(0)
-		for y := startY; y < endY; y++ {
-			for x := startX; x < endX; x++ {
-				pred := elosslessPredictorForMode(argb, width, x, y, mode)
-				cost += uint64(elosslessPredictorError(argb[y*width+x], pred))
-			}
-		}
-		if cost < bestCost {
-			bestCost = cost
+		if costs[mode] < bestCost {
+			bestCost = costs[mode]
 			bestMode = mode
 		}
 	}
