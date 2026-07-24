@@ -1,11 +1,8 @@
 package webp
 
-// TODO(simd stage 2): replace with per-arch dispatch (predscore_generic.go +
-// predscore_{arm64,amd64}.go). Temporary build-tagless dispatch so the pure-Go
-// refactor builds and can be verified on its own.
-func elosslessScorePredictorRow(argb []uint32, width, y, x0, x1 int, costs *[elosslessNumPredictorModes]uint64) {
-	elosslessScorePredictorRowGo(argb, width, y, x0, x1, costs)
-}
+// elosslessScorePredictorRow is dispatched to a vectorized backend on arm64 and
+// amd64 (see predscore_{arm64,amd64}.go) and to the Go reference elsewhere (see
+// predscore_generic.go).
 
 // elosslessScorePredictorRowGo accumulates, for every interior pixel in row y at
 // columns [x0, x1), the sum of predictor errors for each of the 14 predictor
