@@ -13,7 +13,6 @@ func elossyBlockHasNonZero(levels *[16]int16, first int) bool {
 
 // compute_skip_probability returns (prob, ok).
 func elossyComputeSkipProbability(modes []elossyMacroblockMode) (uint8, bool) {
-	const skipProbaThreshold uint8 = 250
 	total := len(modes)
 	skipCount := 0
 	for i := range modes {
@@ -24,6 +23,12 @@ func elossyComputeSkipProbability(modes []elossyMacroblockMode) (uint8, bool) {
 	if total == 0 || skipCount == 0 {
 		return 0, false
 	}
+	// Skip signaling MUST be enabled whenever any macroblock is skipped:
+	// elossyEncodeMacroblock omits the coefficient tokens for all-zero
+	// macroblocks unconditionally, and that omission is only decodable when
+	// mb_no_skip_coeff signaling is on. Gating signaling on a probability
+	// threshold while still omitting tokens desynced the token partition (the
+	// decoder read the next macroblock's coefficients for every skipped one).
 	nonSkip := total - skipCount
 	probZero := ((nonSkip * 255) + total/2) / total
 	if probZero < 1 {
@@ -31,11 +36,7 @@ func elossyComputeSkipProbability(modes []elossyMacroblockMode) (uint8, bool) {
 	} else if probZero > 254 {
 		probZero = 254
 	}
-	probability := uint8(probZero)
-	if probability < skipProbaThreshold {
-		return probability, true
-	}
-	return 0, false
+	return uint8(probZero), true
 }
 
 func elossyIntra4TreeContains(node int8, mode uint8) bool {

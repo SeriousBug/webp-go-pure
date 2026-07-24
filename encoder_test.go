@@ -3,6 +3,7 @@ package webp
 import (
 	"bytes"
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -299,6 +300,57 @@ func TestEncodeLossyRgbaToVp8MarksFlatMacroblocksAsSkip(t *testing.T) {
 	}
 	if !anySkip {
 		t.Fatal("expected at least one skipped macroblock")
+	}
+}
+
+// TestEncodeLossyRareSkipsRoundTrip guards against a token-partition desync:
+// when only a few macroblocks are skippable, skip signaling must still be
+// enabled, otherwise the encoder omits those macroblocks' coefficient tokens
+// without the decoder expecting it. Uses a mostly-detailed image (rare skips)
+// at high effort and checks the decoded result matches the encoder.
+func TestEncodeLossyRareSkipsRoundTrip(t *testing.T) {
+	width, height := 256, 256
+	rgba := make([]byte, width*height*4)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			o := (y*width + x) * 4
+			// One flat (skippable) macroblock at (0,0); high-frequency detail
+			// everywhere else so almost every macroblock is non-skip.
+			var v byte = 0x80
+			if x >= 16 || y >= 16 {
+				v = byte((x*7 ^ y*13) & 0xff)
+			}
+			rgba[o] = v
+			rgba[o+1] = v
+			rgba[o+2] = v
+			rgba[o+3] = 0xff
+		}
+	}
+	enc, err := EncodeLossy(&Image{Width: width, Height: height, RGBA: rgba}, &LossyOptions{Quality: 90, Effort: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := Decode(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mse float64
+	n := 0
+	for i := 0; i < len(rgba); i++ {
+		if i%4 == 3 {
+			continue
+		}
+		d := float64(rgba[i]) - float64(dec.RGBA[i])
+		mse += d * d
+		n++
+	}
+	mse /= float64(n)
+	psnr := 99.0
+	if mse > 0 {
+		psnr = 10 * math.Log10(255*255/mse)
+	}
+	if psnr < 30 {
+		t.Fatalf("decoded PSNR too low (%.2f): token partition likely desynced", psnr)
 	}
 }
 
