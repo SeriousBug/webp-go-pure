@@ -7,6 +7,22 @@ import "unsafe"
 //go:noescape
 func elossyAddTransformAsm(planePtr unsafe.Pointer, stride int, coeffs *[16]int16)
 
+//go:noescape
+func elossyForwardTransformAsm(srcPtr unsafe.Pointer, srcStride int, predPtr unsafe.Pointer, predStride int, out *[16]int16)
+
+func elossyForwardTransformAt(src []uint8, srcStride, srcX, srcY int, pred []uint8, predStride, predX, predY int) [16]int16 {
+	// Touch the extreme source/pred indices so an out-of-range block panics here
+	// in Go rather than reading past the buffers from assembly.
+	_ = src[(srcY+3)*srcStride+srcX+3]
+	_ = pred[(predY+3)*predStride+predX+3]
+	var out [16]int16
+	elossyForwardTransformAsm(
+		unsafe.Pointer(&src[srcY*srcStride+srcX]), srcStride,
+		unsafe.Pointer(&pred[predY*predStride+predX]), predStride,
+		&out)
+	return out
+}
+
 func elossyAddTransform(plane []uint8, stride, x, y int, coeffs *[16]int16) {
 	// The 16 int16 coefficients are 32 bytes; OR them as four uint64 words to
 	// detect an all-zero block branchlessly. Zero blocks add nothing, so skip them.

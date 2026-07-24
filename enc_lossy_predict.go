@@ -459,7 +459,7 @@ func elossyAddTransformGo(plane []uint8, stride, x, y int, coeffs *[16]int16) {
 	}
 }
 
-func elossyForwardTransformAt(src []uint8, srcStride, srcX, srcY int, pred []uint8, predStride, predX, predY int) [16]int16 {
+func elossyForwardTransformAtGo(src []uint8, srcStride, srcX, srcY int, pred []uint8, predStride, predX, predY int) [16]int16 {
 	var tmp [16]int32
 	for row := 0; row < 4; row++ {
 		srcOffset := (srcY+row)*srcStride + srcX
