@@ -9,8 +9,14 @@ permissions:
   contents: read
 
 jobs:
+  # Run the full suite natively on amd64 and arm64 so both architectures' asm
+  # kernels are exercised for real, not just cross-compiled.
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -28,6 +34,28 @@ jobs:
         run: CGO_ENABLED=0 go test ./...
       - name: test (race detector)
         run: go test -race ./...
+
+  # riscv64 has no native runner, so run a small conversion subset under QEMU
+  # user-mode emulation to confirm the generic (non-asm) fallback path actually
+  # produces correct output. Emulation is slow, so this is deliberately limited
+  # to one encode test and one decode test, exercising the forward and inverse
+  # transform fallbacks in both directions.
+  test-riscv64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Register QEMU binfmt handlers
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
+      - name: test (riscv64 emulation, conversion subset)
+        env:
+          GOARCH: riscv64
+          CGO_ENABLED: "0"
+        run: go test -v -count=1 -run 'TestEncodeLossyRgbaToVp8RoundTripsAsLossyFrame|TestDecodeLossyWebpToRGBAMatchesReferencePixels' .
 
   # Guard the hand-written amd64/arm64 asm kernels and their generic fallbacks by
   # cross-compiling for every supported target with cgo disabled. riscv64 has no
