@@ -977,7 +977,7 @@ func elosslessWriteTokens(bw *bitWriter, tokens []elosslessToken, width int, gre
 	return nil
 }
 
-func elosslessWriteSingleGroupImageStream(bw *bitWriter, width int, tokens []elosslessToken, allowMetaHuffman bool, colorCacheBits int, group *elosslessHuffmanGroupCodes) error {
+func elosslessWriteSingleGroupPrefix(bw *bitWriter, allowMetaHuffman bool, colorCacheBits int, group *elosslessHuffmanGroupCodes) error {
 	if err := bw.putBits(elosslessBoolBit(colorCacheBits > 0), 1); err != nil {
 		return err
 	}
@@ -991,15 +991,49 @@ func elosslessWriteSingleGroupImageStream(bw *bitWriter, width int, tokens []elo
 			return err
 		}
 	}
+	return elosslessWriteHuffmanGroup(bw, group)
+}
 
-	if err := elosslessWriteHuffmanGroup(bw, group); err != nil {
+func elosslessWriteSingleGroupImageStream(bw *bitWriter, width int, tokens []elosslessToken, allowMetaHuffman bool, colorCacheBits int, group *elosslessHuffmanGroupCodes) error {
+	if err := elosslessWriteSingleGroupPrefix(bw, allowMetaHuffman, colorCacheBits, group); err != nil {
 		return err
 	}
-
 	return elosslessWriteTokens(bw, tokens, width, &group.green, &group.red, &group.blue, &group.alpha, &group.dist)
 }
 
-func elosslessWriteMetaHuffmanImageStream(bw *bitWriter, width int, tokens []elosslessToken, colorCacheBits int, plan *elosslessMetaHuffmanPlan) error {
+// elosslessCountSingleGroupTokenBits returns the exact number of bits
+// elosslessWriteTokens would emit for these tokens under one Huffman group,
+// without emitting them, by summing the code depths and extra bits.
+func elosslessCountSingleGroupTokenBits(tokens []elosslessToken, width int, group *elosslessHuffmanGroupCodes) (int, error) {
+	bits := 0
+	for _, token := range tokens {
+		switch token.kind {
+		case elosslessTokLiteral:
+			argb := token.argb
+			bits += group.green.symbolDepth(int((argb >> 8) & 0xff))
+			bits += group.red.symbolDepth(int((argb >> 16) & 0xff))
+			bits += group.blue.symbolDepth(int(argb & 0xff))
+			bits += group.alpha.symbolDepth(int((argb >> 24) & 0xff))
+		case elosslessTokCache:
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes + elosslessNumLengthCodes + token.key)
+		case elosslessTokCopy:
+			lengthPrefix, err := elosslessPrefixEncode(token.length)
+			if err != nil {
+				return 0, err
+			}
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes+lengthPrefix.symbol) + lengthPrefix.extraBits
+			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+			distPrefix, err := elosslessPrefixEncode(planeCode)
+			if err != nil {
+				return 0, err
+			}
+			bits += group.dist.symbolDepth(distPrefix.symbol) + distPrefix.extraBits
+		}
+	}
+	return bits, nil
+}
+
+func elosslessWriteMetaHuffmanPrefix(bw *bitWriter, colorCacheBits int, plan *elosslessMetaHuffmanPlan) error {
 	if err := bw.putBits(elosslessBoolBit(colorCacheBits > 0), 1); err != nil {
 		return err
 	}
@@ -1028,7 +1062,49 @@ func elosslessWriteMetaHuffmanImageStream(bw *bitWriter, width int, tokens []elo
 			return err
 		}
 	}
+	return nil
+}
+
+func elosslessWriteMetaHuffmanImageStream(bw *bitWriter, width int, tokens []elosslessToken, colorCacheBits int, plan *elosslessMetaHuffmanPlan) error {
+	if err := elosslessWriteMetaHuffmanPrefix(bw, colorCacheBits, plan); err != nil {
+		return err
+	}
 	return elosslessWriteTokensWithMeta(bw, tokens, width, plan)
+}
+
+// elosslessCountMetaTokenBits returns the exact number of bits
+// elosslessWriteTokensWithMeta would emit for these tokens, without emitting them.
+func elosslessCountMetaTokenBits(tokens []elosslessToken, width int, plan *elosslessMetaHuffmanPlan) (int, error) {
+	bits := 0
+	pos := 0
+	for _, token := range tokens {
+		tile := elosslessTileIndexForPos(width, plan.huffmanBits, plan.huffmanXsize, pos)
+		group := &plan.groups[plan.assignments[tile]]
+		switch token.kind {
+		case elosslessTokLiteral:
+			argb := token.argb
+			bits += group.green.symbolDepth(int((argb >> 8) & 0xff))
+			bits += group.red.symbolDepth(int((argb >> 16) & 0xff))
+			bits += group.blue.symbolDepth(int(argb & 0xff))
+			bits += group.alpha.symbolDepth(int((argb >> 24) & 0xff))
+		case elosslessTokCache:
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes + elosslessNumLengthCodes + token.key)
+		case elosslessTokCopy:
+			lengthPrefix, err := elosslessPrefixEncode(token.length)
+			if err != nil {
+				return 0, err
+			}
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes+lengthPrefix.symbol) + lengthPrefix.extraBits
+			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+			distPrefix, err := elosslessPrefixEncode(planeCode)
+			if err != nil {
+				return 0, err
+			}
+			bits += group.dist.symbolDepth(distPrefix.symbol) + distPrefix.extraBits
+		}
+		pos += elosslessTokenLen(token)
+	}
+	return bits, nil
 }
 
 func elosslessWriteImageStreamFromTokens(bw *bitWriter, width, height int, tokens []elosslessToken, emitMetaHuffmanFlag bool, entropySearchLevel uint8, colorCacheBits int) error {
@@ -1088,20 +1164,32 @@ func elosslessWriteImageStream(bw *bitWriter, width int, argb []uint32, emitMeta
 	return elosslessWriteImageStreamFromTokens(bw, width, len(argb)/width, tokens, emitMetaHuffmanFlag, entropySearchLevel, options.colorCacheBits)
 }
 
+// elosslessEstimateSingleGroupImageStreamSize returns the byte size of the
+// single-group image stream. The prefix (color-cache flags and Huffman trees) is
+// emitted so its exact bit length is known, and the token bits are counted by
+// summing code depths rather than emitting the whole stream.
 func elosslessEstimateSingleGroupImageStreamSize(width int, tokens []elosslessToken, colorCacheBits int, allowMetaHuffman bool, group *elosslessHuffmanGroupCodes) (int, error) {
 	bw := newBitWriter()
-	if err := elosslessWriteSingleGroupImageStream(bw, width, tokens, allowMetaHuffman, colorCacheBits, group); err != nil {
+	if err := elosslessWriteSingleGroupPrefix(bw, allowMetaHuffman, colorCacheBits, group); err != nil {
 		return 0, err
 	}
-	return len(bw.intoBytes()), nil
+	tokenBits, err := elosslessCountSingleGroupTokenBits(tokens, width, group)
+	if err != nil {
+		return 0, err
+	}
+	return (bw.bitPos + tokenBits + 7) / 8, nil
 }
 
 func elosslessEstimateMetaHuffmanImageStreamSize(width int, tokens []elosslessToken, colorCacheBits int, plan *elosslessMetaHuffmanPlan) (int, error) {
 	bw := newBitWriter()
-	if err := elosslessWriteMetaHuffmanImageStream(bw, width, tokens, colorCacheBits, plan); err != nil {
+	if err := elosslessWriteMetaHuffmanPrefix(bw, colorCacheBits, plan); err != nil {
 		return 0, err
 	}
-	return len(bw.intoBytes()), nil
+	tokenBits, err := elosslessCountMetaTokenBits(tokens, width, plan)
+	if err != nil {
+		return 0, err
+	}
+	return (bw.bitPos + tokenBits + 7) / 8, nil
 }
 
 func elosslessEstimateImageStreamSize(width, height int, tokens []elosslessToken, colorCacheBits int, emitMetaHuffmanFlag bool, entropySearchLevel uint8) (int, error) {

@@ -106,6 +106,15 @@ func (c *elosslessHuffmanCode) getCodeLengths() []uint8 {
 	return c.codeLengths
 }
 
+// symbolDepth returns the number of bits writeSymbol emits for symbol: zero for
+// a single-symbol code (which emits nothing), otherwise the code length.
+func (c *elosslessHuffmanCode) symbolDepth(symbol int) int {
+	if c.hasSingleSymbol {
+		return 0
+	}
+	return int(c.codeLengths[symbol])
+}
+
 func (c *elosslessHuffmanCode) usedSymbols() []int {
 	var symbols []int
 	for symbol, length := range c.codeLengths {
