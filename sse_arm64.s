@@ -57,3 +57,47 @@ done:
 	VMOV V7.D[0], R4
 	MOVD R4, ret+32(FP)
 	RET
+
+// func elossyBlockSse4x4Asm(srcPtr, candPtr unsafe.Pointer, srcStride int) uint64
+//
+// Sum of squared differences over a 4x4 block: a contiguous 16-byte candidate
+// against a strided source. The four 4-byte source rows are gathered into one
+// vector via per-lane moves, then the 16-byte SSE reuses the same widen/subtract/
+// square/accumulate path as elossyBlockSseAsm.
+TEXT ·elossyBlockSse4x4Asm(SB), NOSPLIT, $0-32
+	MOVD srcPtr+0(FP), R0
+	MOVD candPtr+8(FP), R1
+	MOVD srcStride+16(FP), R2
+
+	MOVWU (R0), R3
+	VMOV R3, V0.S[0]
+	ADD R2, R0, R0
+	MOVWU (R0), R3
+	VMOV R3, V0.S[1]
+	ADD R2, R0, R0
+	MOVWU (R0), R3
+	VMOV R3, V0.S[2]
+	ADD R2, R0, R0
+	MOVWU (R0), R3
+	VMOV R3, V0.S[3]
+
+	VLD1 (R1), [V1.B16]
+
+	VEOR V6.B16, V6.B16, V6.B16
+	VUXTL V0.B8, V2.H8
+	VUXTL V1.B8, V3.H8
+	VSUB V3.H8, V2.H8, V4.H8
+	WORD $0x4e649c85 // VMUL V4.H8, V4.H8, V5.H8
+	VUADDW V5.H4, V6.S4, V6.S4
+	VUADDW2 V5.H8, V6.S4, V6.S4
+	VUXTL2 V0.B16, V2.H8
+	VUXTL2 V1.B16, V3.H8
+	VSUB V3.H8, V2.H8, V4.H8
+	WORD $0x4e649c85 // VMUL V4.H8, V4.H8, V5.H8
+	VUADDW V5.H4, V6.S4, V6.S4
+	VUADDW2 V5.H8, V6.S4, V6.S4
+
+	VUADDLV V6.S4, V7
+	VMOV V7.D[0], R4
+	MOVD R4, ret+24(FP)
+	RET

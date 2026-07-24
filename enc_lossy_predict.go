@@ -618,7 +618,7 @@ func elossyReconstructFromPrediction(prediction *[16]uint8, coeffs *[16]int16) [
 	return block
 }
 
-func elossyBlockSse4x4(source []uint8, stride, x, y int, candidate *[16]uint8) uint64 {
+func elossyBlockSse4x4Go(source []uint8, stride, x, y int, candidate *[16]uint8) uint64 {
 	var sse uint64
 	for row := 0; row < 4; row++ {
 		srcOffset := (y+row)*stride + x
