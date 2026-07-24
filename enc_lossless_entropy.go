@@ -383,12 +383,33 @@ func elosslessHistogramSetEntropyCost(histograms *elosslessHistogramSet) float64
 	return sum
 }
 
-func elosslessHistogramMergePenalty(lhs, rhs *elosslessHistogramSet) float64 {
-	merged := elosslessCloneHistogramSet(lhs)
-	elosslessMergeHistograms(&merged, rhs)
-	return elosslessHistogramSetEntropyCost(&merged) -
-		elosslessHistogramSetEntropyCost(lhs) -
-		elosslessHistogramSetEntropyCost(rhs)
+// elosslessCombinedChannelEntropy returns the Shannon entropy cost of the
+// element-wise sum of two histograms without materializing the sum.
+func elosslessCombinedChannelEntropy(a, b []uint32) float64 {
+	total := 0.0
+	for i := range a {
+		total += float64(a[i] + b[i])
+	}
+	if total == 0.0 {
+		return 0.0
+	}
+	sum := 0.0
+	for i := range a {
+		c := a[i] + b[i]
+		if c != 0 {
+			cf := float64(c)
+			sum += cf * math.Log2(total/cf)
+		}
+	}
+	return sum
+}
+
+func elosslessCombinedHistogramSetEntropy(a, b *elosslessHistogramSet) float64 {
+	return elosslessCombinedChannelEntropy(a[0], b[0]) +
+		elosslessCombinedChannelEntropy(a[1], b[1]) +
+		elosslessCombinedChannelEntropy(a[2], b[2]) +
+		elosslessCombinedChannelEntropy(a[3], b[3]) +
+		elosslessCombinedChannelEntropy(a[4], b[4])
 }
 
 func elosslessHistogramPartitionIndex(value, minValue, maxValue float64, partitions int) int {
@@ -461,12 +482,43 @@ func elosslessEntropyHistogramCandidates(nonEmptyTiles [][2]int, tileHistograms 
 		return nil
 	}
 
-	for len(candidates) > targetCount {
+	// Greedy pairwise merge minimizing total entropy. The merge penalty for a
+	// pair is combinedEntropy(i,j) - selfCost[i] - selfCost[j]; caching each
+	// candidate's self-entropy and the pairwise combined entropies keeps the
+	// entropy evaluations at O(n^2) overall instead of recomputing them for
+	// every pair on every merge step.
+	n := len(candidates)
+	selfCost := make([]float64, n)
+	comb := make([][]float64, n)
+	for i := 0; i < n; i++ {
+		selfCost[i] = elosslessHistogramSetEntropyCost(&candidates[i].histograms)
+		comb[i] = make([]float64, n)
+	}
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			comb[i][j] = elosslessCombinedHistogramSetEntropy(&candidates[i].histograms, &candidates[j].histograms)
+		}
+	}
+	recomputeRow := func(i, active int) {
+		for j := 0; j < active; j++ {
+			if j == i {
+				continue
+			}
+			v := elosslessCombinedHistogramSetEntropy(&candidates[i].histograms, &candidates[j].histograms)
+			if i < j {
+				comb[i][j] = v
+			} else {
+				comb[j][i] = v
+			}
+		}
+	}
+
+	for n > targetCount {
 		bestLhs, bestRhs := -1, -1
 		bestPenalty := math.Inf(1)
-		for lhs := 0; lhs < len(candidates); lhs++ {
-			for rhs := lhs + 1; rhs < len(candidates); rhs++ {
-				penalty := elosslessHistogramMergePenalty(&candidates[lhs].histograms, &candidates[rhs].histograms)
+		for lhs := 0; lhs < n; lhs++ {
+			for rhs := lhs + 1; rhs < n; rhs++ {
+				penalty := comb[lhs][rhs] - selfCost[lhs] - selfCost[rhs]
 				if penalty < bestPenalty {
 					bestPenalty = penalty
 					bestLhs, bestRhs = lhs, rhs
@@ -478,11 +530,20 @@ func elosslessEntropyHistogramCandidates(nonEmptyTiles [][2]int, tileHistograms 
 			break
 		}
 		rhsCandidate := candidates[bestRhs]
-		candidates[bestRhs] = candidates[len(candidates)-1]
-		candidates = candidates[:len(candidates)-1]
 		elosslessMergeHistograms(&candidates[bestLhs].histograms, &rhsCandidate.histograms)
 		elosslessNormalizeHistograms(&candidates[bestLhs].histograms)
 		candidates[bestLhs].weight += rhsCandidate.weight
+		selfCost[bestLhs] = elosslessHistogramSetEntropyCost(&candidates[bestLhs].histograms)
+
+		last := n - 1
+		candidates[bestRhs] = candidates[last]
+		selfCost[bestRhs] = selfCost[last]
+		candidates = candidates[:last]
+		n = last
+		if bestRhs < n {
+			recomputeRow(bestRhs, n)
+		}
+		recomputeRow(bestLhs, n)
 	}
 
 	return candidates
