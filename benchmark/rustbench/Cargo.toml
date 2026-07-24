@@ -1,0 +1,14 @@
+[package]
+name = "rustbench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Path dependency on the sibling webp-rust repo (the library this Go port is
+# based on). Only builds if ../../../webp-rust exists next to webp-go-pure.
+[dependencies]
+webp-rust = { path = "../../../webp-rust" }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+[profile.release]
+opt-level = 3

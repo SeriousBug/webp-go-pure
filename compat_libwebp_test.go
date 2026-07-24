@@ -1,10 +1,11 @@
-//go:build libwebp
+//go:build testbenchmark
 
 // These tests cross-check our pure-Go codec against libwebp (the C reference)
 // through github.com/kolesa-team/go-webp. They require cgo and the libwebp C
-// library plus pkg-config. They are excluded from the default build; run with:
+// library plus pkg-config, so they are gated behind the test-only build tag
+// `testbenchmark` and excluded from the default build. Run with:
 //
-//	go test -tags libwebp ./...
+//	go test -tags testbenchmark ./...
 //
 // On macOS: brew install webp pkg-config.
 package webp
