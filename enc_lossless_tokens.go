@@ -13,6 +13,7 @@ type elosslessMatch struct {
 	distance int
 	length   int
 	set      bool
+	score    int
 }
 
 type elosslessOptKey struct {
@@ -239,14 +240,13 @@ func elosslessConsiderMatch(width int, best *elosslessMatch, distance, length in
 	candidateScore := elosslessMatchGainBits(width, distance, length)
 	better := true
 	if best.set {
-		bestScore := elosslessMatchGainBits(width, best.distance, best.length)
-		better = candidateScore > bestScore ||
-			(candidateScore == bestScore &&
+		better = candidateScore > best.score ||
+			(candidateScore == best.score &&
 				(length > best.length ||
 					(length == best.length && distance < best.distance)))
 	}
 	if better {
-		*best = elosslessMatch{distance: distance, length: length, set: true}
+		*best = elosslessMatch{distance: distance, length: length, set: true, score: candidateScore}
 	}
 }
 
@@ -303,6 +303,13 @@ func elosslessFindBestHashMatch(width int, argb []uint32, index, maxLen int, hea
 	candidate := heads[hash]
 	remaining := matchChainDepth
 
+	// The chain is walked nearest-first (increasing distance), so a candidate
+	// that cannot exceed the longest match seen cannot beat it on gain either.
+	// Reject such candidates with a single comparison at position bestLen
+	// (libwebp's best_argb trick) instead of a full FindMatchLength.
+	bestLen := 0
+	var bestArgb uint32
+
 	for candidate != elosslessIntMax && remaining > 0 {
 		remaining--
 		if candidate >= index {
@@ -310,12 +317,18 @@ func elosslessFindBestHashMatch(width int, argb []uint32, index, maxLen int, hea
 		}
 		distance := index - candidate
 		if distance <= elosslessMaxFallbackDistance {
-			length := elosslessFindMatchLength(argb, index, candidate, maxLen)
-			if length >= elosslessMinLength {
-				elosslessConsiderMatch(width, &best, distance, length)
-			}
-			if length == maxLen {
-				break
+			if bestLen == 0 || argb[candidate+bestLen] == bestArgb {
+				length := elosslessFindMatchLength(argb, index, candidate, maxLen)
+				if length >= elosslessMinLength {
+					elosslessConsiderMatch(width, &best, distance, length)
+				}
+				if length > bestLen {
+					bestLen = length
+					if bestLen >= maxLen {
+						break
+					}
+					bestArgb = argb[index+bestLen]
+				}
 			}
 		}
 		candidate = prev[candidate]
