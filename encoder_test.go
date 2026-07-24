@@ -1,0 +1,410 @@
+package webp
+
+import (
+	"bytes"
+	"errors"
+	"testing"
+)
+
+func sampleRGBA() (int, int, []byte) {
+	width, height := 3, 2
+	rgba := []byte{
+		0xff, 0x00, 0x00, 0xff, 0x00, 0xff, 0x00, 0x80, 0x00, 0x00, 0xff, 0x40, 0xff, 0xff, 0xff,
+		0xff, 0x22, 0x44, 0x66, 0x00, 0x80, 0x20, 0xc0, 0xfe,
+	}
+	return width, height, rgba
+}
+
+func lossySampleRGBA() (int, int, []byte) {
+	width, height := 19, 17
+	rgba := make([]byte, width*height*4)
+	satMul := func(a byte, b byte) byte {
+		v := int(a) * int(b)
+		if v > 255 {
+			v = 255
+		}
+		return byte(v)
+	}
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			offset := (y*width + x) * 4
+			rgba[offset] = satMul(byte(x), 12)
+			rgba[offset+1] = satMul(byte(y), 13)
+			rgba[offset+2] = satMul(byte(x+y), 7)
+			rgba[offset+3] = 0xff
+		}
+	}
+	return width, height, rgba
+}
+
+func assertInvalidParam(t *testing.T, err error, msg string) {
+	t.Helper()
+	var e *EncoderError
+	if !errors.As(err, &e) {
+		t.Fatalf("expected *EncoderError, got %v", err)
+	}
+	if e.Kind != EncErrInvalidParam || e.Msg != msg {
+		t.Fatalf("expected InvalidParam(%q), got kind=%d msg=%q", msg, e.Kind, e.Msg)
+	}
+}
+
+func TestEncodeLosslessRgbaToVp8lRoundTripsPixels(t *testing.T) {
+	width, height, rgba := sampleRGBA()
+	vp8l, err := EncodeLosslessRgbaToVp8l(width, height, rgba)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeLosslessVp8lToRGBA(vp8l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Width != width || decoded.Height != height || !bytes.Equal(decoded.RGBA, rgba) {
+		t.Fatal("round trip mismatch")
+	}
+}
+
+func TestEncodeLosslessRgbaToWebpRoundTripsPixels(t *testing.T) {
+	width, height, rgba := sampleRGBA()
+	webp, err := EncodeLosslessRgbaToWebp(width, height, rgba)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Width != width || decoded.Height != height || !bytes.Equal(decoded.RGBA, rgba) {
+		t.Fatal("round trip mismatch")
+	}
+}
+
+func TestEncodeLosslessRgbaToWebpRoundTripsAtOptLevelZero(t *testing.T) {
+	width, height, rgba := sampleRGBA()
+	options := LosslessEncodingOptions{OptimizationLevel: 0}
+	webp, err := EncodeLosslessRgbaToWebpWithOptions(width, height, rgba, &options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Width != width || decoded.Height != height || !bytes.Equal(decoded.RGBA, rgba) {
+		t.Fatal("round trip mismatch")
+	}
+}
+
+func TestEncodeLosslessImageToWebpSetsLosslessFeatures(t *testing.T) {
+	width, height, rgba := sampleRGBA()
+	image := &ImageBuffer{Width: width, Height: height, RGBA: rgba}
+	webp, err := EncodeLosslessImageToWebp(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	features, err := GetFeatures(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if features.Width != width || features.Height != height || features.Format != FormatLossless || !features.HasAlpha {
+		t.Fatal("features")
+	}
+}
+
+func TestEncodeLosslessRgbaToWebpRejectsMismatchedBufferLength(t *testing.T) {
+	_, err := EncodeLosslessRgbaToWebp(2, 2, make([]byte, 15))
+	assertInvalidParam(t, err, "RGBA buffer length does not match dimensions")
+}
+
+func TestEncodeLosslessRgbaToWebpRejectsInvalidOptimizationLevel(t *testing.T) {
+	_, err := EncodeLosslessRgbaToWebpWithOptions(1, 1, []byte{0, 0, 0, 0xff}, &LosslessEncodingOptions{OptimizationLevel: 10})
+	assertInvalidParam(t, err, "lossless optimization level must be in 0..=9")
+}
+
+func TestEncodeLosslessRgbaToWebpCompressesFlatRuns(t *testing.T) {
+	width, height := 64, 64
+	rgba := make([]byte, width*height*4)
+	for i := 0; i+4 <= len(rgba); i += 4 {
+		copy(rgba[i:i+4], []byte{0x12, 0x34, 0x56, 0xff})
+	}
+	webp, err := EncodeLosslessRgbaToWebp(width, height, rgba)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.RGBA, rgba) {
+		t.Fatal("round trip mismatch")
+	}
+	if len(webp) >= 200 {
+		t.Fatalf("unexpected flat-image size: %d", len(webp))
+	}
+}
+
+func TestEncodeLosslessHigherOptimizationHelpsRepeatedTiles(t *testing.T) {
+	width, height := 64, 64
+	satMul := func(a byte, b byte) byte {
+		v := int(a) * int(b)
+		if v > 255 {
+			v = 255
+		}
+		return byte(v)
+	}
+	rgba := make([]byte, width*height*4)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			sx := byte(x % 8)
+			sy := byte(y % 8)
+			offset := (y*width + x) * 4
+			rgba[offset] = satMul(sx, 29)
+			rgba[offset+1] = satMul(sy, 31)
+			rgba[offset+2] = satMul(sx^sy, 17)
+			rgba[offset+3] = 0xff
+		}
+	}
+	opt0, err := EncodeLosslessRgbaToWebpWithOptions(width, height, rgba, &LosslessEncodingOptions{OptimizationLevel: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt6, err := EncodeLosslessRgbaToWebpWithOptions(width, height, rgba, &LosslessEncodingOptions{OptimizationLevel: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := Decode(opt0); !bytes.Equal(d.RGBA, rgba) {
+		t.Fatal("opt0 mismatch")
+	}
+	if d, _ := Decode(opt6); !bytes.Equal(d.RGBA, rgba) {
+		t.Fatal("opt6 mismatch")
+	}
+	if len(opt6) >= len(opt0) {
+		t.Fatalf("expected opt6 to beat opt0: opt0=%d opt6=%d", len(opt0), len(opt6))
+	}
+}
+
+func TestEncodeLosslessRoundTripsAtOptLevelNine(t *testing.T) {
+	width, height, rgba := sampleRGBA()
+	webp, err := EncodeLosslessRgbaToWebpWithOptions(width, height, rgba, &LosslessEncodingOptions{OptimizationLevel: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.RGBA, rgba) {
+		t.Fatal("round trip mismatch")
+	}
+}
+
+func TestEncodeLosslessPaletteImageRoundTripsAndCompresses(t *testing.T) {
+	width, height := 32, 32
+	colors := [][4]byte{
+		{0x00, 0x00, 0x00, 0xff},
+		{0xff, 0x00, 0x00, 0xff},
+		{0x00, 0xff, 0x00, 0xff},
+		{0x00, 0x00, 0xff, 0xff},
+	}
+	rgba := make([]byte, width*height*4)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			color := colors[((x/4)+(y/4))%len(colors)]
+			offset := (y*width + x) * 4
+			copy(rgba[offset:offset+4], color[:])
+		}
+	}
+	vp8l, err := EncodeLosslessRgbaToVp8l(width, height, rgba)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeLosslessVp8lToRGBA(vp8l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.RGBA, rgba) {
+		t.Fatal("round trip mismatch")
+	}
+	if len(vp8l) >= len(rgba) {
+		t.Fatal("expected compression")
+	}
+}
+
+func TestEncodeLossyRgbaToVp8RoundTripsAsLossyFrame(t *testing.T) {
+	width, height, rgba := lossySampleRGBA()
+	vp8, err := EncodeLossyRgbaToVp8(width, height, rgba)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeLossyVp8ToRGBA(vp8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := averageAbsDiff(decoded.RGBA, rgba)
+	if decoded.Width != width || decoded.Height != height {
+		t.Fatal("dims")
+	}
+	if diff >= 26.0 {
+		t.Fatalf("avg diff: %f", diff)
+	}
+}
+
+func TestEncodeLossyRgbaToWebpSetsLossyFeatures(t *testing.T) {
+	width, height, rgba := lossySampleRGBA()
+	options := DefaultLossyEncodingOptions()
+	options.Quality = 90
+	webp, err := EncodeLossyRgbaToWebpWithOptions(width, height, rgba, &options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	features, err := GetFeatures(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := averageAbsDiff(decoded.RGBA, rgba)
+	if decoded.Width != width || decoded.Height != height {
+		t.Fatal("dims")
+	}
+	if diff >= 26.0 {
+		t.Fatalf("avg diff: %f", diff)
+	}
+	if features.Format != FormatLossy || features.HasAlpha {
+		t.Fatal("features")
+	}
+}
+
+func TestEncodeLossyRgbaToVp8MarksFlatMacroblocksAsSkip(t *testing.T) {
+	width, height := 64, 64
+	rgba := make([]byte, width*height*4)
+	for i := 0; i+4 <= len(rgba); i += 4 {
+		copy(rgba[i:i+4], []byte{0x80, 0x80, 0x80, 0xff})
+	}
+	vp8, err := EncodeLossyRgbaToVp8(width, height, rgba)
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers, err := parseMacroblockHeaders(vp8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anySkip := false
+	for _, h := range headers.Macroblocks {
+		if h.Skip {
+			anySkip = true
+			break
+		}
+	}
+	if !anySkip {
+		t.Fatal("expected at least one skipped macroblock")
+	}
+}
+
+func TestEncodeLossyImageToWebpAcceptsOpaqueImageBuffer(t *testing.T) {
+	width, height, rgba := lossySampleRGBA()
+	image := &ImageBuffer{Width: width, Height: height, RGBA: rgba}
+	webp, err := EncodeLossyImageToWebp(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	features, err := GetFeatures(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if features.Width != width || features.Height != height || features.Format != FormatLossy {
+		t.Fatal("features")
+	}
+}
+
+func TestEncodeLossyRgbaToWebpRejectsAlphaInput(t *testing.T) {
+	options := DefaultLossyEncodingOptions()
+	_, err := EncodeLossyRgbaToWebpWithOptions(1, 1, []byte{0, 0, 0, 0x7f}, &options)
+	assertInvalidParam(t, err, "lossy encoder does not support alpha yet")
+}
+
+func TestEncodeLossyRgbaToWebpRejectsInvalidQuality(t *testing.T) {
+	options := DefaultLossyEncodingOptions()
+	options.Quality = 101
+	_, err := EncodeLossyRgbaToWebpWithOptions(1, 1, []byte{0, 0, 0, 0xff}, &options)
+	assertInvalidParam(t, err, "lossy quality must be in 0..=100")
+}
+
+func TestEncodeLossyRgbaToWebpRejectsInvalidOptimizationLevel(t *testing.T) {
+	options := DefaultLossyEncodingOptions()
+	options.OptimizationLevel = 10
+	_, err := EncodeLossyRgbaToWebpWithOptions(1, 1, []byte{0, 0, 0, 0xff}, &options)
+	assertInvalidParam(t, err, "lossy optimization level must be in 0..=9")
+}
+
+func TestTopLevelEncodeLosslessRoundTrips(t *testing.T) {
+	width, height, rgba := sampleRGBA()
+	image := &ImageBuffer{Width: width, Height: height, RGBA: rgba}
+	webp, err := Encode(image, 2, 100, Lossless, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	features, err := GetFeatures(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.RGBA, rgba) || features.Format != FormatLossless {
+		t.Fatal("mismatch")
+	}
+}
+
+func TestTopLevelEncodeLossyUsesRequestedCompression(t *testing.T) {
+	width, height, rgba := lossySampleRGBA()
+	image := &ImageBuffer{Width: width, Height: height, RGBA: rgba}
+	webp, err := Encode(image, 0, 90, Lossy, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	features, err := GetFeatures(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := averageAbsDiff(decoded.RGBA, rgba)
+	if features.Format != FormatLossy {
+		t.Fatal("format")
+	}
+	if diff >= 26.0 {
+		t.Fatalf("avg diff: %f", diff)
+	}
+}
+
+func TestTopLevelEncodeVariantsEmbedExifChunk(t *testing.T) {
+	width, height, rgba := sampleRGBA()
+	image := &ImageBuffer{Width: width, Height: height, RGBA: rgba}
+	exif := []byte("Exif\x00\x00unit-test")
+
+	lossless, err := EncodeLossless(image, 2, exif)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opaque := make([]byte, len(image.RGBA))
+	copy(opaque, image.RGBA)
+	for i := 3; i < len(opaque); i += 4 {
+		opaque[i] = 0xff
+	}
+	lossy, err := EncodeLossy(&ImageBuffer{Width: image.Width, Height: image.Height, RGBA: opaque}, 0, 90, exif)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Contains(lossless, []byte("EXIF")) || !bytes.Contains(lossless, exif) {
+		t.Fatal("lossless missing exif")
+	}
+	if !bytes.Contains(lossy, []byte("EXIF")) || !bytes.Contains(lossy, exif) {
+		t.Fatal("lossy missing exif")
+	}
+}
