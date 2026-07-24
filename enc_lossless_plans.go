@@ -296,19 +296,40 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 	}
 
 	// Read each pixel's neighbours once and score all 14 predictor modes from
-	// them, instead of re-reading neighbours per mode.
+	// them, instead of re-reading neighbours per mode. Interior pixels (y>=1,
+	// x>=1, x+1<width) are scored by elosslessScorePredictorRow, which the
+	// arm64/amd64 builds vectorize; the borders are scored scalar here.
 	var costs [elosslessNumPredictorModes]uint64
 	for y := startY; y < endY; y++ {
-		for x := startX; x < endX; x++ {
-			actual := argb[y*width+x]
-			if y == 0 || x == 0 {
-				pred := elosslessPredictorForMode(argb, width, x, y, 0)
-				e := uint64(elosslessPredictorError(actual, pred))
+		if y == 0 {
+			for x := startX; x < endX; x++ {
+				pred := elosslessPredictorForMode(argb, width, x, 0, 0)
+				e := uint64(elosslessPredictorError(argb[x], pred))
 				for mode := range costs {
 					costs[mode] += e
 				}
-				continue
 			}
+			continue
+		}
+		x := startX
+		if x == 0 {
+			pred := elosslessPredictorForMode(argb, width, 0, y, 0)
+			e := uint64(elosslessPredictorError(argb[y*width], pred))
+			for mode := range costs {
+				costs[mode] += e
+			}
+			x = 1
+		}
+		interiorEnd := endX
+		if interiorEnd > width-1 {
+			interiorEnd = width - 1
+		}
+		if x < interiorEnd {
+			elosslessScorePredictorRow(argb, width, y, x, interiorEnd, &costs)
+			x = interiorEnd
+		}
+		for ; x < endX; x++ {
+			actual := argb[y*width+x]
 			left := argb[y*width+x-1]
 			top := argb[(y-1)*width+x]
 			topLeft := argb[(y-1)*width+x-1]
