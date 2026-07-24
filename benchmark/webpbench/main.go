@@ -83,9 +83,13 @@ func main() {
 			engine, mode string
 			fn           func() ([]byte, error)
 		}{
-			{"ours", "lossless", func() ([]byte, error) { return webp.EncodeLossless(&buf, oursLLOpt, nil) }},
-			{"ours", "lossy-fast", func() ([]byte, error) { return webp.EncodeLossy(&buf, oursFastOpt, lossyQuality, nil) }},
-			{"ours", "lossy-slow", func() ([]byte, error) { return webp.EncodeLossy(&buf, oursSlowOpt, lossyQuality, nil) }},
+			{"ours", "lossless", func() ([]byte, error) { return webp.EncodeLossless(&buf, &webp.LosslessOptions{Effort: oursLLOpt}) }},
+			{"ours", "lossy-fast", func() ([]byte, error) {
+				return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: lossyQuality, Effort: oursFastOpt})
+			}},
+			{"ours", "lossy-slow", func() ([]byte, error) {
+				return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: lossyQuality, Effort: oursSlowOpt})
+			}},
 			{"libwebp", "lossless", libwebpEncoder(nrgba, true, 0, libwebpLL)},
 			{"libwebp", "lossy-fast", libwebpEncoder(nrgba, false, lossyQuality, libwebpFast)},
 			{"libwebp", "lossy-slow", libwebpEncoder(nrgba, false, lossyQuality, libwebpSlow)},
@@ -185,15 +189,15 @@ func listImages(dir string) ([]string, error) {
 	return paths, nil
 }
 
-func loadImageBuffer(path string) (webp.ImageBuffer, error) {
+func loadImageBuffer(path string) (webp.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return webp.ImageBuffer{}, err
+		return webp.Image{}, err
 	}
 	defer f.Close()
 	img, _, err := image.Decode(f)
 	if err != nil {
-		return webp.ImageBuffer{}, err
+		return webp.Image{}, err
 	}
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -209,5 +213,5 @@ func loadImageBuffer(path string) (webp.ImageBuffer, error) {
 			i += 4
 		}
 	}
-	return webp.ImageBuffer{Width: w, Height: h, RGBA: rgba}, nil
+	return webp.Image{Width: w, Height: h, RGBA: rgba}, nil
 }

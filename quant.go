@@ -18,7 +18,7 @@ var acTable = [128]uint16{
 	209, 213, 217, 221, 225, 229, 234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
 }
 
-type QuantIndices struct {
+type quantIndices struct {
 	BaseQ0    int32
 	Y1DCDelta int32
 	Y2DCDelta int32
@@ -27,16 +27,16 @@ type QuantIndices struct {
 	UVACDelta int32
 }
 
-type QuantMatrix struct {
+type quantMatrix struct {
 	Y1      [2]uint16
 	Y2      [2]uint16
 	UV      [2]uint16
 	UVQuant int32
 }
 
-type Quantization struct {
-	Indices  QuantIndices
-	Matrices [NUM_MB_SEGMENTS]QuantMatrix
+type quantization struct {
+	Indices  quantIndices
+	Matrices [numMbSegments]quantMatrix
 }
 
 func clipQ(v, max int32) int {
@@ -49,8 +49,8 @@ func clipQ(v, max int32) int {
 	return int(v)
 }
 
-func parseQuantization(br *Vp8BoolDecoder, segmentHeader *SegmentHeader) (Quantization, error) {
-	indices := QuantIndices{BaseQ0: int32(br.GetValue(7))}
+func parseQuantization(br *vp8BoolDecoder, segmentHeader *segmentHeader) (quantization, error) {
+	indices := quantIndices{BaseQ0: int32(br.GetValue(7))}
 	if br.Get() == 1 {
 		indices.Y1DCDelta = int32(br.GetSignedValue(4))
 	}
@@ -67,8 +67,8 @@ func parseQuantization(br *Vp8BoolDecoder, segmentHeader *SegmentHeader) (Quanti
 		indices.UVACDelta = int32(br.GetSignedValue(4))
 	}
 
-	var matrices [NUM_MB_SEGMENTS]QuantMatrix
-	for segment := 0; segment < NUM_MB_SEGMENTS; segment++ {
+	var matrices [numMbSegments]quantMatrix
+	for segment := 0; segment < numMbSegments; segment++ {
 		var q int32
 		if segmentHeader.UseSegment {
 			q = int32(segmentHeader.Quantizer[segment])
@@ -79,7 +79,7 @@ func parseQuantization(br *Vp8BoolDecoder, segmentHeader *SegmentHeader) (Quanti
 			q = indices.BaseQ0
 		}
 
-		var matrix QuantMatrix
+		var matrix quantMatrix
 		matrix.Y1[0] = uint16(dcTable[clipQ(q+indices.Y1DCDelta, 127)])
 		matrix.Y1[1] = acTable[clipQ(q, 127)]
 
@@ -97,8 +97,8 @@ func parseQuantization(br *Vp8BoolDecoder, segmentHeader *SegmentHeader) (Quanti
 	}
 
 	if br.EOF() {
-		return Quantization{}, bitstreamErr("cannot parse quantization")
+		return quantization{}, bitstreamErr("cannot parse quantization")
 	}
 
-	return Quantization{Indices: indices, Matrices: matrices}, nil
+	return quantization{Indices: indices, Matrices: matrices}, nil
 }

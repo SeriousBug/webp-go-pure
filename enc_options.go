@@ -1,27 +1,23 @@
 package webp
 
-// LossyEncodingOptions tunes the lossy VP8 encoder.
-type LossyEncodingOptions struct {
+// LossyOptions configures the lossy VP8 encoder. Pass a nil *LossyOptions to
+// EncodeLossy to use the defaults (quality 90, effort 0).
+type LossyOptions struct {
 	// Quality is the VP8 quality target in 0..=100.
 	Quality uint8
-	// OptimizationLevel selects the encode-effort preset in 0..=9.
-	OptimizationLevel uint8
+	// Effort selects the encode-effort preset in 0..=9. Higher is slower and
+	// produces smaller output.
+	Effort uint8
+	// EXIF, if non-nil, is embedded in the container as a raw EXIF metadata chunk.
+	EXIF []byte
 }
 
-// DefaultLossyEncodingOptions returns the default lossy options: quality 90 and
-// optimization level 0 (fast encode), matching the upstream Rust defaults.
-func DefaultLossyEncodingOptions() LossyEncodingOptions {
-	return LossyEncodingOptions{Quality: 90, OptimizationLevel: 0}
-}
-
-// LosslessEncodingOptions tunes the lossless VP8L encoder.
-type LosslessEncodingOptions struct {
-	// OptimizationLevel selects the encode-effort preset in 0..=9.
-	OptimizationLevel uint8
-}
-
-// DefaultLosslessEncodingOptions returns the balanced default lossless options
-// (optimization level 6), matching the upstream Rust defaults.
-func DefaultLosslessEncodingOptions() LosslessEncodingOptions {
-	return LosslessEncodingOptions{OptimizationLevel: 6}
+// LosslessOptions configures the lossless VP8L encoder. Pass a nil
+// *LosslessOptions to EncodeLossless to use the default (effort 6).
+type LosslessOptions struct {
+	// Effort selects the encode-effort preset in 0..=9. Higher is slower and
+	// produces smaller output.
+	Effort uint8
+	// EXIF, if non-nil, is embedded in the container as a raw EXIF metadata chunk.
+	EXIF []byte
 }

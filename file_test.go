@@ -17,7 +17,7 @@ func TestImageFromFileDecodesStillWebp(t *testing.T) {
 	if err := os.WriteFile(path, sample, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	image, err := ImageFromFile(path)
+	image, err := DecodeFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}

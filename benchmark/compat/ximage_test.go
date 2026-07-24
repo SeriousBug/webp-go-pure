@@ -1,4 +1,4 @@
-package webp
+package compat
 
 import (
 	"bytes"
@@ -7,25 +7,13 @@ import (
 	"testing"
 
 	ximage "golang.org/x/image/webp"
+
+	webp "github.com/SeriousBug/webp-go-pure"
 )
 
 // These tests cross-check our codec against the independent pure-Go decoder
 // golang.org/x/image/webp: our encoder output must be decodable by x/image, and
 // our decoder must agree with x/image on the real sample files.
-
-func makeGradientRGBA(width, height int) []byte {
-	rgba := make([]byte, width*height*4)
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			o := (y*width + x) * 4
-			rgba[o+0] = byte((x * 255) / max(1, width-1))
-			rgba[o+1] = byte((y * 255) / max(1, height-1))
-			rgba[o+2] = byte(((x + y) * 255) / max(1, width+height-2))
-			rgba[o+3] = 255
-		}
-	}
-	return rgba
-}
 
 func ximageToRGBA(t *testing.T, data []byte) *image.RGBA {
 	t.Helper()
@@ -42,7 +30,7 @@ func ximageToRGBA(t *testing.T, data []byte) *image.RGBA {
 func TestXImageDecodesOurLosslessOutput(t *testing.T) {
 	const w, h = 64, 48
 	src := makeGradientRGBA(w, h)
-	encoded, err := EncodeLosslessRgbaToWebp(w, h, src)
+	encoded, err := webp.EncodeLossless(&webp.Image{Width: w, Height: h, RGBA: src}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +54,7 @@ func TestXImageDecodesOurLosslessOutput(t *testing.T) {
 func TestXImageDecodesOurLossyOutput(t *testing.T) {
 	const w, h = 64, 48
 	src := makeGradientRGBA(w, h)
-	encoded, err := EncodeLossyRgbaToWebp(w, h, src)
+	encoded, err := webp.EncodeLossy(&webp.Image{Width: w, Height: h, RGBA: src}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +79,7 @@ func TestXImageDecodesOurLossyOutput(t *testing.T) {
 
 func TestXImageAgreesWithOurDecoderOnLosslessSample(t *testing.T) {
 	data := loadSample(t, "sample_lossless.webp")
-	ours, err := DecodeLosslessWebpToRGBA(data)
+	ours, err := webp.Decode(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +101,7 @@ func TestXImageAgreesWithOurDecoderOnLosslessSample(t *testing.T) {
 
 func TestXImageAgreesWithOurDecoderOnLossySample(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	ours, err := DecodeLossyWebpToRGBA(data)
+	ours, err := webp.Decode(data)
 	if err != nil {
 		t.Fatal(err)
 	}

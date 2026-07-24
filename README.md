@@ -1,6 +1,8 @@
 # webp-go
 
-Pure Go WebP decoder and partial encoder.
+Pure Go WebP decoder and encoder. No cgo, no external dependencies.
+
+    go get github.com/SeriousBug/webp-go-pure
 
 This is a Go port of [webp-rust](https://github.com/mith-mmk/webp-rust) by
 MITH@mmk. It is essentially a fork of that project, translated to Go. The
@@ -27,18 +29,23 @@ if err != nil {
 fmt.Printf("%dx%d\n", img.Width, img.Height)
 ```
 
-Top-level still-image encode:
+`Decode` returns a `webp.Image` (packed 8-bit RGBA, plus `Width`/`Height`).
+`DecodeFile` does the same from a path, and `Features` reports dimensions and
+format without a full decode.
+
+Still-image encode takes a `*webp.Image` and an options struct; pass `nil` for
+the defaults (lossy quality 90 effort 0, lossless effort 6). `Effort` runs 0..9,
+trading speed for size:
 
 ```go
-out, err := webp.Encode(img, 2, 100, webp.Lossless, nil)
-lossy, err := webp.EncodeLossy(img, 0, 90, nil)
-lossless, err := webp.EncodeLossless(img, 2, nil)
+lossy, err := webp.EncodeLossy(&img, &webp.LossyOptions{Quality: 90, Effort: 4})
+lossless, err := webp.EncodeLossless(&img, nil)
 ```
 
-To embed raw EXIF metadata, pass the chunk payload directly:
+To embed raw EXIF metadata, set it on the options:
 
 ```go
-out, err := webp.EncodeLossless(img, 2, exifBytes)
+out, err := webp.EncodeLossless(&img, &webp.LosslessOptions{EXIF: exifBytes})
 ```
 
 Animated WebP is not accepted by `Decode`. For animation, use the animation

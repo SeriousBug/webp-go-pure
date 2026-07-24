@@ -46,7 +46,7 @@ func lossyBlendPixelNonPremult(src, dst [4]byte) [4]byte {
 	}
 }
 
-func lossyCompositeFrame(canvas []byte, canvasWidth int, frameRGBA []byte, frame *ParsedAnimationFrame) {
+func lossyCompositeFrame(canvas []byte, canvasWidth int, frameRGBA []byte, frame *parsedAnimationFrame) {
 	for y := 0; y < frame.Height; y++ {
 		srcRow := y * frame.Width * 4
 		dstRow := ((frame.YOffset+y)*canvasWidth + frame.XOffset) * 4
@@ -65,26 +65,26 @@ func lossyCompositeFrame(canvas []byte, canvasWidth int, frameRGBA []byte, frame
 	}
 }
 
-func lossyDecodeFrameImage(frame *ParsedAnimationFrame) (DecodedImage, error) {
-	var image DecodedImage
+func lossyDecodeFrameImage(frame *parsedAnimationFrame) (decodedImage, error) {
+	var image decodedImage
 	var err error
 	switch frame.ImageChunk.Fourcc {
 	case [4]byte{'V', 'P', '8', 'L'}:
 		if frame.AlphaChunk != nil {
-			return DecodedImage{}, bitstreamErr("VP8L animation frame must not carry ALPH chunk")
+			return decodedImage{}, bitstreamErr("VP8L animation frame must not carry ALPH chunk")
 		}
-		image, err = DecodeLosslessVp8lToRGBA(frame.ImageData)
+		image, err = decodeLosslessVp8lToRGBA(frame.ImageData)
 	case [4]byte{'V', 'P', '8', ' '}:
 		image, err = decodeLossyVp8FrameToRGBA(frame.ImageData, frame.AlphaData)
 	default:
-		return DecodedImage{}, bitstreamErr("unsupported animation frame chunk")
+		return decodedImage{}, bitstreamErr("unsupported animation frame chunk")
 	}
 	if err != nil {
-		return DecodedImage{}, err
+		return decodedImage{}, err
 	}
 
 	if image.Width != frame.Width || image.Height != frame.Height {
-		return DecodedImage{}, bitstreamErr("animation frame dimensions do not match bitstream")
+		return decodedImage{}, bitstreamErr("animation frame dimensions do not match bitstream")
 	}
 	return image, nil
 }
@@ -98,17 +98,17 @@ type lossyDisposeRect struct {
 
 // DecodeAnimation decodes an animated WebP container to a sequence of composited
 // RGBA frames.
-func DecodeAnimation(data []byte) (DecodedAnimation, error) {
-	parsed, err := ParseAnimationWebp(data)
+func DecodeAnimation(data []byte) (Animation, error) {
+	parsed, err := parseAnimationWebp(data)
 	if err != nil {
-		return DecodedAnimation{}, err
+		return Animation{}, err
 	}
 	background := lossyArgbToRgba(parsed.Animation.BackgroundColor)
 	canvas := make([]byte, parsed.Features.Width*parsed.Features.Height*4)
 	lossyFillRect(canvas, parsed.Features.Width, 0, 0, parsed.Features.Width, parsed.Features.Height, background)
 
 	var previousRect *lossyDisposeRect
-	frames := make([]DecodedAnimationFrame, 0, len(parsed.Frames))
+	frames := make([]AnimationFrame, 0, len(parsed.Frames))
 	for i := range parsed.Frames {
 		frame := &parsed.Frames[i]
 		if previousRect != nil {
@@ -118,13 +118,13 @@ func DecodeAnimation(data []byte) (DecodedAnimation, error) {
 
 		decoded, err := lossyDecodeFrameImage(frame)
 		if err != nil {
-			return DecodedAnimation{}, err
+			return Animation{}, err
 		}
 		lossyCompositeFrame(canvas, parsed.Features.Width, decoded.RGBA, frame)
 
 		frameCopy := make([]byte, len(canvas))
 		copy(frameCopy, canvas)
-		frames = append(frames, DecodedAnimationFrame{
+		frames = append(frames, AnimationFrame{
 			Duration: frame.Duration,
 			RGBA:     frameCopy,
 		})
@@ -139,7 +139,7 @@ func DecodeAnimation(data []byte) (DecodedAnimation, error) {
 		}
 	}
 
-	return DecodedAnimation{
+	return Animation{
 		Width:           parsed.Features.Width,
 		Height:          parsed.Features.Height,
 		BackgroundColor: parsed.Animation.BackgroundColor,

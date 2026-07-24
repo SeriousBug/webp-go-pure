@@ -116,7 +116,7 @@ func elossyAvg3(a, b, c uint8) uint8 {
 
 func elossyFillPredictionBlock(plane []uint8, stride, planeWidth, x, y int, mode uint8, out []uint8, outStride, n int) {
 	switch mode {
-	case DC_PRED:
+	case dcPred:
 		value := elossyDcPredictValue(plane, stride, x, y, n)
 		for row := 0; row < n; row++ {
 			offset := row * outStride
@@ -124,13 +124,13 @@ func elossyFillPredictionBlock(plane []uint8, stride, planeWidth, x, y int, mode
 				out[offset+col] = value
 			}
 		}
-	case V_PRED:
+	case vPred:
 		top := elossyTopSamples(plane, stride, planeWidth, x, y, n)
 		for row := 0; row < n; row++ {
 			offset := row * outStride
 			copy(out[offset:offset+n], top)
 		}
-	case H_PRED:
+	case hPred:
 		left := elossyLeftSamples(plane, stride, x, y, n)
 		for row := 0; row < n; row++ {
 			offset := row * outStride
@@ -138,7 +138,7 @@ func elossyFillPredictionBlock(plane []uint8, stride, planeWidth, x, y int, mode
 				out[offset+col] = left[row]
 			}
 		}
-	case TM_PRED:
+	case tmPred:
 		top := elossyTopSamples(plane, stride, planeWidth, x, y, n)
 		left := elossyLeftSamples(plane, stride, x, y, n)
 		topLeft := int32(elossyTopLeftSample(plane, stride, x, y))
@@ -174,14 +174,14 @@ func elossyFillLuma4PredictionBlock(plane []uint8, stride, planeWidth, x, y int,
 
 	var block [16]uint8
 	switch mode {
-	case B_DC_PRED:
+	case bDCPred:
 		sumTop := uint32(a) + uint32(b) + uint32(c) + uint32(d)
 		sumLeft := uint32(i) + uint32(j) + uint32(k) + uint32(l)
 		dc := uint8((sumTop + sumLeft + 4) >> 3)
 		for idx := range block {
 			block[idx] = dc
 		}
-	case B_TM_PRED:
+	case bTMPred:
 		topLeft := int32(x0)
 		for row := 0; row < 4; row++ {
 			leftValue := int32(left[row])
@@ -189,19 +189,19 @@ func elossyFillLuma4PredictionBlock(plane []uint8, stride, planeWidth, x, y int,
 				block[row*4+col] = elossyClipByte(leftValue + int32(top[col]) - topLeft)
 			}
 		}
-	case B_VE_PRED:
+	case bVEPred:
 		vals := [4]uint8{elossyAvg3(x0, a, b), elossyAvg3(a, b, c), elossyAvg3(b, c, d), elossyAvg3(c, d, e)}
 		for row := 0; row < 4; row++ {
 			copy(block[row*4:row*4+4], vals[:])
 		}
-	case B_HE_PRED:
+	case bHEPred:
 		vals := [4]uint8{elossyAvg3(x0, i, j), elossyAvg3(i, j, k), elossyAvg3(j, k, l), elossyAvg3(k, l, l)}
 		for row := 0; row < 4; row++ {
 			for col := 0; col < 4; col++ {
 				block[row*4+col] = vals[row]
 			}
 		}
-	case B_RD_PRED:
+	case bRDPred:
 		block[12] = elossyAvg3(j, k, l)
 		block[13] = elossyAvg3(i, j, k)
 		block[8] = block[13]
@@ -218,7 +218,7 @@ func elossyFillLuma4PredictionBlock(plane []uint8, stride, planeWidth, x, y int,
 		block[7] = elossyAvg3(c, b, a)
 		block[2] = block[7]
 		block[3] = elossyAvg3(d, c, b)
-	case B_LD_PRED:
+	case bLDPred:
 		block[0] = elossyAvg3(a, b, c)
 		block[1] = elossyAvg3(b, c, d)
 		block[4] = block[1]
@@ -235,7 +235,7 @@ func elossyFillLuma4PredictionBlock(plane []uint8, stride, planeWidth, x, y int,
 		block[11] = elossyAvg3(f, g, h)
 		block[14] = block[11]
 		block[15] = elossyAvg3(g, h, h)
-	case B_VR_PRED:
+	case bVRPred:
 		block[0] = elossyAvg2(x0, a)
 		block[9] = block[0]
 		block[1] = elossyAvg2(a, b)
@@ -252,7 +252,7 @@ func elossyFillLuma4PredictionBlock(plane []uint8, stride, planeWidth, x, y int,
 		block[6] = elossyAvg3(a, b, c)
 		block[15] = block[6]
 		block[7] = elossyAvg3(b, c, d)
-	case B_VL_PRED:
+	case bVLPred:
 		block[0] = elossyAvg2(a, b)
 		block[1] = elossyAvg2(b, c)
 		block[2] = elossyAvg2(c, d)
@@ -269,7 +269,7 @@ func elossyFillLuma4PredictionBlock(plane []uint8, stride, planeWidth, x, y int,
 		block[13] = block[6]
 		block[14] = block[7]
 		block[15] = elossyAvg3(f, g, h)
-	case B_HD_PRED:
+	case bHDPred:
 		block[0] = elossyAvg2(i, x0)
 		block[1] = elossyAvg3(i, x0, a)
 		block[2] = elossyAvg3(x0, a, b)
@@ -286,7 +286,7 @@ func elossyFillLuma4PredictionBlock(plane []uint8, stride, planeWidth, x, y int,
 		block[13] = elossyAvg3(l, k, j)
 		block[14] = block[8]
 		block[15] = block[9]
-	case B_HU_PRED:
+	case bHUPred:
 		block[0] = elossyAvg2(i, j)
 		block[2] = elossyAvg2(j, k)
 		block[4] = block[2]
@@ -419,7 +419,7 @@ func elossyDcPredictValue(plane []uint8, stride, x, y, size int) uint8 {
 	}
 }
 
-func elossyAddTransform(plane []uint8, stride, x, y int, coeffs *[16]int16) {
+func elossyAddTransformGo(plane []uint8, stride, x, y int, coeffs *[16]int16) {
 	allZero := true
 	for _, coeff := range coeffs {
 		if coeff != 0 {
@@ -451,22 +451,25 @@ func elossyAddTransform(plane []uint8, stride, x, y int, coeffs *[16]int16) {
 		c := elossyMul2(tmp[4+row]) - elossyMul1(tmp[12+row])
 		d := elossyMul1(tmp[4+row]) + elossyMul2(tmp[12+row])
 		offset := (y+row)*stride + x
-		plane[offset] = elossyClipByte(int32(plane[offset]) + ((a + d) >> 3))
-		plane[offset+1] = elossyClipByte(int32(plane[offset+1]) + ((b + c) >> 3))
-		plane[offset+2] = elossyClipByte(int32(plane[offset+2]) + ((b - c) >> 3))
-		plane[offset+3] = elossyClipByte(int32(plane[offset+3]) + ((a - d) >> 3))
+		out := plane[offset : offset+4 : offset+4]
+		out[0] = elossyClipByte(int32(out[0]) + ((a + d) >> 3))
+		out[1] = elossyClipByte(int32(out[1]) + ((b + c) >> 3))
+		out[2] = elossyClipByte(int32(out[2]) + ((b - c) >> 3))
+		out[3] = elossyClipByte(int32(out[3]) + ((a - d) >> 3))
 	}
 }
 
-func elossyForwardTransformAt(src []uint8, srcStride, srcX, srcY int, pred []uint8, predStride, predX, predY int) [16]int16 {
+func elossyForwardTransformAtGo(src []uint8, srcStride, srcX, srcY int, pred []uint8, predStride, predX, predY int) [16]int16 {
 	var tmp [16]int32
 	for row := 0; row < 4; row++ {
 		srcOffset := (srcY+row)*srcStride + srcX
 		predOffset := (predY+row)*predStride + predX
-		d0 := int32(src[srcOffset]) - int32(pred[predOffset])
-		d1 := int32(src[srcOffset+1]) - int32(pred[predOffset+1])
-		d2 := int32(src[srcOffset+2]) - int32(pred[predOffset+2])
-		d3 := int32(src[srcOffset+3]) - int32(pred[predOffset+3])
+		srcRow := src[srcOffset : srcOffset+4 : srcOffset+4]
+		predRow := pred[predOffset : predOffset+4 : predOffset+4]
+		d0 := int32(srcRow[0]) - int32(predRow[0])
+		d1 := int32(srcRow[1]) - int32(predRow[1])
+		d2 := int32(srcRow[2]) - int32(predRow[2])
+		d3 := int32(srcRow[3]) - int32(predRow[3])
 		a0 := d0 + d3
 		a1 := d1 + d2
 		a2 := d1 - d2
@@ -615,13 +618,14 @@ func elossyReconstructFromPrediction(prediction *[16]uint8, coeffs *[16]int16) [
 	return block
 }
 
-func elossyBlockSse4x4(source []uint8, stride, x, y int, candidate *[16]uint8) uint64 {
+func elossyBlockSse4x4Go(source []uint8, stride, x, y int, candidate *[16]uint8) uint64 {
 	var sse uint64
 	for row := 0; row < 4; row++ {
 		srcOffset := (y+row)*stride + x
-		candOffset := row * 4
+		srcRow := source[srcOffset : srcOffset+4 : srcOffset+4]
+		candRow := candidate[row*4 : row*4+4]
 		for col := 0; col < 4; col++ {
-			diff := int32(source[srcOffset+col]) - int32(candidate[candOffset+col])
+			diff := int32(srcRow[col]) - int32(candRow[col])
 			sse += uint64(diff * diff)
 		}
 	}
@@ -751,16 +755,16 @@ func elossyRdScore(distortion uint64, rate, lambda uint32) uint64 {
 func elossyI16ModeRate(mode uint8) uint32 {
 	rate := elossyBitCost(true, 145)
 	switch mode {
-	case DC_PRED:
+	case dcPred:
 		rate += elossyBitCost(false, 156)
 		rate += elossyBitCost(false, 163)
-	case V_PRED:
+	case vPred:
 		rate += elossyBitCost(false, 156)
 		rate += elossyBitCost(true, 163)
-	case H_PRED:
+	case hPred:
 		rate += elossyBitCost(true, 156)
 		rate += elossyBitCost(false, 128)
-	case TM_PRED:
+	case tmPred:
 		rate += elossyBitCost(true, 156)
 		rate += elossyBitCost(true, 128)
 	default:
@@ -771,26 +775,28 @@ func elossyI16ModeRate(mode uint8) uint32 {
 
 func elossyUvModeRate(mode uint8) uint32 {
 	switch mode {
-	case DC_PRED:
+	case dcPred:
 		return elossyBitCost(false, 142)
-	case V_PRED:
+	case vPred:
 		return elossyBitCost(true, 142) + elossyBitCost(false, 114)
-	case H_PRED:
+	case hPred:
 		return elossyBitCost(true, 142) + elossyBitCost(true, 114) + elossyBitCost(false, 183)
-	case TM_PRED:
+	case tmPred:
 		return elossyBitCost(true, 142) + elossyBitCost(true, 114) + elossyBitCost(true, 183)
 	default:
 		panic("unsupported chroma mode")
 	}
 }
 
-func elossyBlockSse(source []uint8, sourceStride, x, y int, reconstructed []uint8, reconstructedStride, width, height int) uint64 {
+func elossyBlockSseGo(source []uint8, sourceStride, x, y int, reconstructed []uint8, reconstructedStride, width, height int) uint64 {
 	var sse uint64
 	for row := 0; row < height; row++ {
 		srcOffset := (y+row)*sourceStride + x
 		reconOffset := row * reconstructedStride
+		srcRow := source[srcOffset : srcOffset+width : srcOffset+width]
+		reconRow := reconstructed[reconOffset : reconOffset+width : reconOffset+width]
 		for col := 0; col < width; col++ {
-			diff := int32(source[srcOffset+col]) - int32(reconstructed[reconOffset+col])
+			diff := int32(srcRow[col]) - int32(reconRow[col])
 			sse += uint64(diff * diff)
 		}
 	}
@@ -811,7 +817,7 @@ func elossyPlaneSseRegion(source []uint8, sourceStride int, decoded []uint8, dec
 }
 
 func elossyYuvSse(source *elossyPlanes, width, height int, vp8 []byte) (uint64, error) {
-	decoded, err := DecodeLossyVp8ToYuv(vp8)
+	decoded, err := decodeLossyVp8ToYuv(vp8)
 	if err != nil {
 		return 0, encBitstream("internal filter evaluation decode failed")
 	}
@@ -906,9 +912,9 @@ func elossyEvaluateLumaMode(source *elossyPlanes, reconstructed *elossyPlanes, m
 }
 
 func elossyEvaluateLuma4Mode(source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, quant *elossyQuantMatrices, rd *elossyRdMultipliers, probabilities *elossyCoeffProbTables, topContext *elossyNonZeroContext, leftContext *elossyNonZeroContext, topModes []uint8, leftModes *[4]uint8) (uint64, [16]uint8) {
-	modes := [NUM_BMODES]uint8{
-		B_DC_PRED, B_TM_PRED, B_VE_PRED, B_HE_PRED, B_RD_PRED, B_VR_PRED, B_LD_PRED, B_VL_PRED,
-		B_HD_PRED, B_HU_PRED,
+	modes := [numBModes]uint8{
+		bDCPred, bTMPred, bVEPred, bHEPred, bRDPred, bVRPred, bLDPred, bVLPred,
+		bHDPred, bHUPred,
 	}
 
 	x := mbX * 16
@@ -933,7 +939,7 @@ func elossyEvaluateLuma4Mode(source *elossyPlanes, reconstructed *elossyPlanes, 
 			original := elossyCopyBlock4(reconstructed.y, reconstructed.yStride, blockX, blockY)
 			ctx := int(l + (tnz & 1))
 
-			bestMode := uint8(B_DC_PRED)
+			bestMode := uint8(bDCPred)
 			var bestCoeffs [16]int16
 			bestScore := uint64(0xffffffffffffffff)
 			bestNonZero := uint8(0)
@@ -1073,10 +1079,10 @@ func elossyFastChromaPredictorScore(source *elossyPlanes, reconstructed *elossyP
 }
 
 func elossyChooseMacroblockMode(source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, quant *elossyQuantMatrices, rd *elossyRdMultipliers, probabilities *elossyCoeffProbTables, topContext *elossyNonZeroContext, leftContext *elossyNonZeroContext, topModes []uint8, leftModes *[4]uint8) elossyMacroblockMode {
-	modes := [4]uint8{DC_PRED, V_PRED, H_PRED, TM_PRED}
+	modes := [4]uint8{dcPred, vPred, hPred, tmPred}
 
 	if profile.fastModeSearch {
-		bestLuma := uint8(DC_PRED)
+		bestLuma := uint8(dcPred)
 		bestLumaScore := uint64(0xffffffffffffffff)
 		for _, mode := range modes {
 			score := elossyFastLumaPredictorScore(source, reconstructed, mbX, mbY, mode)
@@ -1086,7 +1092,7 @@ func elossyChooseMacroblockMode(source *elossyPlanes, reconstructed *elossyPlane
 			}
 		}
 
-		bestChroma := uint8(DC_PRED)
+		bestChroma := uint8(dcPred)
 		bestChromaScore := uint64(0xffffffffffffffff)
 		for _, mode := range modes {
 			score := elossyFastChromaPredictorScore(source, reconstructed, mbX, mbY, mode)
@@ -1104,7 +1110,7 @@ func elossyChooseMacroblockMode(source *elossyPlanes, reconstructed *elossyPlane
 		}
 	}
 
-	bestLuma := uint8(DC_PRED)
+	bestLuma := uint8(dcPred)
 	bestLumaScore := uint64(0xffffffffffffffff)
 	for _, mode := range modes {
 		score := elossyEvaluateLumaMode(source, reconstructed, mbX, mbY, profile, quant, rd, probabilities, topContext, leftContext, mode)
@@ -1118,20 +1124,20 @@ func elossyChooseMacroblockMode(source *elossyPlanes, reconstructed *elossyPlane
 	if profile.allowI4x4 {
 		i4Score, i4SubLuma := elossyEvaluateLuma4Mode(source, reconstructed, mbX, mbY, profile, quant, rd, probabilities, topContext, leftContext, topModes, leftModes)
 		if i4Score < bestLumaScore {
-			bestLuma = B_PRED
+			bestLuma = bPred
 			subLuma = i4SubLuma
 		} else {
 			for idx := range subLuma {
-				subLuma[idx] = B_DC_PRED
+				subLuma[idx] = bDCPred
 			}
 		}
 	} else {
 		for idx := range subLuma {
-			subLuma[idx] = B_DC_PRED
+			subLuma[idx] = bDCPred
 		}
 	}
 
-	bestChroma := uint8(DC_PRED)
+	bestChroma := uint8(dcPred)
 	bestChromaScore := uint64(0xffffffffffffffff)
 	for _, mode := range modes {
 		score := elossyEvaluateChromaMode(source, reconstructed, mbX, mbY, profile, quant, rd, probabilities, topContext, leftContext, mode)

@@ -3,7 +3,7 @@ package webp
 import "bytes"
 
 // ChunkHeader holds common metadata for a RIFF chunk.
-type ChunkHeader struct {
+type chunkHeader struct {
 	Fourcc     [4]byte
 	Offset     int
 	Size       int
@@ -12,62 +12,62 @@ type ChunkHeader struct {
 }
 
 // Vp8xHeader is a parsed VP8X extended header.
-type Vp8xHeader struct {
+type vp8xHeader struct {
 	Flags        uint32
 	CanvasWidth  int
 	CanvasHeight int
 }
 
 // WebpFeatures are high-level image features derived from the container and bitstream.
-type WebpFeatures struct {
+type FeatureInfo struct {
 	Width        int
 	Height       int
 	HasAlpha     bool
 	HasAnimation bool
-	Format       WebpFormat
-	Vp8x         *Vp8xHeader
+	Format       Format
+	vp8x         *vp8xHeader
 }
 
 // ParsedWebp is a parsed still-image WebP container with raw chunk slices.
-type ParsedWebp struct {
-	Features    WebpFeatures
+type parsedWebp struct {
+	Features    FeatureInfo
 	RiffSize    *int
-	ImageChunk  ChunkHeader
+	ImageChunk  chunkHeader
 	ImageData   []byte
-	AlphaChunk  *ChunkHeader
+	AlphaChunk  *chunkHeader
 	AlphaData   []byte
-	AlphaHeader *AlphaHeader
+	alphaHeader *alphaHeader
 }
 
 // AnimationHeader is a parsed ANIM chunk.
-type AnimationHeader struct {
+type animationHeader struct {
 	BackgroundColor uint32
 	LoopCount       uint16
 }
 
 // ParsedAnimationFrame is a parsed animation frame entry.
-type ParsedAnimationFrame struct {
-	FrameChunk         ChunkHeader
-	XOffset            int
-	YOffset            int
-	Width              int
-	Height             int
-	Duration           int
-	Blend              bool
+type parsedAnimationFrame struct {
+	FrameChunk          chunkHeader
+	XOffset             int
+	YOffset             int
+	Width               int
+	Height              int
+	Duration            int
+	Blend               bool
 	DisposeToBackground bool
-	ImageChunk         ChunkHeader
-	ImageData          []byte
-	AlphaChunk         *ChunkHeader
-	AlphaData          []byte
-	AlphaHeader        *AlphaHeader
+	ImageChunk          chunkHeader
+	ImageData           []byte
+	AlphaChunk          *chunkHeader
+	AlphaData           []byte
+	alphaHeader         *alphaHeader
 }
 
 // ParsedAnimationWebp is a parsed animated WebP container.
-type ParsedAnimationWebp struct {
-	Features  WebpFeatures
+type parsedAnimationWebp struct {
+	Features  FeatureInfo
 	RiffSize  *int
-	Animation AnimationHeader
-	Frames    []ParsedAnimationFrame
+	Animation animationHeader
+	Frames    []parsedAnimationFrame
 }
 
 func readLE24(b []byte) int {
@@ -86,38 +86,38 @@ func paddedPayloadSize(size int) int {
 	return size + (size & 1)
 }
 
-func parseChunk(data []byte, offset int, riffLimit *int) (ChunkHeader, error) {
-	if len(data) < offset+CHUNK_HEADER_SIZE {
-		return ChunkHeader{}, notEnoughData("chunk header")
+func parseChunk(data []byte, offset int, riffLimit *int) (chunkHeader, error) {
+	if len(data) < offset+chunkHeaderSize {
+		return chunkHeader{}, notEnoughData("chunk header")
 	}
-	size := readLE32(data[offset+TAG_SIZE : offset+CHUNK_HEADER_SIZE])
-	if size > MAX_CHUNK_PAYLOAD {
-		return ChunkHeader{}, bitstreamErr("invalid chunk size")
+	size := readLE32(data[offset+tagSize : offset+chunkHeaderSize])
+	if size > maxChunkPayload {
+		return chunkHeader{}, bitstreamErr("invalid chunk size")
 	}
 
 	paddedSize := paddedPayloadSize(size)
-	totalSize := CHUNK_HEADER_SIZE + paddedSize
+	totalSize := chunkHeaderSize + paddedSize
 	end := offset + totalSize
 	if riffLimit != nil && end > *riffLimit {
-		return ChunkHeader{}, bitstreamErr("chunk exceeds RIFF payload")
+		return chunkHeader{}, bitstreamErr("chunk exceeds RIFF payload")
 	}
 	if len(data) < end {
-		return ChunkHeader{}, notEnoughData("chunk payload")
+		return chunkHeader{}, notEnoughData("chunk payload")
 	}
 
 	var fourcc [4]byte
-	copy(fourcc[:], data[offset:offset+TAG_SIZE])
-	return ChunkHeader{
+	copy(fourcc[:], data[offset:offset+tagSize])
+	return chunkHeader{
 		Fourcc:     fourcc,
 		Offset:     offset,
 		Size:       size,
 		PaddedSize: paddedSize,
-		DataOffset: offset + CHUNK_HEADER_SIZE,
+		DataOffset: offset + chunkHeaderSize,
 	}, nil
 }
 
 func parseRiff(data []byte) (*int, int, error) {
-	if len(data) < RIFF_HEADER_SIZE {
+	if len(data) < riffHeaderSize {
 		return nil, 0, notEnoughData("RIFF header")
 	}
 	if !bytes.Equal(data[:4], []byte("RIFF")) {
@@ -128,24 +128,24 @@ func parseRiff(data []byte) (*int, int, error) {
 	}
 
 	riffSize := readLE32(data[4:8])
-	if riffSize < TAG_SIZE+CHUNK_HEADER_SIZE {
+	if riffSize < tagSize+chunkHeaderSize {
 		return nil, 0, bitstreamErr("RIFF payload is too small")
 	}
-	if riffSize > MAX_CHUNK_PAYLOAD {
+	if riffSize > maxChunkPayload {
 		return nil, 0, bitstreamErr("RIFF payload is too large")
 	}
-	if riffSize > len(data)-CHUNK_HEADER_SIZE {
+	if riffSize > len(data)-chunkHeaderSize {
 		return nil, 0, notEnoughData("truncated RIFF payload")
 	}
 
-	return &riffSize, RIFF_HEADER_SIZE, nil
+	return &riffSize, riffHeaderSize, nil
 }
 
-func parseVp8x(data []byte, offset int) (*Vp8xHeader, int, error) {
-	if len(data) < offset+CHUNK_HEADER_SIZE {
+func parseVp8x(data []byte, offset int) (*vp8xHeader, int, error) {
+	if len(data) < offset+chunkHeaderSize {
 		return nil, offset, nil
 	}
-	if !bytes.Equal(data[offset:offset+TAG_SIZE], []byte("VP8X")) {
+	if !bytes.Equal(data[offset:offset+tagSize], []byte("VP8X")) {
 		return nil, offset, nil
 	}
 
@@ -153,73 +153,73 @@ func parseVp8x(data []byte, offset int) (*Vp8xHeader, int, error) {
 	if err != nil {
 		return nil, offset, err
 	}
-	if chunk.Size != VP8X_CHUNK_SIZE {
+	if chunk.Size != vp8xChunkSize {
 		return nil, offset, bitstreamErr("wrong VP8X chunk size")
 	}
 
 	flags := uint32(readLE32(data[offset+8 : offset+12]))
 	canvasWidth := readLE24(data[offset+12:offset+15]) + 1
 	canvasHeight := readLE24(data[offset+15:offset+18]) + 1
-	if uint64(canvasWidth)*uint64(canvasHeight) >= MAX_IMAGE_AREA {
+	if uint64(canvasWidth)*uint64(canvasHeight) >= maxImageArea {
 		return nil, offset, bitstreamErr("canvas is too large")
 	}
 
-	return &Vp8xHeader{
+	return &vp8xHeader{
 		Flags:        flags,
 		CanvasWidth:  canvasWidth,
 		CanvasHeight: canvasHeight,
-	}, offset + CHUNK_HEADER_SIZE + chunk.PaddedSize, nil
+	}, offset + chunkHeaderSize + chunk.PaddedSize, nil
 }
 
 func riffLimitOf(riffSize *int) *int {
 	if riffSize == nil {
 		return nil
 	}
-	limit := *riffSize + CHUNK_HEADER_SIZE
+	limit := *riffSize + chunkHeaderSize
 	return &limit
 }
 
 // GetFeatures returns high-level WebP features without fully decoding the image.
-func GetFeatures(data []byte) (WebpFeatures, error) {
+func Features(data []byte) (FeatureInfo, error) {
 	riffSize, offset, err := parseRiff(data)
 	if err != nil {
-		return WebpFeatures{}, err
+		return FeatureInfo{}, err
 	}
 	riffLimit := riffLimitOf(riffSize)
 
 	vp8x, nextOffset, err := parseVp8x(data, offset)
 	if err != nil {
-		return WebpFeatures{}, err
+		return FeatureInfo{}, err
 	}
 	offset = nextOffset
 	if riffSize == nil && vp8x != nil {
-		return WebpFeatures{}, bitstreamErr("VP8X chunk requires RIFF")
+		return FeatureInfo{}, bitstreamErr("VP8X chunk requires RIFF")
 	}
 
-	hasAlpha := vp8x != nil && (vp8x.Flags&ALPHA_FLAG) != 0
-	hasAnimation := vp8x != nil && (vp8x.Flags&ANIMATION_FLAG) != 0
+	hasAlpha := vp8x != nil && (vp8x.Flags&alphaFlag) != 0
+	hasAnimation := vp8x != nil && (vp8x.Flags&animationFlag) != 0
 
 	if vp8x != nil && hasAnimation {
-		return WebpFeatures{
+		return FeatureInfo{
 			Width:        vp8x.CanvasWidth,
 			Height:       vp8x.CanvasHeight,
 			HasAlpha:     hasAlpha,
 			HasAnimation: hasAnimation,
 			Format:       FormatUndefined,
-			Vp8x:         vp8x,
+			vp8x:         vp8x,
 		}, nil
 	}
 
-	if len(data) < offset+TAG_SIZE {
-		return WebpFeatures{}, notEnoughData("chunk tag")
+	if len(data) < offset+tagSize {
+		return FeatureInfo{}, notEnoughData("chunk tag")
 	}
 
 	if (riffSize != nil && vp8x != nil) ||
-		(riffSize == nil && vp8x == nil && bytes.Equal(data[offset:offset+TAG_SIZE], []byte("ALPH"))) {
+		(riffSize == nil && vp8x == nil && bytes.Equal(data[offset:offset+tagSize], []byte("ALPH"))) {
 		for {
 			chunk, err := parseChunk(data, offset, riffLimit)
 			if err != nil {
-				return WebpFeatures{}, err
+				return FeatureInfo{}, err
 			}
 			if bytes.Equal(chunk.Fourcc[:], []byte("VP8 ")) || bytes.Equal(chunk.Fourcc[:], []byte("VP8L")) {
 				break
@@ -227,80 +227,80 @@ func GetFeatures(data []byte) (WebpFeatures, error) {
 			if bytes.Equal(chunk.Fourcc[:], []byte("ALPH")) {
 				hasAlpha = true
 			}
-			offset += CHUNK_HEADER_SIZE + chunk.PaddedSize
+			offset += chunkHeaderSize + chunk.PaddedSize
 		}
 	}
 
 	chunk, err := parseChunk(data, offset, riffLimit)
 	if err != nil {
-		return WebpFeatures{}, err
+		return FeatureInfo{}, err
 	}
 	payload := data[chunk.DataOffset : chunk.DataOffset+chunk.Size]
-	var format WebpFormat
+	var format Format
 	var width, height int
 	if bytes.Equal(chunk.Fourcc[:], []byte("VP8 ")) {
 		width, height, err = getInfo(payload, chunk.Size)
 		if err != nil {
-			return WebpFeatures{}, err
+			return FeatureInfo{}, err
 		}
 		format = FormatLossy
 	} else if bytes.Equal(chunk.Fourcc[:], []byte("VP8L")) {
 		info, err := getLosslessInfo(payload)
 		if err != nil {
-			return WebpFeatures{}, err
+			return FeatureInfo{}, err
 		}
 		hasAlpha = hasAlpha || info.HasAlpha
 		format, width, height = FormatLossless, info.Width, info.Height
 	} else {
-		return WebpFeatures{}, bitstreamErr("missing VP8/VP8L image chunk")
+		return FeatureInfo{}, bitstreamErr("missing VP8/VP8L image chunk")
 	}
 
 	if vp8x != nil {
 		if vp8x.CanvasWidth != width || vp8x.CanvasHeight != height {
-			return WebpFeatures{}, bitstreamErr("VP8X canvas does not match image size")
+			return FeatureInfo{}, bitstreamErr("VP8X canvas does not match image size")
 		}
 	}
 
-	return WebpFeatures{
+	return FeatureInfo{
 		Width:        width,
 		Height:       height,
 		HasAlpha:     hasAlpha,
 		HasAnimation: hasAnimation,
 		Format:       format,
-		Vp8x:         vp8x,
+		vp8x:         vp8x,
 	}, nil
 }
 
 // ParseStillWebp parses a still-image WebP container and returns raw chunk slices.
-func ParseStillWebp(data []byte) (ParsedWebp, error) {
+func parseStillWebp(data []byte) (parsedWebp, error) {
 	riffSize, offset, err := parseRiff(data)
 	if err != nil {
-		return ParsedWebp{}, err
+		return parsedWebp{}, err
 	}
 	riffLimit := riffLimitOf(riffSize)
 
 	vp8x, nextOffset, err := parseVp8x(data, offset)
 	if err != nil {
-		return ParsedWebp{}, err
+		return parsedWebp{}, err
 	}
 	offset = nextOffset
 	if riffSize == nil && vp8x != nil {
-		return ParsedWebp{}, bitstreamErr("VP8X chunk requires RIFF")
+		return parsedWebp{}, bitstreamErr("VP8X chunk requires RIFF")
 	}
-	if vp8x != nil && (vp8x.Flags&ANIMATION_FLAG) != 0 {
-		return ParsedWebp{}, unsupportedErr("animated WebP is not implemented")
+	if vp8x != nil && (vp8x.Flags&animationFlag) != 0 {
+		return parsedWebp{}, unsupportedErr("animated WebP is not implemented")
 	}
 
-	var alphaChunk *ChunkHeader
-	if len(data) < offset+TAG_SIZE {
-		return ParsedWebp{}, notEnoughData("chunk tag")
+	var alphaChunk *chunkHeader
+	if len(data) < offset+tagSize {
+		return parsedWebp{}, notEnoughData("chunk tag")
 	}
 	if (riffSize != nil && vp8x != nil) ||
-		(riffSize == nil && vp8x == nil && bytes.Equal(data[offset:offset+TAG_SIZE], []byte("ALPH"))) {
+		(riffSize == nil && vp8x == nil && bytes.Equal(data[offset:offset+tagSize], []byte("ALPH"))) {
 		for {
 			chunk, err := parseChunk(data, offset, riffLimit)
 			if err != nil {
-				return ParsedWebp{}, err
+				return parsedWebp{}, err
 			}
 			if bytes.Equal(chunk.Fourcc[:], []byte("VP8 ")) || bytes.Equal(chunk.Fourcc[:], []byte("VP8L")) {
 				break
@@ -309,48 +309,48 @@ func ParseStillWebp(data []byte) (ParsedWebp, error) {
 				c := chunk
 				alphaChunk = &c
 			}
-			offset += CHUNK_HEADER_SIZE + chunk.PaddedSize
+			offset += chunkHeaderSize + chunk.PaddedSize
 		}
 	}
 
 	imageChunk, err := parseChunk(data, offset, riffLimit)
 	if err != nil {
-		return ParsedWebp{}, err
+		return parsedWebp{}, err
 	}
 	if !bytes.Equal(imageChunk.Fourcc[:], []byte("VP8 ")) && !bytes.Equal(imageChunk.Fourcc[:], []byte("VP8L")) {
-		return ParsedWebp{}, bitstreamErr("missing VP8/VP8L image chunk")
+		return parsedWebp{}, bitstreamErr("missing VP8/VP8L image chunk")
 	}
 	imageData := data[imageChunk.DataOffset : imageChunk.DataOffset+imageChunk.Size]
-	features, err := GetFeatures(data)
+	features, err := Features(data)
 	if err != nil {
-		return ParsedWebp{}, err
+		return parsedWebp{}, err
 	}
 	var alphaData []byte
-	var alphaHeader *AlphaHeader
+	var alphaHeader *alphaHeader
 	if alphaChunk != nil {
 		alphaData = data[alphaChunk.DataOffset : alphaChunk.DataOffset+alphaChunk.Size]
 		h, err := parseAlphaHeader(alphaData)
 		if err != nil {
-			return ParsedWebp{}, err
+			return parsedWebp{}, err
 		}
 		alphaHeader = &h
 		features.HasAlpha = true
 	}
 
-	return ParsedWebp{
+	return parsedWebp{
 		Features:    features,
 		RiffSize:    riffSize,
 		ImageChunk:  imageChunk,
 		ImageData:   imageData,
 		AlphaChunk:  alphaChunk,
 		AlphaData:   alphaData,
-		AlphaHeader: alphaHeader,
+		alphaHeader: alphaHeader,
 	}, nil
 }
 
-func parseAnimationFrame(data []byte, features WebpFeatures, chunk ChunkHeader, riffLimit *int) (ParsedAnimationFrame, error) {
+func parseAnimationFrame(data []byte, features FeatureInfo, chunk chunkHeader, riffLimit *int) (parsedAnimationFrame, error) {
 	if chunk.Size < 16 {
-		return ParsedAnimationFrame{}, bitstreamErr("ANMF chunk is too small")
+		return parsedAnimationFrame{}, bitstreamErr("ANMF chunk is too small")
 	}
 
 	header := data[chunk.DataOffset : chunk.DataOffset+16]
@@ -361,21 +361,21 @@ func parseAnimationFrame(data []byte, features WebpFeatures, chunk ChunkHeader, 
 	duration := readLE24(header[12:15])
 	flags := header[15]
 	if flags>>2 != 0 {
-		return ParsedAnimationFrame{}, bitstreamErr("ANMF reserved bits must be zero")
+		return parsedAnimationFrame{}, bitstreamErr("ANMF reserved bits must be zero")
 	}
 	if xOffset+width > features.Width || yOffset+height > features.Height {
-		return ParsedAnimationFrame{}, bitstreamErr("ANMF frame exceeds animation canvas")
+		return parsedAnimationFrame{}, bitstreamErr("ANMF frame exceeds animation canvas")
 	}
 
 	offset := chunk.DataOffset + 16
 	frameEnd := chunk.DataOffset + chunk.Size
 	frameLimit := &frameEnd
-	var alphaChunk *ChunkHeader
-	var imageChunk ChunkHeader
+	var alphaChunk *chunkHeader
+	var imageChunk chunkHeader
 	for {
 		subchunk, err := parseChunk(data, offset, frameLimit)
 		if err != nil {
-			return ParsedAnimationFrame{}, err
+			return parsedAnimationFrame{}, err
 		}
 		if bytes.Equal(subchunk.Fourcc[:], []byte("VP8 ")) || bytes.Equal(subchunk.Fourcc[:], []byte("VP8L")) {
 			imageChunk = subchunk
@@ -385,25 +385,25 @@ func parseAnimationFrame(data []byte, features WebpFeatures, chunk ChunkHeader, 
 			c := subchunk
 			alphaChunk = &c
 		}
-		offset += CHUNK_HEADER_SIZE + subchunk.PaddedSize
+		offset += chunkHeaderSize + subchunk.PaddedSize
 		if riffLimit != nil && offset > *riffLimit {
-			return ParsedAnimationFrame{}, bitstreamErr("ANMF frame data exceeds RIFF payload")
+			return parsedAnimationFrame{}, bitstreamErr("ANMF frame data exceeds RIFF payload")
 		}
 	}
 
 	imageData := data[imageChunk.DataOffset : imageChunk.DataOffset+imageChunk.Size]
 	var alphaData []byte
-	var alphaHeader *AlphaHeader
+	var alphaHeader *alphaHeader
 	if alphaChunk != nil {
 		alphaData = data[alphaChunk.DataOffset : alphaChunk.DataOffset+alphaChunk.Size]
 		h, err := parseAlphaHeader(alphaData)
 		if err != nil {
-			return ParsedAnimationFrame{}, err
+			return parsedAnimationFrame{}, err
 		}
 		alphaHeader = &h
 	}
 
-	return ParsedAnimationFrame{
+	return parsedAnimationFrame{
 		FrameChunk:          chunk,
 		XOffset:             xOffset,
 		YOffset:             yOffset,
@@ -416,81 +416,81 @@ func parseAnimationFrame(data []byte, features WebpFeatures, chunk ChunkHeader, 
 		ImageData:           imageData,
 		AlphaChunk:          alphaChunk,
 		AlphaData:           alphaData,
-		AlphaHeader:         alphaHeader,
+		alphaHeader:         alphaHeader,
 	}, nil
 }
 
 // ParseAnimationWebp parses an animated WebP container and returns frame-level chunk slices.
-func ParseAnimationWebp(data []byte) (ParsedAnimationWebp, error) {
+func parseAnimationWebp(data []byte) (parsedAnimationWebp, error) {
 	riffSize, offset, err := parseRiff(data)
 	if err != nil {
-		return ParsedAnimationWebp{}, err
+		return parsedAnimationWebp{}, err
 	}
 	riffLimit := riffLimitOf(riffSize)
 
 	vp8x, nextOffset, err := parseVp8x(data, offset)
 	if err != nil {
-		return ParsedAnimationWebp{}, err
+		return parsedAnimationWebp{}, err
 	}
 	offset = nextOffset
 	if vp8x == nil {
-		return ParsedAnimationWebp{}, bitstreamErr("animated WebP requires VP8X")
+		return parsedAnimationWebp{}, bitstreamErr("animated WebP requires VP8X")
 	}
-	if (vp8x.Flags & ANIMATION_FLAG) == 0 {
-		return ParsedAnimationWebp{}, unsupportedErr("animated WebP flag is not set")
+	if (vp8x.Flags & animationFlag) == 0 {
+		return parsedAnimationWebp{}, unsupportedErr("animated WebP flag is not set")
 	}
 
 	animChunk, err := parseChunk(data, offset, riffLimit)
 	if err != nil {
-		return ParsedAnimationWebp{}, err
+		return parsedAnimationWebp{}, err
 	}
 	if !bytes.Equal(animChunk.Fourcc[:], []byte("ANIM")) {
-		return ParsedAnimationWebp{}, bitstreamErr("missing ANIM chunk")
+		return parsedAnimationWebp{}, bitstreamErr("missing ANIM chunk")
 	}
 	if animChunk.Size != 6 {
-		return ParsedAnimationWebp{}, bitstreamErr("wrong ANIM chunk size")
+		return parsedAnimationWebp{}, bitstreamErr("wrong ANIM chunk size")
 	}
-	animation := AnimationHeader{
+	animation := animationHeader{
 		BackgroundColor: uint32(readLE32(data[animChunk.DataOffset : animChunk.DataOffset+4])),
 		LoopCount:       readLE16(data[animChunk.DataOffset+4 : animChunk.DataOffset+6]),
 	}
-	offset += CHUNK_HEADER_SIZE + animChunk.PaddedSize
+	offset += chunkHeaderSize + animChunk.PaddedSize
 
-	features := WebpFeatures{
+	features := FeatureInfo{
 		Width:        vp8x.CanvasWidth,
 		Height:       vp8x.CanvasHeight,
-		HasAlpha:     (vp8x.Flags & ALPHA_FLAG) != 0,
+		HasAlpha:     (vp8x.Flags & alphaFlag) != 0,
 		HasAnimation: true,
 		Format:       FormatUndefined,
-		Vp8x:         vp8x,
+		vp8x:         vp8x,
 	}
 
 	limit := len(data)
 	if riffLimit != nil {
 		limit = *riffLimit
 	}
-	var frames []ParsedAnimationFrame
-	for offset+CHUNK_HEADER_SIZE <= limit {
+	var frames []parsedAnimationFrame
+	for offset+chunkHeaderSize <= limit {
 		chunk, err := parseChunk(data, offset, riffLimit)
 		if err != nil {
-			return ParsedAnimationWebp{}, err
+			return parsedAnimationWebp{}, err
 		}
 		if !bytes.Equal(chunk.Fourcc[:], []byte("ANMF")) {
 			break
 		}
 		frame, err := parseAnimationFrame(data, features, chunk, riffLimit)
 		if err != nil {
-			return ParsedAnimationWebp{}, err
+			return parsedAnimationWebp{}, err
 		}
 		frames = append(frames, frame)
-		offset += CHUNK_HEADER_SIZE + chunk.PaddedSize
+		offset += chunkHeaderSize + chunk.PaddedSize
 	}
 
 	if len(frames) == 0 {
-		return ParsedAnimationWebp{}, bitstreamErr("animated WebP has no ANMF frames")
+		return parsedAnimationWebp{}, bitstreamErr("animated WebP has no ANMF frames")
 	}
 
-	return ParsedAnimationWebp{
+	return parsedAnimationWebp{
 		Features:  features,
 		RiffSize:  riffSize,
 		Animation: animation,

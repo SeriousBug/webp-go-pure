@@ -26,7 +26,7 @@ type lossyPlanes struct {
 	v        []byte
 }
 
-func lossyNewPlanes(frame *MacroBlockDataFrame) lossyPlanes {
+func lossyNewPlanes(frame *macroBlockDataFrame) lossyPlanes {
 	yStride := frame.Frame.MacroblockWidth * 16
 	uvStride := frame.Frame.MacroblockWidth * 8
 	height := frame.Frame.MacroblockHeight * 16
@@ -273,9 +273,9 @@ func lossyHFilter8i(planeU, planeV []byte, pos, stride int, thresh, innerThresh,
 	lossyFilterLoop24(planeV, pos+4, 1, stride, 8, thresh, innerThresh, hevThresh)
 }
 
-func lossyMacroblockFilterInfo(frame *MacroBlockDataFrame, macroblock *MacroBlockData) (lossyFilterInfo, bool) {
+func lossyMacroblockFilterInfo(frame *macroBlockDataFrame, macroblock *macroBlockData) (lossyFilterInfo, bool) {
 	filter := &frame.Frame.Filter
-	if filter.FilterType == FilterOff {
+	if filter.filterType == filterOff {
 		return lossyFilterInfo{}, false
 	}
 
@@ -342,7 +342,7 @@ func lossyMacroblockFilterInfo(frame *MacroBlockDataFrame, macroblock *MacroBloc
 	}, true
 }
 
-func lossyFilterMacroblock(frame *MacroBlockDataFrame, planes *lossyPlanes, mbX, mbY int, macroblock *MacroBlockData) {
+func lossyFilterMacroblock(frame *macroBlockDataFrame, planes *lossyPlanes, mbX, mbY int, macroblock *macroBlockData) {
 	info, ok := lossyMacroblockFilterInfo(frame, macroblock)
 	if !ok {
 		return
@@ -354,9 +354,9 @@ func lossyFilterMacroblock(frame *MacroBlockDataFrame, planes *lossyPlanes, mbX,
 	inner := int32(info.fILevel)
 	hev := int32(info.hevThresh)
 
-	switch frame.Frame.Filter.FilterType {
-	case FilterOff:
-	case FilterSimple:
+	switch frame.Frame.Filter.filterType {
+	case filterOff:
+	case filterSimple:
 		if mbX > 0 {
 			lossySimpleHFilter16(planes.y, yPos, planes.yStride, limit+4)
 		}
@@ -369,7 +369,7 @@ func lossyFilterMacroblock(frame *MacroBlockDataFrame, planes *lossyPlanes, mbX,
 		if info.fInner {
 			lossySimpleVFilter16i(planes.y, yPos, planes.yStride, limit)
 		}
-	case FilterComplex:
+	case filterComplex:
 		if mbX > 0 {
 			lossyHFilter16(planes.y, yPos, planes.yStride, limit+4, inner, hev)
 			lossyHFilter8(planes.u, planes.v, uvPos, planes.uvStride, limit+4, inner, hev)
@@ -389,8 +389,8 @@ func lossyFilterMacroblock(frame *MacroBlockDataFrame, planes *lossyPlanes, mbX,
 	}
 }
 
-func lossyApplyLoopFilter(frame *MacroBlockDataFrame, planes *lossyPlanes) {
-	if frame.Frame.Filter.FilterType == FilterOff {
+func lossyApplyLoopFilter(frame *macroBlockDataFrame, planes *lossyPlanes) {
+	if frame.Frame.Filter.filterType == filterOff {
 		return
 	}
 
@@ -533,7 +533,7 @@ func lossyPredictTrueMotion(plane []byte, stride, planeWidth, x, y, size int) {
 
 func lossyPredictLuma16(plane []byte, stride, planeWidth, x, y int, mode uint8) error {
 	switch mode {
-	case DC_PRED:
+	case dcPred:
 		hasTop := y > 0
 		hasLeft := x > 0
 		var value byte
@@ -567,15 +567,15 @@ func lossyPredictLuma16(plane []byte, stride, planeWidth, x, y int, mode uint8) 
 			value = 128
 		}
 		lossyFillBlock(plane, stride, x, y, 16, 16, value)
-	case TM_PRED:
+	case tmPred:
 		lossyPredictTrueMotion(plane, stride, planeWidth, x, y, 16)
-	case V_PRED:
+	case vPred:
 		top := lossyTopSamples(plane, stride, planeWidth, x, y, 16)
 		for row := 0; row < 16; row++ {
 			offset := (y+row)*stride + x
 			copy(plane[offset:offset+16], top)
 		}
-	case H_PRED:
+	case hPred:
 		left := lossyLeftSamples(plane, stride, x, y, 16)
 		for row := 0; row < 16; row++ {
 			offset := (y+row)*stride + x
@@ -591,7 +591,7 @@ func lossyPredictLuma16(plane []byte, stride, planeWidth, x, y int, mode uint8) 
 
 func lossyPredictChroma8(plane []byte, stride, planeWidth, x, y int, mode uint8) error {
 	switch mode {
-	case DC_PRED:
+	case dcPred:
 		hasTop := y > 0
 		hasLeft := x > 0
 		var value byte
@@ -625,15 +625,15 @@ func lossyPredictChroma8(plane []byte, stride, planeWidth, x, y int, mode uint8)
 			value = 128
 		}
 		lossyFillBlock(plane, stride, x, y, 8, 8, value)
-	case TM_PRED:
+	case tmPred:
 		lossyPredictTrueMotion(plane, stride, planeWidth, x, y, 8)
-	case V_PRED:
+	case vPred:
 		top := lossyTopSamples(plane, stride, planeWidth, x, y, 8)
 		for row := 0; row < 8; row++ {
 			offset := (y+row)*stride + x
 			copy(plane[offset:offset+8], top)
 		}
-	case H_PRED:
+	case hPred:
 		left := lossyLeftSamples(plane, stride, x, y, 8)
 		for row := 0; row < 8; row++ {
 			offset := (y+row)*stride + x
@@ -667,14 +667,14 @@ func lossyPredictLuma4(plane []byte, stride, planeWidth, x, y int, mode uint8) e
 
 	var block [16]byte
 	switch mode {
-	case B_DC_PRED:
+	case bDCPred:
 		sumTop := uint32(a) + uint32(b) + uint32(c) + uint32(d)
 		sumLeft := uint32(i) + uint32(j) + uint32(k) + uint32(l)
 		dc := byte((sumTop + sumLeft + 4) >> 3)
 		for n := range block {
 			block[n] = dc
 		}
-	case B_TM_PRED:
+	case bTMPred:
 		topLeft := int32(x0)
 		for row := 0; row < 4; row++ {
 			leftValue := int32(left[row])
@@ -682,19 +682,19 @@ func lossyPredictLuma4(plane []byte, stride, planeWidth, x, y int, mode uint8) e
 				block[row*4+col] = lossyClipByte(leftValue + int32(top[col]) - topLeft)
 			}
 		}
-	case B_VE_PRED:
+	case bVEPred:
 		vals := [4]byte{lossyAvg3(x0, a, b), lossyAvg3(a, b, c), lossyAvg3(b, c, d), lossyAvg3(c, d, e)}
 		for row := 0; row < 4; row++ {
 			copy(block[row*4:row*4+4], vals[:])
 		}
-	case B_HE_PRED:
+	case bHEPred:
 		vals := [4]byte{lossyAvg3(x0, i, j), lossyAvg3(i, j, k), lossyAvg3(j, k, l), lossyAvg3(k, l, l)}
 		for row := 0; row < 4; row++ {
 			for c := 0; c < 4; c++ {
 				block[row*4+c] = vals[row]
 			}
 		}
-	case B_RD_PRED:
+	case bRDPred:
 		block[12] = lossyAvg3(j, k, l)
 		block[13] = lossyAvg3(i, j, k)
 		block[8] = block[13]
@@ -711,7 +711,7 @@ func lossyPredictLuma4(plane []byte, stride, planeWidth, x, y int, mode uint8) e
 		block[7] = lossyAvg3(c, b, a)
 		block[2] = block[7]
 		block[3] = lossyAvg3(d, c, b)
-	case B_LD_PRED:
+	case bLDPred:
 		block[0] = lossyAvg3(a, b, c)
 		block[1] = lossyAvg3(b, c, d)
 		block[4] = block[1]
@@ -728,7 +728,7 @@ func lossyPredictLuma4(plane []byte, stride, planeWidth, x, y int, mode uint8) e
 		block[11] = lossyAvg3(f, g, h)
 		block[14] = block[11]
 		block[15] = lossyAvg3(g, h, h)
-	case B_VR_PRED:
+	case bVRPred:
 		block[0] = lossyAvg2(x0, a)
 		block[9] = block[0]
 		block[1] = lossyAvg2(a, b)
@@ -745,7 +745,7 @@ func lossyPredictLuma4(plane []byte, stride, planeWidth, x, y int, mode uint8) e
 		block[6] = lossyAvg3(a, b, c)
 		block[15] = block[6]
 		block[7] = lossyAvg3(b, c, d)
-	case B_VL_PRED:
+	case bVLPred:
 		block[0] = lossyAvg2(a, b)
 		block[1] = lossyAvg2(b, c)
 		block[2] = lossyAvg2(c, d)
@@ -762,7 +762,7 @@ func lossyPredictLuma4(plane []byte, stride, planeWidth, x, y int, mode uint8) e
 		block[13] = block[6]
 		block[14] = block[7]
 		block[15] = lossyAvg3(f, g, h)
-	case B_HD_PRED:
+	case bHDPred:
 		block[0] = lossyAvg2(i, x0)
 		block[1] = lossyAvg3(i, x0, a)
 		block[2] = lossyAvg3(x0, a, b)
@@ -779,7 +779,7 @@ func lossyPredictLuma4(plane []byte, stride, planeWidth, x, y int, mode uint8) e
 		block[13] = lossyAvg3(l, k, j)
 		block[14] = block[8]
 		block[15] = block[9]
-	case B_HU_PRED:
+	case bHUPred:
 		block[0] = lossyAvg2(i, j)
 		block[2] = lossyAvg2(j, k)
 		block[4] = block[2]
@@ -846,7 +846,7 @@ func lossyAddTransform(plane []byte, stride, x, y int, coeffs []int16) {
 	}
 }
 
-func lossyReconstructMacroblock(planes *lossyPlanes, mbX, mbY int, macroblock *MacroBlockData) error {
+func lossyReconstructMacroblock(planes *lossyPlanes, mbX, mbY int, macroblock *macroBlockData) error {
 	yX := mbX * 16
 	yY := mbY * 16
 	yWidth := planes.yStride
@@ -901,7 +901,7 @@ func lossyReconstructMacroblock(planes *lossyPlanes, mbX, mbY int, macroblock *M
 	return nil
 }
 
-func lossyReconstructPlanes(frame *MacroBlockDataFrame) (lossyPlanes, error) {
+func lossyReconstructPlanes(frame *macroBlockDataFrame) (lossyPlanes, error) {
 	expected := frame.Frame.MacroblockWidth * frame.Frame.MacroblockHeight
 	if len(frame.Macroblocks) != expected {
 		return lossyPlanes{}, bitstreamErr("macroblock count mismatch")
@@ -1047,8 +1047,8 @@ func lossyYuvToRgbaFancy(planes *lossyPlanes) []byte {
 	return rgba
 }
 
-func lossyIntoDecodedYuv(planes lossyPlanes) DecodedYuvImage {
-	return DecodedYuvImage{
+func lossyIntoDecodedYuv(planes lossyPlanes) decodedYuvImage {
+	return decodedYuvImage{
 		Width:    planes.width,
 		Height:   planes.height,
 		YStride:  planes.yStride,
@@ -1060,23 +1060,23 @@ func lossyIntoDecodedYuv(planes lossyPlanes) DecodedYuvImage {
 }
 
 // DecodeLossyVp8ToYuv decodes a raw "VP8 " frame payload to planar YUV420.
-func DecodeLossyVp8ToYuv(data []byte) (DecodedYuvImage, error) {
+func decodeLossyVp8ToYuv(data []byte) (decodedYuvImage, error) {
 	frame, err := parseMacroblockData(data)
 	if err != nil {
-		return DecodedYuvImage{}, err
+		return decodedYuvImage{}, err
 	}
 	planes, err := lossyReconstructPlanes(&frame)
 	if err != nil {
-		return DecodedYuvImage{}, err
+		return decodedYuvImage{}, err
 	}
 	return lossyIntoDecodedYuv(planes), nil
 }
 
 // DecodeLossyVp8ToRGBA decodes a raw "VP8 " frame payload to RGBA.
-func DecodeLossyVp8ToRGBA(data []byte) (DecodedImage, error) {
-	yuv, err := DecodeLossyVp8ToYuv(data)
+func decodeLossyVp8ToRGBA(data []byte) (decodedImage, error) {
+	yuv, err := decodeLossyVp8ToYuv(data)
 	if err != nil {
-		return DecodedImage{}, err
+		return decodedImage{}, err
 	}
 	planes := lossyPlanes{
 		width:    yuv.Width,
@@ -1087,14 +1087,14 @@ func DecodeLossyVp8ToRGBA(data []byte) (DecodedImage, error) {
 		u:        yuv.U,
 		v:        yuv.V,
 	}
-	return DecodedImage{
+	return decodedImage{
 		Width:  yuv.Width,
 		Height: yuv.Height,
 		RGBA:   lossyYuvToRgbaFancy(&planes),
 	}, nil
 }
 
-func lossyApplyLossyAlpha(image *DecodedImage, alphaData []byte) error {
+func lossyApplyLossyAlpha(image *decodedImage, alphaData []byte) error {
 	alpha, err := decodeAlphaPlane(alphaData, image.Width, image.Height)
 	if err != nil {
 		return err
@@ -1102,14 +1102,14 @@ func lossyApplyLossyAlpha(image *DecodedImage, alphaData []byte) error {
 	return applyAlphaPlane(image.RGBA, alpha)
 }
 
-func decodeLossyVp8FrameToRGBA(imageData []byte, alphaData []byte) (DecodedImage, error) {
-	image, err := DecodeLossyVp8ToRGBA(imageData)
+func decodeLossyVp8FrameToRGBA(imageData []byte, alphaData []byte) (decodedImage, error) {
+	image, err := decodeLossyVp8ToRGBA(imageData)
 	if err != nil {
-		return DecodedImage{}, err
+		return decodedImage{}, err
 	}
 	if alphaData != nil {
 		if err := lossyApplyLossyAlpha(&image, alphaData); err != nil {
-			return DecodedImage{}, err
+			return decodedImage{}, err
 		}
 	}
 	return image, nil
@@ -1117,29 +1117,29 @@ func decodeLossyVp8FrameToRGBA(imageData []byte, alphaData []byte) (DecodedImage
 
 // DecodeLossyWebpToRGBA decodes a still lossy WebP container to RGBA. If an ALPH
 // chunk is present, it is decoded and applied to the returned RGBA buffer.
-func DecodeLossyWebpToRGBA(data []byte) (DecodedImage, error) {
-	parsed, err := ParseStillWebp(data)
+func decodeLossyWebpToRGBA(data []byte) (decodedImage, error) {
+	parsed, err := parseStillWebp(data)
 	if err != nil {
-		return DecodedImage{}, err
+		return decodedImage{}, err
 	}
 	if parsed.Features.Format != FormatLossy {
-		return DecodedImage{}, unsupportedErr("only still lossy WebP is supported")
+		return decodedImage{}, unsupportedErr("only still lossy WebP is supported")
 	}
 	return decodeLossyVp8FrameToRGBA(parsed.ImageData, parsed.AlphaData)
 }
 
 // DecodeLossyWebpToYuv decodes a still lossy WebP container to planar YUV420. It
 // rejects input with alpha because the return type has no alpha channel.
-func DecodeLossyWebpToYuv(data []byte) (DecodedYuvImage, error) {
-	parsed, err := ParseStillWebp(data)
+func decodeLossyWebpToYuv(data []byte) (decodedYuvImage, error) {
+	parsed, err := parseStillWebp(data)
 	if err != nil {
-		return DecodedYuvImage{}, err
+		return decodedYuvImage{}, err
 	}
 	if parsed.Features.Format != FormatLossy {
-		return DecodedYuvImage{}, unsupportedErr("only still lossy WebP is supported")
+		return decodedYuvImage{}, unsupportedErr("only still lossy WebP is supported")
 	}
 	if parsed.AlphaData != nil {
-		return DecodedYuvImage{}, unsupportedErr("lossy alpha is not implemented")
+		return decodedYuvImage{}, unsupportedErr("lossy alpha is not implemented")
 	}
-	return DecodeLossyVp8ToYuv(parsed.ImageData)
+	return decodeLossyVp8ToYuv(parsed.ImageData)
 }

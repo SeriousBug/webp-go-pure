@@ -4,7 +4,7 @@ package webp
 // Ported from src/encoder/lossless/api.rs.
 
 // EncodeLosslessRgbaToVp8lWithOptions encodes RGBA pixels to a raw lossless VP8L frame payload with explicit options.
-func EncodeLosslessRgbaToVp8lWithOptions(width, height int, rgba []byte, options *LosslessEncodingOptions) ([]byte, error) {
+func encodeLosslessRgbaToVp8lWithOptions(width, height int, rgba []byte, options *LosslessOptions) ([]byte, error) {
 	if err := elosslessValidateRgba(width, height, rgba); err != nil {
 		return nil, err
 	}
@@ -17,7 +17,7 @@ func EncodeLosslessRgbaToVp8lWithOptions(width, height int, rgba []byte, options
 	var best []byte
 	haveBest := false
 
-	for _, profile := range elosslessCandidateProfiles(options.OptimizationLevel) {
+	for _, profile := range elosslessCandidateProfiles(options.Effort) {
 		profile := profile
 		var profileBest []byte
 		haveProfileBest := false
@@ -72,19 +72,19 @@ func EncodeLosslessRgbaToVp8lWithOptions(width, height int, rgba []byte, options
 }
 
 // EncodeLosslessRgbaToVp8l encodes RGBA pixels to a raw lossless VP8L frame payload.
-func EncodeLosslessRgbaToVp8l(width, height int, rgba []byte) ([]byte, error) {
+func encodeLosslessRgbaToVp8l(width, height int, rgba []byte) ([]byte, error) {
 	options := elosslessDefaultOptions()
-	return EncodeLosslessRgbaToVp8lWithOptions(width, height, rgba, &options)
+	return encodeLosslessRgbaToVp8lWithOptions(width, height, rgba, &options)
 }
 
 // EncodeLosslessRgbaToWebpWithOptions encodes RGBA pixels to a still lossless WebP container with explicit options.
-func EncodeLosslessRgbaToWebpWithOptions(width, height int, rgba []byte, options *LosslessEncodingOptions) ([]byte, error) {
-	return EncodeLosslessRgbaToWebpWithOptionsAndExif(width, height, rgba, options, nil)
+func encodeLosslessRgbaToWebpWithOptions(width, height int, rgba []byte, options *LosslessOptions) ([]byte, error) {
+	return encodeLosslessRgbaToWebpWithOptionsAndExif(width, height, rgba, options, nil)
 }
 
 // EncodeLosslessRgbaToWebpWithOptionsAndExif encodes RGBA pixels to a still lossless WebP container with explicit options and EXIF.
-func EncodeLosslessRgbaToWebpWithOptionsAndExif(width, height int, rgba []byte, options *LosslessEncodingOptions, exif []byte) ([]byte, error) {
-	vp8l, err := EncodeLosslessRgbaToVp8lWithOptions(width, height, rgba, options)
+func encodeLosslessRgbaToWebpWithOptionsAndExif(width, height int, rgba []byte, options *LosslessOptions, exif []byte) ([]byte, error) {
+	vp8l, err := encodeLosslessRgbaToVp8lWithOptions(width, height, rgba, options)
 	if err != nil {
 		return nil, err
 	}
@@ -98,23 +98,23 @@ func EncodeLosslessRgbaToWebpWithOptionsAndExif(width, height int, rgba []byte, 
 }
 
 // EncodeLosslessRgbaToWebp encodes RGBA pixels to a still lossless WebP container.
-func EncodeLosslessRgbaToWebp(width, height int, rgba []byte) ([]byte, error) {
+func encodeLosslessRgbaToWebp(width, height int, rgba []byte) ([]byte, error) {
 	options := elosslessDefaultOptions()
-	return EncodeLosslessRgbaToWebpWithOptions(width, height, rgba, &options)
+	return encodeLosslessRgbaToWebpWithOptions(width, height, rgba, &options)
 }
 
 // EncodeLosslessImageToWebpWithOptions encodes an ImageBuffer to a still lossless WebP container with explicit options.
-func EncodeLosslessImageToWebpWithOptions(image *ImageBuffer, options *LosslessEncodingOptions) ([]byte, error) {
-	return EncodeLosslessImageToWebpWithOptionsAndExif(image, options, nil)
+func encodeLosslessImageToWebpWithOptions(image *Image, options *LosslessOptions) ([]byte, error) {
+	return encodeLosslessImageToWebpWithOptionsAndExif(image, options, nil)
 }
 
 // EncodeLosslessImageToWebpWithOptionsAndExif encodes an ImageBuffer to a still lossless WebP container with explicit options and EXIF.
-func EncodeLosslessImageToWebpWithOptionsAndExif(image *ImageBuffer, options *LosslessEncodingOptions, exif []byte) ([]byte, error) {
-	return EncodeLosslessRgbaToWebpWithOptionsAndExif(image.Width, image.Height, image.RGBA, options, exif)
+func encodeLosslessImageToWebpWithOptionsAndExif(image *Image, options *LosslessOptions, exif []byte) ([]byte, error) {
+	return encodeLosslessRgbaToWebpWithOptionsAndExif(image.Width, image.Height, image.RGBA, options, exif)
 }
 
 // EncodeLosslessImageToWebp encodes an ImageBuffer to a still lossless WebP container.
-func EncodeLosslessImageToWebp(image *ImageBuffer) ([]byte, error) {
+func encodeLosslessImageToWebp(image *Image) ([]byte, error) {
 	options := elosslessDefaultOptions()
-	return EncodeLosslessImageToWebpWithOptions(image, &options)
+	return encodeLosslessImageToWebpWithOptions(image, &options)
 }

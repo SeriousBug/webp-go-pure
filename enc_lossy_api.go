@@ -107,7 +107,7 @@ func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWid
 
 // EncodeLossyRgbaToVp8WithOptions encodes RGBA pixels to a raw lossy VP8 frame
 // payload with explicit options.
-func EncodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *LossyEncodingOptions) ([]byte, error) {
+func encodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *LossyOptions) ([]byte, error) {
 	if err := elossyValidateRgba(width, height, rgba); err != nil {
 		return nil, err
 	}
@@ -118,9 +118,9 @@ func EncodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *Lo
 	mbWidth := (width + 15) >> 4
 	mbHeight := (height + 15) >> 4
 	baseQuant := elossyBaseQuantizerFromQuality(options.Quality)
-	profile := elossySearchProfile(options.OptimizationLevel)
+	profile := elossySearchProfile(options.Effort)
 	source := elossyRgbaToYuv420(width, height, rgba, mbWidth, mbHeight)
-	candidates := elossyBuildSegmentCandidates(&source, mbWidth, mbHeight, baseQuant, options.OptimizationLevel)
+	candidates := elossyBuildSegmentCandidates(&source, mbWidth, mbHeight, baseQuant, options.Effort)
 
 	var bestLen int
 	var bestVp8 []byte
@@ -130,7 +130,7 @@ func EncodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *Lo
 		if err != nil {
 			return nil, err
 		}
-		vp8, err := elossyFinalizeLossyCandidate(width, height, &source, mbWidth, mbHeight, baseQuant, options.OptimizationLevel, &candidate)
+		vp8, err := elossyFinalizeLossyCandidate(width, height, &source, mbWidth, mbHeight, baseQuant, options.Effort, &candidate)
 		if err != nil {
 			return nil, err
 		}
@@ -149,21 +149,21 @@ func EncodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *Lo
 }
 
 // EncodeLossyRgbaToVp8 encodes RGBA pixels to a raw lossy VP8 frame payload.
-func EncodeLossyRgbaToVp8(width, height int, rgba []byte) ([]byte, error) {
+func encodeLossyRgbaToVp8(width, height int, rgba []byte) ([]byte, error) {
 	options := elossyDefaultOptions()
-	return EncodeLossyRgbaToVp8WithOptions(width, height, rgba, &options)
+	return encodeLossyRgbaToVp8WithOptions(width, height, rgba, &options)
 }
 
 // EncodeLossyRgbaToWebpWithOptions encodes RGBA pixels to a still lossy WebP
 // container with explicit options.
-func EncodeLossyRgbaToWebpWithOptions(width, height int, rgba []byte, options *LossyEncodingOptions) ([]byte, error) {
-	return EncodeLossyRgbaToWebpWithOptionsAndExif(width, height, rgba, options, nil)
+func encodeLossyRgbaToWebpWithOptions(width, height int, rgba []byte, options *LossyOptions) ([]byte, error) {
+	return encodeLossyRgbaToWebpWithOptionsAndExif(width, height, rgba, options, nil)
 }
 
 // EncodeLossyRgbaToWebpWithOptionsAndExif encodes RGBA pixels to a still lossy
 // WebP container with explicit options and EXIF.
-func EncodeLossyRgbaToWebpWithOptionsAndExif(width, height int, rgba []byte, options *LossyEncodingOptions, exif []byte) ([]byte, error) {
-	vp8, err := EncodeLossyRgbaToVp8WithOptions(width, height, rgba, options)
+func encodeLossyRgbaToWebpWithOptionsAndExif(width, height int, rgba []byte, options *LossyOptions, exif []byte) ([]byte, error) {
+	vp8, err := encodeLossyRgbaToVp8WithOptions(width, height, rgba, options)
 	if err != nil {
 		return nil, err
 	}
@@ -177,25 +177,25 @@ func EncodeLossyRgbaToWebpWithOptionsAndExif(width, height int, rgba []byte, opt
 }
 
 // EncodeLossyRgbaToWebp encodes RGBA pixels to a still lossy WebP container.
-func EncodeLossyRgbaToWebp(width, height int, rgba []byte) ([]byte, error) {
+func encodeLossyRgbaToWebp(width, height int, rgba []byte) ([]byte, error) {
 	options := elossyDefaultOptions()
-	return EncodeLossyRgbaToWebpWithOptions(width, height, rgba, &options)
+	return encodeLossyRgbaToWebpWithOptions(width, height, rgba, &options)
 }
 
 // EncodeLossyImageToWebpWithOptions encodes an ImageBuffer to a still lossy WebP
 // container with explicit options.
-func EncodeLossyImageToWebpWithOptions(image *ImageBuffer, options *LossyEncodingOptions) ([]byte, error) {
-	return EncodeLossyImageToWebpWithOptionsAndExif(image, options, nil)
+func encodeLossyImageToWebpWithOptions(image *Image, options *LossyOptions) ([]byte, error) {
+	return encodeLossyImageToWebpWithOptionsAndExif(image, options, nil)
 }
 
 // EncodeLossyImageToWebpWithOptionsAndExif encodes an ImageBuffer to a still lossy
 // WebP container with explicit options and EXIF.
-func EncodeLossyImageToWebpWithOptionsAndExif(image *ImageBuffer, options *LossyEncodingOptions, exif []byte) ([]byte, error) {
-	return EncodeLossyRgbaToWebpWithOptionsAndExif(image.Width, image.Height, image.RGBA, options, exif)
+func encodeLossyImageToWebpWithOptionsAndExif(image *Image, options *LossyOptions, exif []byte) ([]byte, error) {
+	return encodeLossyRgbaToWebpWithOptionsAndExif(image.Width, image.Height, image.RGBA, options, exif)
 }
 
 // EncodeLossyImageToWebp encodes an ImageBuffer to a still lossy WebP container.
-func EncodeLossyImageToWebp(image *ImageBuffer) ([]byte, error) {
+func encodeLossyImageToWebp(image *Image) ([]byte, error) {
 	options := elossyDefaultOptions()
-	return EncodeLossyImageToWebpWithOptions(image, &options)
+	return encodeLossyImageToWebpWithOptions(image, &options)
 }

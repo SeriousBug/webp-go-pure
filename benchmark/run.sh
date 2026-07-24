@@ -26,8 +26,10 @@ trap 'rm -f "$RESULTS"' EXIT
 cd "$REPO_ROOT"
 
 echo ">> Go engines (ours + libwebp + wasm)..." >&2
-go run -tags testbenchmark,nodynamic ./cmd/webpbench \
-  -dir "$IMAGES_DIR" -budget-ms "$BUDGET_MS" >>"$RESULTS"
+# webpbench lives in the nested benchmark module (it pulls in cgo/libwebp and
+# other encoders, kept out of the root module). Run it from there.
+( cd "$SCRIPT_DIR" && go run -tags testbenchmark,nodynamic ./webpbench \
+  -dir "$IMAGES_DIR" -budget-ms "$BUDGET_MS" ) >>"$RESULTS"
 
 RUST_DIR="$REPO_ROOT/../webp-rust"
 if command -v cargo >/dev/null 2>&1 && [ -d "$RUST_DIR" ]; then

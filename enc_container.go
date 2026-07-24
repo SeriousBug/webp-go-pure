@@ -82,7 +82,7 @@ func wrapStillWebp(image stillImageChunk, exif []byte) ([]byte, error) {
 
 	flags := exifFlag
 	if image.hasAlpha {
-		flags |= ALPHA_FLAG
+		flags |= alphaFlag
 	}
 	width, err := encodeLE24(image.width)
 	if err != nil {

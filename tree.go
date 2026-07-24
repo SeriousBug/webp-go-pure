@@ -1,23 +1,23 @@
 package webp
 
-type ProbabilityUpdateSummary struct {
+type probabilityUpdateSummary struct {
 	CoefficientUpdates int
 	UseSkipProbability bool
 	SkipProbability    *uint8
 }
 
-type ProbabilityTables struct {
-	Coefficients [NUM_TYPES][NUM_BANDS][NUM_CTX][NUM_PROBAS]uint8
-	Summary      ProbabilityUpdateSummary
+type probabilityTables struct {
+	Coefficients [numTypes][numBands][numCtx][numProbas]uint8
+	Summary      probabilityUpdateSummary
 }
 
 var bands = [17]int{0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 0}
 
-func (p *ProbabilityTables) CoeffProbs(coeffType, coeffIndex, ctx int) *[NUM_PROBAS]uint8 {
+func (p *probabilityTables) CoeffProbs(coeffType, coeffIndex, ctx int) *[numProbas]uint8 {
 	return &p.Coefficients[coeffType][bands[coeffIndex]][ctx]
 }
 
-type MacroBlockHeader struct {
+type macroBlockHeader struct {
 	Segment  uint8
 	Skip     bool
 	IsI4x4   bool
@@ -28,7 +28,7 @@ type MacroBlockHeader struct {
 
 var yModesIntra4 = [18]int8{0, 1, -1, 2, -2, 3, 4, 6, -3, 5, -4, -5, -6, 7, -7, 8, -8, -9}
 
-func parseI4x4Mode(br *Vp8BoolDecoder, topMode, leftMode uint8) uint8 {
+func parseI4x4Mode(br *vp8BoolDecoder, topMode, leftMode uint8) uint8 {
 	prob := &bmodesProba[topMode][leftMode]
 	node := yModesIntra4[br.GetBit(prob[0])]
 	for node > 0 {
@@ -38,7 +38,7 @@ func parseI4x4Mode(br *Vp8BoolDecoder, topMode, leftMode uint8) uint8 {
 }
 
 func parseIntraModeRow(
-	br *Vp8BoolDecoder,
+	br *vp8BoolDecoder,
 	macroblockWidth int,
 	updateSegmentMap bool,
 	segmentProbs *[3]uint8,
@@ -46,12 +46,12 @@ func parseIntraModeRow(
 	skipProbability uint8,
 	topModes []uint8,
 	leftModes *[4]uint8,
-) ([]MacroBlockHeader, error) {
+) ([]macroBlockHeader, error) {
 	if len(topModes) != macroblockWidth*4 {
 		return nil, invalidParam("top mode cache length")
 	}
 
-	row := make([]MacroBlockHeader, 0, macroblockWidth)
+	row := make([]macroBlockHeader, 0, macroblockWidth)
 	for mbX := 0; mbX < macroblockWidth; mbX++ {
 		top := topModes[mbX*4 : mbX*4+4]
 		var segment uint8
@@ -65,26 +65,26 @@ func parseIntraModeRow(
 		skip := useSkipProbability && br.GetBit(skipProbability) == 1
 		isI4x4 := br.GetBit(145) == 0
 
-		header := MacroBlockHeader{
+		header := macroBlockHeader{
 			Segment:  segment,
 			Skip:     skip,
 			IsI4x4:   isI4x4,
-			LumaMode: B_PRED,
-			UVMode:   DC_PRED,
+			LumaMode: bPred,
+			UVMode:   dcPred,
 		}
 
 		if !isI4x4 {
 			var ymode uint8
 			if br.GetBit(156) == 1 {
 				if br.GetBit(128) == 1 {
-					ymode = TM_PRED
+					ymode = tmPred
 				} else {
-					ymode = H_PRED
+					ymode = hPred
 				}
 			} else if br.GetBit(163) == 1 {
-				ymode = V_PRED
+				ymode = vPred
 			} else {
-				ymode = DC_PRED
+				ymode = dcPred
 			}
 			header.LumaMode = ymode
 			for i := range top {
@@ -108,13 +108,13 @@ func parseIntraModeRow(
 		}
 
 		if br.GetBit(142) == 0 {
-			header.UVMode = DC_PRED
+			header.UVMode = dcPred
 		} else if br.GetBit(114) == 0 {
-			header.UVMode = V_PRED
+			header.UVMode = vPred
 		} else if br.GetBit(183) == 1 {
-			header.UVMode = TM_PRED
+			header.UVMode = tmPred
 		} else {
-			header.UVMode = H_PRED
+			header.UVMode = hPred
 		}
 
 		row = append(row, header)
@@ -126,7 +126,7 @@ func parseIntraModeRow(
 	return row, nil
 }
 
-func parseProbabilityTables(br *Vp8BoolDecoder) (ProbabilityTables, error) {
+func parseProbabilityTables(br *vp8BoolDecoder) (probabilityTables, error) {
 	coefficientUpdates := 0
 	coefficients := coeffsProba0
 	for typeIndex := range coeffsUpdateProba {
@@ -151,12 +151,12 @@ func parseProbabilityTables(br *Vp8BoolDecoder) (ProbabilityTables, error) {
 	}
 
 	if br.EOF() {
-		return ProbabilityTables{}, bitstreamErr("cannot parse coefficient probability updates")
+		return probabilityTables{}, bitstreamErr("cannot parse coefficient probability updates")
 	}
 
-	return ProbabilityTables{
+	return probabilityTables{
 		Coefficients: coefficients,
-		Summary: ProbabilityUpdateSummary{
+		Summary: probabilityUpdateSummary{
 			CoefficientUpdates: coefficientUpdates,
 			UseSkipProbability: useSkipProbability,
 			SkipProbability:    skipProbability,
@@ -164,15 +164,15 @@ func parseProbabilityTables(br *Vp8BoolDecoder) (ProbabilityTables, error) {
 	}, nil
 }
 
-func parseProbabilityUpdates(br *Vp8BoolDecoder) (ProbabilityUpdateSummary, error) {
+func parseProbabilityUpdates(br *vp8BoolDecoder) (probabilityUpdateSummary, error) {
 	tables, err := parseProbabilityTables(br)
 	if err != nil {
-		return ProbabilityUpdateSummary{}, err
+		return probabilityUpdateSummary{}, err
 	}
 	return tables.Summary, nil
 }
 
-var bmodesProba = [NUM_BMODES][NUM_BMODES][NUM_BMODES - 1]uint8{
+var bmodesProba = [numBModes][numBModes][numBModes - 1]uint8{
 	{
 		{231, 120, 48, 89, 115, 113, 120, 152, 112},
 		{152, 179, 64, 126, 170, 118, 46, 70, 95},
@@ -295,7 +295,7 @@ var bmodesProba = [NUM_BMODES][NUM_BMODES][NUM_BMODES - 1]uint8{
 	},
 }
 
-var coeffsProba0 = [NUM_TYPES][NUM_BANDS][NUM_CTX][NUM_PROBAS]uint8{
+var coeffsProba0 = [numTypes][numBands][numCtx][numProbas]uint8{
 	{
 		{
 			{128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128},
@@ -466,7 +466,7 @@ var coeffsProba0 = [NUM_TYPES][NUM_BANDS][NUM_CTX][NUM_PROBAS]uint8{
 	},
 }
 
-var coeffsUpdateProba = [NUM_TYPES][NUM_BANDS][NUM_CTX][NUM_PROBAS]uint8{
+var coeffsUpdateProba = [numTypes][numBands][numCtx][numProbas]uint8{
 	{
 		{
 			{255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},

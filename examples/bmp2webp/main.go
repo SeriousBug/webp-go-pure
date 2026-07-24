@@ -24,7 +24,7 @@ func rowStride(width, bytesPerPixel int) int {
 	return (width*bytesPerPixel + 3) &^ 3
 }
 
-func decodeBMPToRGBA(data []byte) (*webp.ImageBuffer, error) {
+func decodeBMPToRGBA(data []byte) (*webp.Image, error) {
 	if len(data) < fileHeaderSize+minInfoHeaderSize {
 		return nil, fmt.Errorf("BMP file is too small")
 	}
@@ -105,7 +105,7 @@ func decodeBMPToRGBA(data []byte) (*webp.ImageBuffer, error) {
 		}
 	}
 
-	return &webp.ImageBuffer{Width: width, Height: height, RGBA: rgba}, nil
+	return &webp.Image{Width: width, Height: height, RGBA: rgba}, nil
 }
 
 const usage = "usage: go run ./examples/bmp2webp -- [-z 0..9] [--lossy --quality 0..100 [--lossy-opt-level 0..9]] [--opt-level 0..9] <input.bmp> [output.webp]"
@@ -121,9 +121,9 @@ func parseU8Level(value, what string) (uint8, error) {
 func run() error {
 	args := os.Args[1:]
 	var input, output string
-	options := webp.DefaultLosslessEncodingOptions()
+	options := webp.LosslessOptions{Effort: 6}
 	lossy := false
-	lossyOptions := webp.DefaultLossyEncodingOptions()
+	lossyOptions := webp.LossyOptions{Quality: 90}
 	var sharedLevel *uint8
 	losslessExplicit := false
 	lossyExplicit := false
@@ -153,7 +153,7 @@ func run() error {
 			if lvl > 9 {
 				return fmt.Errorf("optimization level must be in 0..=9")
 			}
-			options.OptimizationLevel = lvl
+			options.Effort = lvl
 			losslessExplicit = true
 		case "--quality", "-q":
 			v, err := next(&i)
@@ -190,7 +190,7 @@ func run() error {
 			if lvl > 9 {
 				return fmt.Errorf("lossy optimization level must be in 0..=9")
 			}
-			lossyOptions.OptimizationLevel = lvl
+			lossyOptions.Effort = lvl
 			lossyExplicit = true
 		default:
 			if input == "" {
@@ -212,10 +212,10 @@ func run() error {
 		}
 		if lossy {
 			if !lossyExplicit {
-				lossyOptions.OptimizationLevel = *sharedLevel
+				lossyOptions.Effort = *sharedLevel
 			}
 		} else if !losslessExplicit {
-			options.OptimizationLevel = *sharedLevel
+			options.Effort = *sharedLevel
 		}
 	}
 
@@ -236,9 +236,9 @@ func run() error {
 	}
 	var out []byte
 	if lossy {
-		out, err = webp.EncodeLossyImageToWebpWithOptions(image, &lossyOptions)
+		out, err = webp.EncodeLossy(image, &lossyOptions)
 	} else {
-		out, err = webp.EncodeLosslessImageToWebpWithOptions(image, &options)
+		out, err = webp.EncodeLossless(image, &options)
 	}
 	if err != nil {
 		return err
