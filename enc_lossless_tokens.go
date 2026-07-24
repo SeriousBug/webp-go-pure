@@ -345,7 +345,9 @@ func elosslessFindBestWindowOffsetMatch(width int, argb []uint32, index, maxLen 
 		}
 		candidateIndex := index - distance
 		length := elosslessFindMatchLength(argb, index, candidateIndex, maxLen)
-		elosslessConsiderMatch(width, &best, distance, length)
+		if length >= elosslessMinLength {
+			elosslessConsiderMatch(width, &best, distance, length)
+		}
 	}
 	return best
 }
