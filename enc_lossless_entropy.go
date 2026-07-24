@@ -348,6 +348,47 @@ func elosslessHistogramCost(histograms *elosslessHistogramSet, codes *elosslessH
 		sum(histograms[4], &codes.dist)
 }
 
+// elosslessSparseHist stores only the non-zero (symbol, count) entries of a
+// histogram set. Per-tile histograms are sparse (a small image tile touches few
+// distinct residual values), so evaluating the assignment cost against a group's
+// Huffman code lengths over just the non-zeros is far cheaper than scanning the
+// full dense arrays, while producing identical totals.
+type elosslessSparseHist struct {
+	sym [5][]uint16
+	cnt [5][]uint32
+}
+
+func elosslessMakeSparseHist(h *elosslessHistogramSet) elosslessSparseHist {
+	var s elosslessSparseHist
+	for c := 0; c < 5; c++ {
+		hist := h[c]
+		for i, v := range hist {
+			if v != 0 {
+				s.sym[c] = append(s.sym[c], uint16(i))
+				s.cnt[c] = append(s.cnt[c], v)
+			}
+		}
+	}
+	return s
+}
+
+func elosslessSparseHistCost(s *elosslessSparseHist, codes *elosslessHuffmanGroupCodes) int {
+	channelCodes := [5]*elosslessHuffmanCode{&codes.green, &codes.red, &codes.blue, &codes.alpha, &codes.dist}
+	total := 0
+	for c := 0; c < 5; c++ {
+		lengths := channelCodes[c].getCodeLengths()
+		nLen := len(lengths)
+		sym := s.sym[c]
+		cnt := s.cnt[c]
+		for k, symbol := range sym {
+			if int(symbol) < nLen {
+				total += int(cnt[k]) * int(lengths[symbol])
+			}
+		}
+	}
+	return total
+}
+
 func elosslessHistogramEntropyCost(histogram []uint32) float64 {
 	total := 0.0
 	for _, count := range histogram {
@@ -578,13 +619,13 @@ func elosslessBuildWeightedSeedHistograms(nonEmptyTiles [][2]int, tileHistograms
 	return out
 }
 
-func elosslessAssignTilesToGroups(nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, groupCodes []elosslessHuffmanGroupCodes, assignments []int) {
+func elosslessAssignTilesToGroups(nonEmptyTiles [][2]int, tileSparse []elosslessSparseHist, groupCodes []elosslessHuffmanGroupCodes, assignments []int) {
 	for _, t := range nonEmptyTiles {
 		tile := t[0]
 		bestGroup := 0
 		bestCost := elosslessIntMax
 		for groupIndex := range groupCodes {
-			cost := elosslessHistogramCost(&tileHistograms[tile], &groupCodes[groupIndex])
+			cost := elosslessSparseHistCost(&tileSparse[tile], &groupCodes[groupIndex])
 			if cost < bestCost {
 				bestCost = cost
 				bestGroup = groupIndex
@@ -594,7 +635,7 @@ func elosslessAssignTilesToGroups(nonEmptyTiles [][2]int, tileHistograms []eloss
 	}
 }
 
-func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, seedHistograms []elosslessHistogramSet) (*elosslessMetaHuffmanPlan, error) {
+func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, tileSparse []elosslessSparseHist, seedHistograms []elosslessHistogramSet) (*elosslessMetaHuffmanPlan, error) {
 	if len(seedHistograms) <= 1 {
 		return nil, nil
 	}
@@ -610,7 +651,7 @@ func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles
 	assignments := make([]int, tileCount)
 
 	for iter := 0; iter < 4; iter++ {
-		elosslessAssignTilesToGroups(nonEmptyTiles, tileHistograms, groupCodes, assignments)
+		elosslessAssignTilesToGroups(nonEmptyTiles, tileSparse, groupCodes, assignments)
 
 		remap := make([]int, len(groupCodes))
 		for i := range remap {
@@ -658,11 +699,11 @@ func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles
 	}, nil
 }
 
-func elosslessMetaHuffmanAssignmentCost(nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, plan *elosslessMetaHuffmanPlan) int {
+func elosslessMetaHuffmanAssignmentCost(nonEmptyTiles [][2]int, tileSparse []elosslessSparseHist, plan *elosslessMetaHuffmanPlan) int {
 	total := 0
 	for _, t := range nonEmptyTiles {
 		tile := t[0]
-		total += elosslessHistogramCost(&tileHistograms[tile], &plan.groups[plan.assignments[tile]])
+		total += elosslessSparseHistCost(&tileSparse[tile], &plan.groups[plan.assignments[tile]])
 	}
 	return total
 }
@@ -747,6 +788,11 @@ func elosslessBuildMetaHuffmanPlan(width, height int, tokens []elosslessToken, c
 		return nonEmptyTiles[j][1] < nonEmptyTiles[i][1]
 	})
 
+	tileSparse := make([]elosslessSparseHist, tileCount)
+	for _, t := range nonEmptyTiles {
+		tileSparse[t[0]] = elosslessMakeSparseHist(&tileHistograms[t[0]])
+	}
+
 	groupCount := maxGroups
 	if len(nonEmptyTiles) < groupCount {
 		groupCount = len(nonEmptyTiles)
@@ -763,14 +809,14 @@ func elosslessBuildMetaHuffmanPlan(width, height int, tokens []elosslessToken, c
 	var bestPlan *elosslessMetaHuffmanPlan
 	bestCost := elosslessIntMax
 	for _, seedHistograms := range seedCandidates {
-		plan, err := elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits, nonEmptyTiles, tileHistograms, seedHistograms)
+		plan, err := elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits, nonEmptyTiles, tileHistograms, tileSparse, seedHistograms)
 		if err != nil {
 			return nil, err
 		}
 		if plan != nil {
 			plan.huffmanBits = huffmanBits
 			plan.huffmanXsize = huffmanXsize
-			cost := elosslessMetaHuffmanAssignmentCost(nonEmptyTiles, tileHistograms, plan)
+			cost := elosslessMetaHuffmanAssignmentCost(nonEmptyTiles, tileSparse, plan)
 			if cost < bestCost {
 				bestCost = cost
 				bestPlan = plan
