@@ -229,23 +229,23 @@ func elosslessSearchProfile(optimizationLevel uint8) elosslessLosslessSearchProf
 	case 0:
 		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100}
 	case 1:
-		return elosslessLosslessSearchProfile{1, 1, 0, false, 2, 104}
+		return elosslessLosslessSearchProfile{1, 1, 0, false, 2, 100}
 	case 2:
-		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 106}
+		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 100}
 	case 3:
-		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 108}
+		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101}
 	case 4:
-		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 110}
+		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101}
 	case 5:
-		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 112}
+		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101}
 	case 6:
-		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 115}
+		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101}
 	case 7:
-		return elosslessLosslessSearchProfile{7, 5, 4, true, 5, 118}
+		return elosslessLosslessSearchProfile{7, 5, 4, true, 5, 106}
 	case 8:
-		return elosslessLosslessSearchProfile{7, 6, 5, true, 6, 122}
+		return elosslessLosslessSearchProfile{7, 6, 5, true, 6, 112}
 	default:
-		return elosslessLosslessSearchProfile{7, 7, 6, true, 8, 128}
+		return elosslessLosslessSearchProfile{7, 7, 6, true, 8, 120}
 	}
 }
 

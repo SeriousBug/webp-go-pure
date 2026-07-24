@@ -747,9 +747,17 @@ func elosslessSatMul(a, b int) int {
 	return s
 }
 
-func elosslessShouldStopTransformSearch(bestLen, nextEstimate int, profile *elosslessLosslessSearchProfile) bool {
+// elosslessShouldStopTransformSearch decides whether to skip fully encoding the
+// next shortlisted plan. It compares that plan's cheap entropy estimate against
+// the best plan's estimate (both the same proxy scale, so the ratio is
+// meaningful) and stops once the next plan is more than earlyStopRatioPercent
+// worse. The best-ranked plan by this proxy reliably produces the smallest real
+// output on photographic images, so encoding a clearly-worse plan is wasted
+// work; a tight margin still re-encodes genuine near-ties where the proxy can't
+// separate the candidates.
+func elosslessShouldStopTransformSearch(bestEstimate, nextEstimate int, profile *elosslessLosslessSearchProfile) bool {
 	return profile.earlyStopRatioPercent != elosslessIntMax &&
-		elosslessSatMul(nextEstimate, 100) >= elosslessSatMul(bestLen, profile.earlyStopRatioPercent)
+		elosslessSatMul(nextEstimate, 100) >= elosslessSatMul(bestEstimate, profile.earlyStopRatioPercent)
 }
 
 // elosslessEncodeTransformPlanToVp8l tokenizes the predicted image once (no color
