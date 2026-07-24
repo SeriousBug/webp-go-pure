@@ -1084,7 +1084,7 @@ func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTok
 				return 0, err
 			}
 		} else {
-			tokens, err := elosslessBuildTokens(width, argb, elosslessTokenBuildOptionsFor(profile.matchSearchLevel, cacheBits))
+			tokens, err := elosslessApplyColorCacheToTokens(argb, baseTokens, cacheBits)
 			if err != nil {
 				return 0, err
 			}

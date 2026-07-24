@@ -563,14 +563,6 @@ func elosslessBuildTiledTransformPlan(width, height int, input []uint32, useSubt
 	}
 }
 
-func elosslessQuickTokenBuildOptions(profile *elosslessLosslessSearchProfile) elosslessTokenBuildOptions {
-	level := profile.matchSearchLevel
-	if level > 2 {
-		level = 2
-	}
-	return elosslessTokenBuildOptionsFor(level, 0)
-}
-
 func elosslessEstimateTokenStreamCostBytes(width int, argb []uint32, options elosslessTokenBuildOptions) (int, error) {
 	tokens, err := elosslessBuildTokens(width, argb, options)
 	if err != nil {
@@ -595,12 +587,29 @@ func elosslessEstimateTokenStreamCostBytes(width int, argb []uint32, options elo
 	return elosslessDivCeil(totalBits, 8), nil
 }
 
+// elosslessChannelEntropyBytes estimates the compressed size of an image from the
+// Shannon entropy of its per-channel residual histograms. This is a cheap O(n)
+// proxy (no LZ77) used only to rank candidate transform plans; the shortlisted
+// winners are still fully encoded and compared by real output size, so a coarse
+// ranking here cannot regress the final result.
+func elosslessChannelEntropyBytes(argb []uint32) int {
+	var hg, hr, hb, ha [256]uint32
+	for _, p := range argb {
+		ha[(p>>24)&0xff]++
+		hr[(p>>16)&0xff]++
+		hg[(p>>8)&0xff]++
+		hb[p&0xff]++
+	}
+	bits := elosslessHistogramEntropyCost(hg[:]) +
+		elosslessHistogramEntropyCost(hr[:]) +
+		elosslessHistogramEntropyCost(hb[:]) +
+		elosslessHistogramEntropyCost(ha[:])
+	return int(bits / 8)
+}
+
 func elosslessEstimateTransformPlanScore(width int, plan *elosslessTransformPlan, profile *elosslessLosslessSearchProfile) (int, error) {
 	transformOptions := elosslessTokenBuildOptions{}
-	score, err := elosslessEstimateTokenStreamCostBytes(width, plan.predicted, elosslessQuickTokenBuildOptions(profile))
-	if err != nil {
-		return 0, err
-	}
+	score := elosslessChannelEntropyBytes(plan.predicted)
 	if plan.useSubtractGreen {
 		score += 1
 	}
@@ -699,33 +708,48 @@ func elosslessShouldStopTransformSearch(bestLen, nextEstimate int, profile *elos
 		elosslessSatMul(nextEstimate, 100) >= elosslessSatMul(bestLen, profile.earlyStopRatioPercent)
 }
 
+// elosslessEncodeTransformPlanToVp8l tokenizes the predicted image once (no color
+// cache) and derives every color-cache variant from that single token stream via
+// elosslessApplyColorCacheToTokens. The LZ77 match structure is identical with or
+// without a cache (the cache only reclassifies literals as cache references), so
+// this avoids re-running the expensive match search once per cache-size candidate.
 func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *elosslessTransformPlan, profile *elosslessLosslessSearchProfile) ([]byte, error) {
 	noCacheOptions := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, 0)
-	best, err := elosslessEncodeTransformPlanToVp8lWithCache(width, height, rgba, plan, noCacheOptions, profile.entropySearchLevel)
+	baseTokens, err := elosslessBuildTokens(width, plan.predicted, noCacheOptions)
 	if err != nil {
 		return nil, err
 	}
+
+	best, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, 0, profile.entropySearchLevel)
+	if err != nil {
+		return nil, err
+	}
+
 	if profile.useColorCache && len(plan.predicted) >= 64 {
-		baseTokens, err := elosslessBuildTokens(width, plan.predicted, noCacheOptions)
-		if err != nil {
-			return nil, err
-		}
 		bestCacheBits, err := elosslessSelectBestColorCacheBits(width, height, plan.predicted, baseTokens, profile)
 		if err != nil {
 			return nil, err
 		}
-		withCache, err := elosslessEncodeTransformPlanToVp8lWithCache(width, height, rgba, plan, elosslessTokenBuildOptionsFor(profile.matchSearchLevel, bestCacheBits), profile.entropySearchLevel)
-		if err != nil {
-			return nil, err
-		}
-		if bestCacheBits > 0 && len(withCache) < len(best) {
-			best = withCache
+		if bestCacheBits > 0 {
+			cachedTokens, err := elosslessApplyColorCacheToTokens(plan.predicted, baseTokens, bestCacheBits)
+			if err != nil {
+				return nil, err
+			}
+			withCache, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, cachedTokens, bestCacheBits, profile.entropySearchLevel)
+			if err != nil {
+				return nil, err
+			}
+			if len(withCache) < len(best) {
+				best = withCache
+			}
 		}
 	}
 	return best, nil
 }
 
-func elosslessEncodeTransformPlanToVp8lWithCache(width, height int, rgba []byte, plan *elosslessTransformPlan, tokenOptions elosslessTokenBuildOptions, entropySearchLevel uint8) ([]byte, error) {
+// elosslessEncodeTransformPlanToVp8lWithTokens writes a full VP8L frame from an
+// already-tokenized image stream, avoiding a redundant tokenization pass.
+func elosslessEncodeTransformPlanToVp8lWithTokens(width, height int, rgba []byte, plan *elosslessTransformPlan, tokens []elosslessToken, colorCacheBits int, entropySearchLevel uint8) ([]byte, error) {
 	transformOptions := elosslessTokenBuildOptions{}
 	bw := newBitWriter()
 	if err := bw.putBits(uint32(width-1), 14); err != nil {
@@ -780,7 +804,7 @@ func elosslessEncodeTransformPlanToVp8lWithCache(width, height int, rgba []byte,
 	if err := bw.putBits(0, 1); err != nil {
 		return nil, err
 	}
-	if err := elosslessWriteImageStream(bw, width, plan.predicted, true, entropySearchLevel, tokenOptions); err != nil {
+	if err := elosslessWriteImageStreamFromTokens(bw, width, height, tokens, true, entropySearchLevel, colorCacheBits); err != nil {
 		return nil, err
 	}
 
