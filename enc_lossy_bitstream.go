@@ -83,7 +83,7 @@ func elossyIntra4ModeRate(topMode, leftMode, mode uint8) uint32 {
 }
 
 func elossyUpdateModeCache(mode *elossyMacroblockMode, top []uint8, left *[4]uint8) {
-	if mode.luma == B_PRED {
+	if mode.luma == bPred {
 		for subY := 0; subY < 4; subY++ {
 			ymode := left[subY]
 			for subX := 0; subX < 4; subX++ {
@@ -340,7 +340,7 @@ func elossyRecordStat(bit bool, stat *uint32) {
 	*stat += 0x00010000 + b
 }
 
-func elossyRecordLargeValue(stats *[NUM_PROBAS]uint32, value uint32) {
+func elossyRecordLargeValue(stats *[numProbas]uint32, value uint32) {
 	gt4 := value > 4
 	elossyRecordStat(gt4, &stats[3])
 	if !gt4 {
@@ -461,10 +461,10 @@ func elossyBranchCost(nb, total uint32, prob uint8) uint32 {
 
 func elossyFinalizeTokenProbabilities(stats *elossyCoeffStats) elossyCoeffProbTables {
 	probabilities := coeffsProba0
-	for t := 0; t < NUM_TYPES; t++ {
-		for b := 0; b < NUM_BANDS; b++ {
-			for c := 0; c < NUM_CTX; c++ {
-				for p := 0; p < NUM_PROBAS; p++ {
+	for t := 0; t < numTypes; t++ {
+		for b := 0; b < numBands; b++ {
+			for c := 0; c < numCtx; c++ {
+				for p := 0; p < numProbas; p++ {
 					stat := stats[t][b][c][p]
 					nb := stat & 0xffff
 					total := stat >> 16
@@ -522,10 +522,10 @@ func elossyEncodePartition0(mbWidth, mbHeight int, baseQuant uint8, segment *elo
 	}
 	writer.putBitUniform(false)
 
-	for t := 0; t < NUM_TYPES; t++ {
-		for b := 0; b < NUM_BANDS; b++ {
-			for c := 0; c < NUM_CTX; c++ {
-				for p := 0; p < NUM_PROBAS; p++ {
+	for t := 0; t < numTypes; t++ {
+		for b := 0; b < numBands; b++ {
+			for c := 0; c < numCtx; c++ {
+				for p := 0; p < numProbas; p++ {
 					update := probabilities[t][b][c][p] != coeffsProba0[t][b][c][p]
 					writer.putBit(update, coeffsUpdateProba[t][b][c][p])
 					if update {
@@ -562,7 +562,7 @@ func elossyEncodePartition0(mbWidth, mbHeight int, baseQuant uint8, segment *elo
 		}
 		mbX := index % mbWidth
 		top := topModes[mbX*4 : mbX*4+4]
-		if mode.luma == B_PRED {
+		if mode.luma == bPred {
 			writer.putBit(false, 145)
 			for subY := 0; subY < 4; subY++ {
 				ymode := leftModes[subY]
@@ -577,16 +577,16 @@ func elossyEncodePartition0(mbWidth, mbHeight int, baseQuant uint8, segment *elo
 		} else {
 			writer.putBit(true, 145)
 			switch mode.luma {
-			case DC_PRED:
+			case dcPred:
 				writer.putBit(false, 156)
 				writer.putBit(false, 163)
-			case V_PRED:
+			case vPred:
 				writer.putBit(false, 156)
 				writer.putBit(true, 163)
-			case H_PRED:
+			case hPred:
 				writer.putBit(true, 156)
 				writer.putBit(false, 128)
-			case TM_PRED:
+			case tmPred:
 				writer.putBit(true, 156)
 				writer.putBit(true, 128)
 			default:
@@ -600,16 +600,16 @@ func elossyEncodePartition0(mbWidth, mbHeight int, baseQuant uint8, segment *elo
 			}
 		}
 		switch mode.chroma {
-		case DC_PRED:
+		case dcPred:
 			writer.putBit(false, 142)
-		case V_PRED:
+		case vPred:
 			writer.putBit(true, 142)
 			writer.putBit(false, 114)
-		case H_PRED:
+		case hPred:
 			writer.putBit(true, 142)
 			writer.putBit(true, 114)
 			writer.putBit(false, 183)
-		case TM_PRED:
+		case tmPred:
 			writer.putBit(true, 142)
 			writer.putBit(true, 114)
 			writer.putBit(true, 183)
@@ -626,7 +626,7 @@ func elossyEncodeMacroblock(writer *vp8BoolWriter, probabilities *elossyCoeffPro
 	yY := mbY * 16
 	uvX := mbX * 8
 	uvY := mbY * 8
-	isI4x4 := mode.luma == B_PRED
+	isI4x4 := mode.luma == bPred
 	rd := elossyBuildRdMultipliers(quant)
 
 	if !isI4x4 {
@@ -893,14 +893,14 @@ func elossyEncodeMacroblock(writer *vp8BoolWriter, probabilities *elossyCoeffPro
 	return false
 }
 
-func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[NUM_MB_SEGMENTS]elossyQuantMatrices, probabilities *elossyCoeffProbTables, stats *elossyCoeffStats) ([]byte, elossyPlanes, []elossyMacroblockMode) {
+func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, probabilities *elossyCoeffProbTables, stats *elossyCoeffStats) ([]byte, elossyPlanes, []elossyMacroblockMode) {
 	writer := newVp8BoolWriter(len(source.y) / 4)
 	reconstructed := elossyEmptyReconstructedPlanes(mbWidth, mbHeight)
 	topContexts := make([]elossyNonZeroContext, mbWidth)
 	topModes := make([]uint8, mbWidth*4)
 	modes := make([]elossyMacroblockMode, 0, mbWidth*mbHeight)
-	var segmentRd [NUM_MB_SEGMENTS]elossyRdMultipliers
-	for index := 0; index < NUM_MB_SEGMENTS; index++ {
+	var segmentRd [numMbSegments]elossyRdMultipliers
+	for index := 0; index < numMbSegments; index++ {
 		segmentRd[index] = elossyBuildRdMultipliers(&segmentQuants[index])
 	}
 

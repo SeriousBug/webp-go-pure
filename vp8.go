@@ -2,14 +2,14 @@ package webp
 
 import "math/bits"
 
-type Vp8FrameHeader struct {
+type vp8FrameHeader struct {
 	KeyFrame        bool
 	Profile         uint8
 	Show            bool
 	PartitionLength int
 }
 
-type Vp8PictureHeader struct {
+type vp8PictureHeader struct {
 	Width      uint16
 	Height     uint16
 	XScale     uint8
@@ -18,73 +18,73 @@ type Vp8PictureHeader struct {
 	ClampType  uint8
 }
 
-type SegmentHeader struct {
+type segmentHeader struct {
 	UseSegment     bool
 	UpdateMap      bool
 	AbsoluteDelta  bool
-	Quantizer      [NUM_MB_SEGMENTS]int8
-	FilterStrength [NUM_MB_SEGMENTS]int8
-	SegmentProbs   [MB_FEATURE_TREE_PROBS]uint8
+	Quantizer      [numMbSegments]int8
+	FilterStrength [numMbSegments]int8
+	SegmentProbs   [mbFeatureTreeProbs]uint8
 }
 
-func defaultSegmentHeader() SegmentHeader {
-	return SegmentHeader{
+func defaultSegmentHeader() segmentHeader {
+	return segmentHeader{
 		AbsoluteDelta: true,
-		SegmentProbs:  [MB_FEATURE_TREE_PROBS]uint8{255, 255, 255},
+		SegmentProbs:  [mbFeatureTreeProbs]uint8{255, 255, 255},
 	}
 }
 
-type FilterType int
+type filterType int
 
 const (
-	FilterOff FilterType = iota
-	FilterSimple
-	FilterComplex
+	filterOff filterType = iota
+	filterSimple
+	filterComplex
 )
 
-type FilterHeader struct {
+type filterHeader struct {
 	Simple      bool
 	Level       uint8
 	Sharpness   uint8
 	UseLFDelta  bool
-	RefLFDelta  [NUM_REF_LF_DELTAS]int8
-	ModeLFDelta [NUM_MODE_LF_DELTAS]int8
-	FilterType  FilterType
+	RefLFDelta  [numRefLfDeltas]int8
+	ModeLFDelta [numModeLfDeltas]int8
+	filterType  filterType
 }
 
-type LosslessInfo struct {
+type losslessInfo struct {
 	Width    int
 	Height   int
 	HasAlpha bool
 }
 
-type LossyHeader struct {
-	Frame               Vp8FrameHeader
-	Picture             Vp8PictureHeader
+type lossyHeader struct {
+	Frame               vp8FrameHeader
+	Picture             vp8PictureHeader
 	MacroblockWidth     int
 	MacroblockHeight    int
-	Segment             SegmentHeader
-	Filter              FilterHeader
+	Segment             segmentHeader
+	Filter              filterHeader
 	TokenPartitionSizes []int
-	Quantization        Quantization
-	Probabilities       ProbabilityUpdateSummary
+	quantization        quantization
+	Probabilities       probabilityUpdateSummary
 }
 
-type MacroBlockHeaders struct {
-	Frame       LossyHeader
-	Macroblocks []MacroBlockHeader
+type macroBlockHeaders struct {
+	Frame       lossyHeader
+	Macroblocks []macroBlockHeader
 }
 
-type MacroBlockData struct {
-	Header    MacroBlockHeader
+type macroBlockData struct {
+	Header    macroBlockHeader
 	Coeffs    [384]int16
 	NonZeroY  uint32
 	NonZeroUV uint32
 }
 
-type MacroBlockDataFrame struct {
-	Frame       LossyHeader
-	Macroblocks []MacroBlockData
+type macroBlockDataFrame struct {
+	Frame       lossyHeader
+	Macroblocks []macroBlockData
 }
 
 type nonZeroContext struct {
@@ -93,7 +93,7 @@ type nonZeroContext struct {
 }
 
 // Vp8BoolDecoder is the VP8 boolean arithmetic decoder.
-type Vp8BoolDecoder struct {
+type vp8BoolDecoder struct {
 	data     []byte
 	position int
 	value    uint64
@@ -102,8 +102,8 @@ type Vp8BoolDecoder struct {
 	eof      bool
 }
 
-func NewVp8BoolDecoder(data []byte) *Vp8BoolDecoder {
-	d := &Vp8BoolDecoder{
+func newVp8BoolDecoder(data []byte) *vp8BoolDecoder {
+	d := &vp8BoolDecoder{
 		data: data,
 		rng:  255 - 1,
 		bits: -8,
@@ -112,9 +112,9 @@ func NewVp8BoolDecoder(data []byte) *Vp8BoolDecoder {
 	return d
 }
 
-func (d *Vp8BoolDecoder) EOF() bool { return d.eof }
+func (d *vp8BoolDecoder) EOF() bool { return d.eof }
 
-func (d *Vp8BoolDecoder) loadNewBytes() {
+func (d *vp8BoolDecoder) loadNewBytes() {
 	for d.bits < 0 {
 		if d.position < len(d.data) {
 			d.bits += 8
@@ -130,9 +130,9 @@ func (d *Vp8BoolDecoder) loadNewBytes() {
 	}
 }
 
-func (d *Vp8BoolDecoder) Get() uint32 { return d.GetBit(0x80) }
+func (d *vp8BoolDecoder) Get() uint32 { return d.GetBit(0x80) }
 
-func (d *Vp8BoolDecoder) GetValue(numBits int) uint32 {
+func (d *vp8BoolDecoder) GetValue(numBits int) uint32 {
 	var value uint32
 	for bitIndex := numBits - 1; bitIndex >= 0; bitIndex-- {
 		value |= d.Get() << uint(bitIndex)
@@ -140,7 +140,7 @@ func (d *Vp8BoolDecoder) GetValue(numBits int) uint32 {
 	return value
 }
 
-func (d *Vp8BoolDecoder) GetSignedValue(numBits int) int32 {
+func (d *vp8BoolDecoder) GetSignedValue(numBits int) int32 {
 	value := int32(d.GetValue(numBits))
 	if d.Get() == 1 {
 		return -value
@@ -148,14 +148,14 @@ func (d *Vp8BoolDecoder) GetSignedValue(numBits int) int32 {
 	return value
 }
 
-func (d *Vp8BoolDecoder) GetSigned(value int32) int32 {
+func (d *vp8BoolDecoder) GetSigned(value int32) int32 {
 	if d.Get() == 1 {
 		return -value
 	}
 	return value
 }
 
-func (d *Vp8BoolDecoder) GetBit(prob uint8) uint32 {
+func (d *vp8BoolDecoder) GetBit(prob uint8) uint32 {
 	if d.bits < 0 {
 		d.loadNewBytes()
 	}
@@ -187,7 +187,7 @@ func checkLossySignature(data []byte) bool {
 }
 
 func getInfo(data []byte, chunkSize int) (int, int, error) {
-	if len(data) < VP8_FRAME_HEADER_SIZE {
+	if len(data) < vp8FrameHeaderSize {
 		return 0, 0, notEnoughData("VP8 frame header")
 	}
 	if !checkLossySignature(data[3:]) {
@@ -222,15 +222,15 @@ func getInfo(data []byte, chunkSize int) (int, int, error) {
 }
 
 func checkLosslessSignature(data []byte) bool {
-	return len(data) >= VP8L_FRAME_HEADER_SIZE && data[0] == 0x2f && (data[4]>>5) == 0
+	return len(data) >= vp8lFrameHeaderSize && data[0] == 0x2f && (data[4]>>5) == 0
 }
 
-func getLosslessInfo(data []byte) (LosslessInfo, error) {
-	if len(data) < VP8L_FRAME_HEADER_SIZE {
-		return LosslessInfo{}, notEnoughData("VP8L frame header")
+func getLosslessInfo(data []byte) (losslessInfo, error) {
+	if len(data) < vp8lFrameHeaderSize {
+		return losslessInfo{}, notEnoughData("VP8L frame header")
 	}
 	if !checkLosslessSignature(data) {
-		return LosslessInfo{}, bitstreamErr("bad VP8L signature")
+		return losslessInfo{}, bitstreamErr("bad VP8L signature")
 	}
 
 	b := uint32(data[1]) | uint32(data[2])<<8 | uint32(data[3])<<16 | uint32(data[4])<<24
@@ -240,13 +240,13 @@ func getLosslessInfo(data []byte) (LosslessInfo, error) {
 	version := (b >> 29) & 0x07
 
 	if version != 0 {
-		return LosslessInfo{}, bitstreamErr("unsupported VP8L version")
+		return losslessInfo{}, bitstreamErr("unsupported VP8L version")
 	}
 
-	return LosslessInfo{Width: width, Height: height, HasAlpha: hasAlpha}, nil
+	return losslessInfo{Width: width, Height: height, HasAlpha: hasAlpha}, nil
 }
 
-func parseSegmentHeader(br *Vp8BoolDecoder) (SegmentHeader, error) {
+func parseSegmentHeader(br *vp8BoolDecoder) (segmentHeader, error) {
 	header := defaultSegmentHeader()
 	header.UseSegment = br.Get() == 1
 	if header.UseSegment {
@@ -280,22 +280,22 @@ func parseSegmentHeader(br *Vp8BoolDecoder) (SegmentHeader, error) {
 	}
 
 	if br.EOF() {
-		return SegmentHeader{}, bitstreamErr("cannot parse segment header")
+		return segmentHeader{}, bitstreamErr("cannot parse segment header")
 	}
 	return header, nil
 }
 
-func parseFilterHeader(br *Vp8BoolDecoder) (FilterHeader, error) {
+func parseFilterHeader(br *vp8BoolDecoder) (filterHeader, error) {
 	simple := br.Get() == 1
 	level := uint8(br.GetValue(6))
 	sharpness := uint8(br.GetValue(3))
 	useLFDelta := br.Get() == 1
-	header := FilterHeader{
+	header := filterHeader{
 		Simple:     simple,
 		Level:      level,
 		Sharpness:  sharpness,
 		UseLFDelta: useLFDelta,
-		FilterType: FilterOff,
+		filterType: filterOff,
 	}
 
 	if useLFDelta && br.Get() == 1 {
@@ -312,22 +312,22 @@ func parseFilterHeader(br *Vp8BoolDecoder) (FilterHeader, error) {
 	}
 
 	if level == 0 {
-		header.FilterType = FilterOff
+		header.filterType = filterOff
 	} else if simple {
-		header.FilterType = FilterSimple
+		header.filterType = filterSimple
 	} else {
-		header.FilterType = FilterComplex
+		header.filterType = filterComplex
 	}
 
 	if br.EOF() {
-		return FilterHeader{}, bitstreamErr("cannot parse filter header")
+		return filterHeader{}, bitstreamErr("cannot parse filter header")
 	}
 	return header, nil
 }
 
-func parseTokenPartitions(br *Vp8BoolDecoder, data []byte) ([]int, error) {
+func parseTokenPartitions(br *vp8BoolDecoder, data []byte) ([]int, error) {
 	numPartsMinusOne := (1 << br.GetValue(2)) - 1
-	if numPartsMinusOne >= MAX_NUM_PARTITIONS {
+	if numPartsMinusOne >= maxNumPartitions {
 		return nil, bitstreamErr("too many VP8 token partitions")
 	}
 
@@ -391,7 +391,7 @@ func transformWHT(input *[16]int16) [16]int16 {
 	return out
 }
 
-func getLargeValue(br *Vp8BoolDecoder, p *[11]uint8) int32 {
+func getLargeValue(br *vp8BoolDecoder, p *[11]uint8) int32 {
 	if br.GetBit(p[3]) == 0 {
 		if br.GetBit(p[4]) == 0 {
 			return 2
@@ -427,8 +427,8 @@ func getLargeValue(br *Vp8BoolDecoder, p *[11]uint8) int32 {
 }
 
 func getCoeffs(
-	br *Vp8BoolDecoder,
-	probabilities *ProbabilityTables,
+	br *vp8BoolDecoder,
+	probabilities *probabilityTables,
 	coeffType int,
 	ctx int,
 	dq [2]uint16,
@@ -486,13 +486,13 @@ func nzCodeBits(nzCoeffs uint32, nz int, dcNZ bool) uint32 {
 }
 
 func parseResiduals(
-	header MacroBlockHeader,
+	header macroBlockHeader,
 	top *nonZeroContext,
 	left *nonZeroContext,
-	tokenBr *Vp8BoolDecoder,
-	quantization *Quantization,
-	probabilities *ProbabilityTables,
-) MacroBlockData {
+	tokenBr *vp8BoolDecoder,
+	quantization *quantization,
+	probabilities *probabilityTables,
+) macroBlockData {
 	var coeffs [384]int16
 	if header.Skip {
 		top.nz = 0
@@ -501,7 +501,7 @@ func parseResiduals(
 			top.nzDC = 0
 			left.nzDC = 0
 		}
-		return MacroBlockData{Header: header, Coeffs: coeffs}
+		return macroBlockData{Header: header, Coeffs: coeffs}
 	}
 
 	q := &quantization.Matrices[header.Segment]
@@ -592,7 +592,7 @@ func parseResiduals(
 	top.nz = outTNZ
 	left.nz = outLNZ
 
-	return MacroBlockData{
+	return macroBlockData{
 		Header:    header,
 		Coeffs:    coeffs,
 		NonZeroY:  nonZeroY,
@@ -600,74 +600,74 @@ func parseResiduals(
 	}
 }
 
-func parseLossyHeaders(data []byte) (LossyHeader, error) {
-	if len(data) < VP8_FRAME_HEADER_SIZE {
-		return LossyHeader{}, notEnoughData("VP8 frame header")
+func parseLossyHeaders(data []byte) (lossyHeader, error) {
+	if len(data) < vp8FrameHeaderSize {
+		return lossyHeader{}, notEnoughData("VP8 frame header")
 	}
 
 	frameBits := uint32(data[0]) | (uint32(data[1]) << 8) | (uint32(data[2]) << 16)
-	frame := Vp8FrameHeader{
+	frame := vp8FrameHeader{
 		KeyFrame:        (frameBits & 1) == 0,
 		Profile:         uint8((frameBits >> 1) & 0x07),
 		Show:            ((frameBits >> 4) & 1) == 1,
 		PartitionLength: int(frameBits >> 5),
 	}
 	if !frame.KeyFrame {
-		return LossyHeader{}, unsupportedErr("interframes are not supported")
+		return lossyHeader{}, unsupportedErr("interframes are not supported")
 	}
 	if frame.Profile > 3 {
-		return LossyHeader{}, bitstreamErr("unknown VP8 profile")
+		return lossyHeader{}, bitstreamErr("unknown VP8 profile")
 	}
 	if !frame.Show {
-		return LossyHeader{}, unsupportedErr("invisible VP8 frame")
+		return lossyHeader{}, unsupportedErr("invisible VP8 frame")
 	}
 	if !checkLossySignature(data[3:]) {
-		return LossyHeader{}, bitstreamErr("bad VP8 signature")
+		return lossyHeader{}, bitstreamErr("bad VP8 signature")
 	}
 
-	picture := Vp8PictureHeader{
+	picture := vp8PictureHeader{
 		Width:  ((uint16(data[7]) << 8) | uint16(data[6])) & 0x3fff,
 		Height: ((uint16(data[9]) << 8) | uint16(data[8])) & 0x3fff,
 		XScale: data[7] >> 6,
 		YScale: data[9] >> 6,
 	}
 	if picture.Width == 0 || picture.Height == 0 {
-		return LossyHeader{}, bitstreamErr("invalid VP8 dimensions")
+		return lossyHeader{}, bitstreamErr("invalid VP8 dimensions")
 	}
 
-	partition0Offset := VP8_FRAME_HEADER_SIZE
+	partition0Offset := vp8FrameHeaderSize
 	partition0End := partition0Offset + frame.PartitionLength
 	if partition0End > len(data) {
-		return LossyHeader{}, notEnoughData("VP8 partition 0")
+		return lossyHeader{}, notEnoughData("VP8 partition 0")
 	}
 
-	br := NewVp8BoolDecoder(data[partition0Offset:partition0End])
+	br := newVp8BoolDecoder(data[partition0Offset:partition0End])
 	picture.Colorspace = uint8(br.Get())
 	picture.ClampType = uint8(br.Get())
 
 	segment, err := parseSegmentHeader(br)
 	if err != nil {
-		return LossyHeader{}, err
+		return lossyHeader{}, err
 	}
 	filter, err := parseFilterHeader(br)
 	if err != nil {
-		return LossyHeader{}, err
+		return lossyHeader{}, err
 	}
 	tokenPartitionSizes, err := parseTokenPartitions(br, data[partition0End:])
 	if err != nil {
-		return LossyHeader{}, err
+		return lossyHeader{}, err
 	}
 	quantization, err := parseQuantization(br, &segment)
 	if err != nil {
-		return LossyHeader{}, err
+		return lossyHeader{}, err
 	}
 	br.Get()
 	probabilities, err := parseProbabilityUpdates(br)
 	if err != nil {
-		return LossyHeader{}, err
+		return lossyHeader{}, err
 	}
 
-	return LossyHeader{
+	return lossyHeader{
 		Frame:               frame,
 		Picture:             picture,
 		MacroblockWidth:     (int(picture.Width) + 15) >> 4,
@@ -675,53 +675,53 @@ func parseLossyHeaders(data []byte) (LossyHeader, error) {
 		Segment:             segment,
 		Filter:              filter,
 		TokenPartitionSizes: tokenPartitionSizes,
-		Quantization:        quantization,
+		quantization:        quantization,
 		Probabilities:       probabilities,
 	}, nil
 }
 
-func parseMacroblockHeaders(data []byte) (MacroBlockHeaders, error) {
+func parseMacroblockHeaders(data []byte) (macroBlockHeaders, error) {
 	frame, err := parseLossyHeaders(data)
 	if err != nil {
-		return MacroBlockHeaders{}, err
+		return macroBlockHeaders{}, err
 	}
 
-	partition0Offset := VP8_FRAME_HEADER_SIZE
+	partition0Offset := vp8FrameHeaderSize
 	partition0End := partition0Offset + frame.Frame.PartitionLength
-	br := NewVp8BoolDecoder(data[partition0Offset:partition0End])
+	br := newVp8BoolDecoder(data[partition0Offset:partition0End])
 
 	br.Get()
 	br.Get()
 	segment, err := parseSegmentHeader(br)
 	if err != nil {
-		return MacroBlockHeaders{}, err
+		return macroBlockHeaders{}, err
 	}
 	if _, err := parseFilterHeader(br); err != nil {
-		return MacroBlockHeaders{}, err
+		return macroBlockHeaders{}, err
 	}
 	if _, err := parseTokenPartitions(br, data[partition0End:]); err != nil {
-		return MacroBlockHeaders{}, err
+		return macroBlockHeaders{}, err
 	}
 	if _, err := parseQuantization(br, &segment); err != nil {
-		return MacroBlockHeaders{}, err
+		return macroBlockHeaders{}, err
 	}
 	br.Get()
 	probabilities, err := parseProbabilityUpdates(br)
 	if err != nil {
-		return MacroBlockHeaders{}, err
+		return macroBlockHeaders{}, err
 	}
 
 	topModes := make([]uint8, frame.MacroblockWidth*4)
 	for i := range topModes {
-		topModes[i] = B_DC_PRED
+		topModes[i] = bDCPred
 	}
-	macroblocks := make([]MacroBlockHeader, 0, frame.MacroblockWidth*frame.MacroblockHeight)
+	macroblocks := make([]macroBlockHeader, 0, frame.MacroblockWidth*frame.MacroblockHeight)
 	skipProb := uint8(0)
 	if probabilities.SkipProbability != nil {
 		skipProb = *probabilities.SkipProbability
 	}
 	for mbY := 0; mbY < frame.MacroblockHeight; mbY++ {
-		leftModes := [4]uint8{B_DC_PRED, B_DC_PRED, B_DC_PRED, B_DC_PRED}
+		leftModes := [4]uint8{bDCPred, bDCPred, bDCPred, bDCPred}
 		row, err := parseIntraModeRow(
 			br,
 			frame.MacroblockWidth,
@@ -733,69 +733,69 @@ func parseMacroblockHeaders(data []byte) (MacroBlockHeaders, error) {
 			&leftModes,
 		)
 		if err != nil {
-			return MacroBlockHeaders{}, err
+			return macroBlockHeaders{}, err
 		}
 		macroblocks = append(macroblocks, row...)
 	}
 
-	return MacroBlockHeaders{Frame: frame, Macroblocks: macroblocks}, nil
+	return macroBlockHeaders{Frame: frame, Macroblocks: macroblocks}, nil
 }
 
-func parseMacroblockData(data []byte) (MacroBlockDataFrame, error) {
+func parseMacroblockData(data []byte) (macroBlockDataFrame, error) {
 	frame, err := parseLossyHeaders(data)
 	if err != nil {
-		return MacroBlockDataFrame{}, err
+		return macroBlockDataFrame{}, err
 	}
-	partition0Offset := VP8_FRAME_HEADER_SIZE
+	partition0Offset := vp8FrameHeaderSize
 	partition0End := partition0Offset + frame.Frame.PartitionLength
-	br := NewVp8BoolDecoder(data[partition0Offset:partition0End])
+	br := newVp8BoolDecoder(data[partition0Offset:partition0End])
 
 	br.Get()
 	br.Get()
 	segment, err := parseSegmentHeader(br)
 	if err != nil {
-		return MacroBlockDataFrame{}, err
+		return macroBlockDataFrame{}, err
 	}
 	if _, err := parseFilterHeader(br); err != nil {
-		return MacroBlockDataFrame{}, err
+		return macroBlockDataFrame{}, err
 	}
 	tokenPartitionSizes, err := parseTokenPartitions(br, data[partition0End:])
 	if err != nil {
-		return MacroBlockDataFrame{}, err
+		return macroBlockDataFrame{}, err
 	}
 	quantization, err := parseQuantization(br, &segment)
 	if err != nil {
-		return MacroBlockDataFrame{}, err
+		return macroBlockDataFrame{}, err
 	}
 	br.Get()
 	probabilities, err := parseProbabilityTables(br)
 	if err != nil {
-		return MacroBlockDataFrame{}, err
+		return macroBlockDataFrame{}, err
 	}
 
 	partitionSizeBytes := (len(tokenPartitionSizes) - 1) * 3
 	tokenOffset := partition0End + partitionSizeBytes
-	tokenReaders := make([]*Vp8BoolDecoder, 0, len(tokenPartitionSizes))
+	tokenReaders := make([]*vp8BoolDecoder, 0, len(tokenPartitionSizes))
 	for _, size := range tokenPartitionSizes {
 		end := tokenOffset + size
-		tokenReaders = append(tokenReaders, NewVp8BoolDecoder(data[tokenOffset:end]))
+		tokenReaders = append(tokenReaders, newVp8BoolDecoder(data[tokenOffset:end]))
 		tokenOffset = end
 	}
 
 	topModes := make([]uint8, frame.MacroblockWidth*4)
 	for i := range topModes {
-		topModes[i] = B_DC_PRED
+		topModes[i] = bDCPred
 	}
 	topContexts := make([]nonZeroContext, frame.MacroblockWidth)
 	partMask := len(tokenReaders) - 1
-	macroblocks := make([]MacroBlockData, 0, frame.MacroblockWidth*frame.MacroblockHeight)
+	macroblocks := make([]macroBlockData, 0, frame.MacroblockWidth*frame.MacroblockHeight)
 
 	skipProb := uint8(0)
 	if probabilities.Summary.SkipProbability != nil {
 		skipProb = *probabilities.Summary.SkipProbability
 	}
 	for mbY := 0; mbY < frame.MacroblockHeight; mbY++ {
-		leftModes := [4]uint8{B_DC_PRED, B_DC_PRED, B_DC_PRED, B_DC_PRED}
+		leftModes := [4]uint8{bDCPred, bDCPred, bDCPred, bDCPred}
 		row, err := parseIntraModeRow(
 			br,
 			frame.MacroblockWidth,
@@ -807,7 +807,7 @@ func parseMacroblockData(data []byte) (MacroBlockDataFrame, error) {
 			&leftModes,
 		)
 		if err != nil {
-			return MacroBlockDataFrame{}, err
+			return macroBlockDataFrame{}, err
 		}
 
 		tokenBr := tokenReaders[mbY&partMask]
@@ -818,5 +818,5 @@ func parseMacroblockData(data []byte) (MacroBlockDataFrame, error) {
 		}
 	}
 
-	return MacroBlockDataFrame{Frame: frame, Macroblocks: macroblocks}, nil
+	return macroBlockDataFrame{Frame: frame, Macroblocks: macroblocks}, nil
 }

@@ -47,9 +47,13 @@ setting.
 - For the `webp-rust` engine: a `cargo` toolchain and `../webp-rust` checked out
   next to this repo. `run.sh` skips it automatically if either is missing.
 
-The benchmark tooling is gated behind the `testbenchmark` build tag (plus
-`nodynamic`, which forces gen2brain/webp onto its WASM path instead of loading a
-system libwebp). It is excluded from the normal build and the default test run.
+The benchmark tooling and the cross-encoder compatibility tests live in their
+own Go module (`benchmark/`, with `webpbench/` and `compat/`), so the cgo and
+third-party encoder dependencies they need stay out of the root module — the
+library itself has none. The `webpbench` command and the libwebp compatibility
+tests are further gated behind the `testbenchmark` build tag (plus `nodynamic`,
+which forces gen2brain/webp onto its WASM path instead of loading a system
+libwebp).
 
 ## Method
 

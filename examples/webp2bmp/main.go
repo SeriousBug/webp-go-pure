@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	fileHeaderSize  = 14
-	infoHeaderSize  = 40
-	bmpHeaderSize   = fileHeaderSize + infoHeaderSize
-	bitsPerPixel    = 24
-	pixelsPerMeter  = 3780
+	fileHeaderSize = 14
+	infoHeaderSize = 40
+	bmpHeaderSize  = fileHeaderSize + infoHeaderSize
+	bitsPerPixel   = 24
+	pixelsPerMeter = 3780
 )
 
 func rowStride(width int) int {
@@ -106,7 +106,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	features, err := webp.GetFeatures(data)
+	features, err := webp.Features(data)
 	if err != nil {
 		return err
 	}

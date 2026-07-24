@@ -56,11 +56,12 @@ func encode(args []string) error {
 	}
 	buf := toImageBuffer(src)
 
-	mode := webp.Lossy
+	var data []byte
 	if *lossless {
-		mode = webp.Lossless
+		data, err = webp.EncodeLossless(&buf, &webp.LosslessOptions{Effort: uint8(*optimize)})
+	} else {
+		data, err = webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: uint8(*quality), Effort: uint8(*optimize)})
 	}
-	data, err := webp.Encode(&buf, *optimize, *quality, mode, nil)
 	if err != nil {
 		return err
 	}
@@ -116,7 +117,7 @@ func readImage(path string) (image.Image, error) {
 	return img, err
 }
 
-func toImageBuffer(src image.Image) webp.ImageBuffer {
+func toImageBuffer(src image.Image) webp.Image {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	rgba := make([]byte, w*h*4)
@@ -131,7 +132,7 @@ func toImageBuffer(src image.Image) webp.ImageBuffer {
 			i += 4
 		}
 	}
-	return webp.ImageBuffer{Width: w, Height: h, RGBA: rgba}
+	return webp.Image{Width: w, Height: h, RGBA: rgba}
 }
 
 func modeName(lossless bool) string {

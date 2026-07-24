@@ -23,8 +23,8 @@ var (
 	elossyBands  = [17]int{0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 0}
 )
 
-type elossyCoeffProbTables [NUM_TYPES][NUM_BANDS][NUM_CTX][NUM_PROBAS]uint8
-type elossyCoeffStats [NUM_TYPES][NUM_BANDS][NUM_CTX][NUM_PROBAS]uint32
+type elossyCoeffProbTables [numTypes][numBands][numCtx][numProbas]uint8
+type elossyCoeffStats [numTypes][numBands][numCtx][numProbas]uint32
 
 type elossyNonZeroContext struct {
 	nz   uint8
@@ -63,9 +63,9 @@ type elossyPlanes struct {
 type elossySegmentConfig struct {
 	useSegment     bool
 	updateMap      bool
-	quantizer      [NUM_MB_SEGMENTS]uint8
-	filterStrength [NUM_MB_SEGMENTS]int8
-	probs          [MB_FEATURE_TREE_PROBS]uint8
+	quantizer      [numMbSegments]uint8
+	filterStrength [numMbSegments]int8
+	probs          [mbFeatureTreeProbs]uint8
 	segments       []uint8
 }
 
@@ -94,10 +94,10 @@ type elossyLossySearchProfile struct {
 	updateProbabilities bool
 }
 
-func elossyDefaultOptions() LossyEncodingOptions {
-	return LossyEncodingOptions{
-		Quality:           90,
-		OptimizationLevel: elossyDefaultLossyOptimizationLevel,
+func elossyDefaultOptions() LossyOptions {
+	return LossyOptions{
+		Quality: 90,
+		Effort:  elossyDefaultLossyOptimizationLevel,
 	}
 }
 
@@ -120,11 +120,11 @@ func elossyValidateRgba(width, height int, rgba []byte) error {
 	return nil
 }
 
-func elossyValidateOptions(options *LossyEncodingOptions) error {
+func elossyValidateOptions(options *LossyOptions) error {
 	if options.Quality > 100 {
 		return encInvalidParam("lossy quality must be in 0..=100")
 	}
-	if options.OptimizationLevel > elossyMaxLossyOptimizationLevel {
+	if options.Effort > elossyMaxLossyOptimizationLevel {
 		return encInvalidParam("lossy optimization level must be in 0..=9")
 	}
 	return nil
@@ -299,20 +299,20 @@ func elossyGetProba(a, b int) uint8 {
 	return uint8((255*a + total/2) / total)
 }
 
-func elossyBuildSegmentQuantizers(segment *elossySegmentConfig) [NUM_MB_SEGMENTS]elossyQuantMatrices {
-	var out [NUM_MB_SEGMENTS]elossyQuantMatrices
-	for index := 0; index < NUM_MB_SEGMENTS; index++ {
+func elossyBuildSegmentQuantizers(segment *elossySegmentConfig) [numMbSegments]elossyQuantMatrices {
+	var out [numMbSegments]elossyQuantMatrices
+	for index := 0; index < numMbSegments; index++ {
 		out[index] = elossyBuildQuantMatrices(int32(segment.quantizer[index]))
 	}
 	return out
 }
 
 func elossyDisabledSegmentConfig(mbCount int, baseQuant uint8) elossySegmentConfig {
-	var quantizer [NUM_MB_SEGMENTS]uint8
+	var quantizer [numMbSegments]uint8
 	for i := range quantizer {
 		quantizer[i] = baseQuant
 	}
-	var probs [MB_FEATURE_TREE_PROBS]uint8
+	var probs [mbFeatureTreeProbs]uint8
 	for i := range probs {
 		probs[i] = 255
 	}
@@ -444,8 +444,8 @@ func elossyMacroblockActivity(source *elossyPlanes, mbX, mbY int) uint32 {
 	return activity
 }
 
-func elossyBuildSegmentProbs(counts *[NUM_MB_SEGMENTS]int) [MB_FEATURE_TREE_PROBS]uint8 {
-	return [MB_FEATURE_TREE_PROBS]uint8{
+func elossyBuildSegmentProbs(counts *[numMbSegments]int) [mbFeatureTreeProbs]uint8 {
+	return [mbFeatureTreeProbs]uint8{
 		elossyGetProba(counts[0]+counts[1], counts[2]+counts[3]),
 		elossyGetProba(counts[0], counts[1]),
 		elossyGetProba(counts[2], counts[3]),
@@ -466,7 +466,7 @@ func elossyBuildSegmentConfig(activities, sortedActivities []uint32, flatPercent
 	threshold := sortedActivities[flatCount-1]
 
 	segments := make([]uint8, len(activities))
-	var counts [NUM_MB_SEGMENTS]int
+	var counts [numMbSegments]int
 	for index, activity := range activities {
 		segment := uint8(0)
 		if activity > threshold {
@@ -497,7 +497,7 @@ func elossyBuildSegmentConfig(activities, sortedActivities []uint32, flatPercent
 		return elossySegmentConfig{}, false
 	}
 
-	var quantizer [NUM_MB_SEGMENTS]uint8
+	var quantizer [numMbSegments]uint8
 	for i := range quantizer {
 		quantizer[i] = quant0
 	}
@@ -513,7 +513,7 @@ func elossyBuildSegmentConfig(activities, sortedActivities []uint32, flatPercent
 
 func elossyBuildMultiSegmentConfig(activities, sortedActivities []uint32, percentiles []int, deltas []int32, baseQuant int32) (elossySegmentConfig, bool) {
 	segmentCount := len(deltas)
-	if segmentCount < 2 || segmentCount > NUM_MB_SEGMENTS || len(percentiles)+1 != segmentCount {
+	if segmentCount < 2 || segmentCount > numMbSegments || len(percentiles)+1 != segmentCount {
 		return elossySegmentConfig{}, false
 	}
 
@@ -531,7 +531,7 @@ func elossyBuildMultiSegmentConfig(activities, sortedActivities []uint32, percen
 	sort.Slice(thresholds, func(i, j int) bool { return thresholds[i] < thresholds[j] })
 
 	segments := make([]uint8, len(activities))
-	var counts [NUM_MB_SEGMENTS]int
+	var counts [numMbSegments]int
 	for index, activity := range activities {
 		segment := 0
 		for _, threshold := range thresholds {
@@ -551,7 +551,7 @@ func elossyBuildMultiSegmentConfig(activities, sortedActivities []uint32, percen
 		}
 	}
 
-	var quantizer [NUM_MB_SEGMENTS]uint8
+	var quantizer [numMbSegments]uint8
 	for i := range quantizer {
 		quantizer[i] = elossyClippedQuantizer(baseQuant)
 	}

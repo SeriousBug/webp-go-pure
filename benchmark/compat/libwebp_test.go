@@ -3,12 +3,12 @@
 // These tests cross-check our pure-Go codec against libwebp (the C reference)
 // through github.com/kolesa-team/go-webp. They require cgo and the libwebp C
 // library plus pkg-config, so they are gated behind the test-only build tag
-// `testbenchmark` and excluded from the default build. Run with:
+// `testbenchmark` and excluded from the default build. Run from this module with:
 //
 //	go test -tags testbenchmark ./...
 //
 // On macOS: brew install webp pkg-config.
-package webp
+package compat
 
 import (
 	"bytes"
@@ -19,6 +19,8 @@ import (
 	"github.com/kolesa-team/go-webp/decoder"
 	"github.com/kolesa-team/go-webp/encoder"
 	kwebp "github.com/kolesa-team/go-webp/webp"
+
+	webp "github.com/SeriousBug/webp-go-pure"
 )
 
 func rgbaImageFromBytes(width, height int, rgba []byte) *image.RGBA {
@@ -44,7 +46,7 @@ func libwebpDecodeToRGBA(t *testing.T, data []byte) *image.RGBA {
 func TestLibwebpDecodesOurLosslessOutput(t *testing.T) {
 	const w, h = 64, 48
 	src := makeGradientRGBA(w, h)
-	encoded, err := EncodeLosslessRgbaToWebp(w, h, src)
+	encoded, err := webp.EncodeLossless(&webp.Image{Width: w, Height: h, RGBA: src}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +64,7 @@ func TestLibwebpDecodesOurLosslessOutput(t *testing.T) {
 func TestLibwebpDecodesOurLossyOutput(t *testing.T) {
 	const w, h = 64, 48
 	src := makeGradientRGBA(w, h)
-	encoded, err := EncodeLossyRgbaToWebp(w, h, src)
+	encoded, err := webp.EncodeLossy(&webp.Image{Width: w, Height: h, RGBA: src}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +88,7 @@ func TestOurDecoderReadsLibwebpLosslessOutput(t *testing.T) {
 	if err := kwebp.Encode(&buf, rgbaImageFromBytes(w, h, src), opts); err != nil {
 		t.Fatalf("libwebp encode: %v", err)
 	}
-	decoded, err := DecodeLosslessWebpToRGBA(buf.Bytes())
+	decoded, err := webp.Decode(buf.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +113,7 @@ func TestOurDecoderReadsLibwebpLossyOutput(t *testing.T) {
 	if err := kwebp.Encode(&buf, rgbaImageFromBytes(w, h, src), opts); err != nil {
 		t.Fatalf("libwebp encode: %v", err)
 	}
-	decoded, err := DecodeLossyWebpToRGBA(buf.Bytes())
+	decoded, err := webp.Decode(buf.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +127,7 @@ func TestOurDecoderReadsLibwebpLossyOutput(t *testing.T) {
 
 func TestLibwebpAgreesWithOurDecoderOnLosslessSample(t *testing.T) {
 	data := loadSample(t, "sample_lossless.webp")
-	ours, err := DecodeLosslessWebpToRGBA(data)
+	ours, err := webp.Decode(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +142,7 @@ func TestLibwebpAgreesWithOurDecoderOnLosslessSample(t *testing.T) {
 
 func TestLibwebpAgreesWithOurDecoderOnLossySample(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	ours, err := DecodeLossyWebpToRGBA(data)
+	ours, err := webp.Decode(data)
 	if err != nil {
 		t.Fatal(err)
 	}

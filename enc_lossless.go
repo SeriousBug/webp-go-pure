@@ -171,8 +171,8 @@ type elosslessLosslessSearchProfile struct {
 	earlyStopRatioPercent int
 }
 
-func elosslessDefaultOptions() LosslessEncodingOptions {
-	return LosslessEncodingOptions{OptimizationLevel: elosslessDefaultOptimizationLevel}
+func elosslessDefaultOptions() LosslessOptions {
+	return LosslessOptions{Effort: elosslessDefaultOptimizationLevel}
 }
 
 func elosslessColorCacheNew(hashBits int) (elosslessColorCache, error) {
@@ -217,8 +217,8 @@ func elosslessValidateRgba(width, height int, rgba []byte) error {
 	return nil
 }
 
-func elosslessValidateOptions(options *LosslessEncodingOptions) error {
-	if options.OptimizationLevel > elosslessMaxOptimizationLevel {
+func elosslessValidateOptions(options *LosslessOptions) error {
+	if options.Effort > elosslessMaxOptimizationLevel {
 		return encInvalidParam("lossless optimization level must be in 0..=9")
 	}
 	return nil

@@ -24,11 +24,11 @@ func makeRawAlphaChunk(alpha []byte) []byte {
 
 func makeLossyAlphaStillWebp(t *testing.T, alpha []byte) []byte {
 	sample := loadSample(t, "sample.webp")
-	parsed, err := ParseStillWebp(sample)
+	parsed, err := parseStillWebp(sample)
 	if err != nil {
 		t.Fatal(err)
 	}
-	vp8x := makeChunk("VP8X", makeVp8xPayload(ALPHA_FLAG, parsed.Features.Width, parsed.Features.Height))
+	vp8x := makeChunk("VP8X", makeVp8xPayload(alphaFlag, parsed.Features.Width, parsed.Features.Height))
 	alph := makeChunk("ALPH", makeRawAlphaChunk(alpha))
 	vp8 := makeChunk("VP8 ", parsed.ImageData)
 	return wrapRiff(vp8x, alph, vp8)
@@ -36,7 +36,7 @@ func makeLossyAlphaStillWebp(t *testing.T, alpha []byte) []byte {
 
 func makeLossyAlphaAnimationWebp(t *testing.T, alpha []byte) []byte {
 	sample := loadSample(t, "sample.webp")
-	parsed, err := ParseStillWebp(sample)
+	parsed, err := parseStillWebp(sample)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func makeLossyAlphaAnimationWebp(t *testing.T, alpha []byte) []byte {
 	anmf = append(anmf, makeChunk("ALPH", makeRawAlphaChunk(alpha))...)
 	anmf = append(anmf, makeChunk("VP8 ", parsed.ImageData)...)
 
-	vp8x := makeChunk("VP8X", makeVp8xPayload(ALPHA_FLAG|ANIMATION_FLAG, parsed.Features.Width, parsed.Features.Height))
+	vp8x := makeChunk("VP8X", makeVp8xPayload(alphaFlag|animationFlag, parsed.Features.Width, parsed.Features.Height))
 	anim := makeChunk("ANIM", []byte{0, 0, 0, 0, 0, 0})
 	anmfChunk := makeChunk("ANMF", anmf)
 	return wrapRiff(vp8x, anim, anmfChunk)
@@ -63,7 +63,7 @@ func makeLossyAlphaAnimationWebp(t *testing.T, alpha []byte) []byte {
 
 func TestGetFeaturesParsesLossySample(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	features, err := GetFeatures(data)
+	features, err := Features(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,14 +73,14 @@ func TestGetFeaturesParsesLossySample(t *testing.T) {
 	if features.Format != FormatLossy {
 		t.Fatalf("format %v", features.Format)
 	}
-	if features.HasAlpha || features.HasAnimation || features.Vp8x != nil {
+	if features.HasAlpha || features.HasAnimation || features.vp8x != nil {
 		t.Fatal("unexpected flags")
 	}
 }
 
 func TestParseStillWebpExposesVp8Payload(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	parsed, err := ParseStillWebp(data)
+	parsed, err := parseStillWebp(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestParseStillWebpExposesVp8Payload(t *testing.T) {
 
 func TestParseLossyHeadersReadsSamplePartitionHeaders(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	parsed, err := ParseStillWebp(data)
+	parsed, err := parseStillWebp(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,14 +117,14 @@ func TestParseLossyHeadersReadsSamplePartitionHeaders(t *testing.T) {
 	if len(vp8.TokenPartitionSizes) == 0 || len(vp8.TokenPartitionSizes) > 8 {
 		t.Fatalf("token partitions %d", len(vp8.TokenPartitionSizes))
 	}
-	if vp8.Quantization.Indices.BaseQ0 <= 0 {
-		t.Fatalf("base q0 %d", vp8.Quantization.Indices.BaseQ0)
+	if vp8.quantization.Indices.BaseQ0 <= 0 {
+		t.Fatalf("base q0 %d", vp8.quantization.Indices.BaseQ0)
 	}
 }
 
 func TestParseMacroblockHeadersReadsAllLossyMacroblocks(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	parsed, err := ParseStillWebp(data)
+	parsed, err := parseStillWebp(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestParseMacroblockHeadersReadsAllLossyMacroblocks(t *testing.T) {
 
 func TestParseMacroblockDataReadsResidualCoefficients(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	parsed, err := ParseStillWebp(data)
+	parsed, err := parseStillWebp(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestParseMacroblockDataReadsResidualCoefficients(t *testing.T) {
 
 func TestDecodeLossyWebpToRGBAMatchesReferencePixels(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	image, err := DecodeLossyWebpToRGBA(data)
+	image, err := decodeLossyWebpToRGBA(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,15 +205,15 @@ func TestDecodeLossyWebpToRGBAMatchesReferencePixels(t *testing.T) {
 
 func TestDecodeLossyVp8ToRGBAMatchesContainerDecode(t *testing.T) {
 	data := loadSample(t, "sample.webp")
-	parsed, err := ParseStillWebp(data)
+	parsed, err := parseStillWebp(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromContainer, err := DecodeLossyWebpToRGBA(data)
+	fromContainer, err := decodeLossyWebpToRGBA(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromVp8, err := DecodeLossyVp8ToRGBA(parsed.ImageData)
+	fromVp8, err := decodeLossyVp8ToRGBA(parsed.ImageData)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestGetFeaturesParsesMinimalLosslessWebp(t *testing.T) {
 		'R', 'I', 'F', 'F', 18, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', 'L', 5, 0,
 		0, 0, 0x2f, 0x00, 0x00, 0x00, 0x10, 0x00,
 	}
-	features, err := GetFeatures(data)
+	features, err := Features(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestGetFeaturesParsesMinimalLosslessWebp(t *testing.T) {
 
 func TestDecodeLosslessWebpToRGBAMatchesReferencePixels(t *testing.T) {
 	data := loadSample(t, "sample_lossless.webp")
-	image, err := DecodeLosslessWebpToRGBA(data)
+	image, err := decodeLosslessWebpToRGBA(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,15 +270,15 @@ func TestDecodeLosslessWebpToRGBAMatchesReferencePixels(t *testing.T) {
 
 func TestDecodeLosslessVp8lToRGBAMatchesContainerDecode(t *testing.T) {
 	data := loadSample(t, "sample_lossless.webp")
-	parsed, err := ParseStillWebp(data)
+	parsed, err := parseStillWebp(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromContainer, err := DecodeLosslessWebpToRGBA(data)
+	fromContainer, err := decodeLosslessWebpToRGBA(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromVp8l, err := DecodeLosslessVp8lToRGBA(parsed.ImageData)
+	fromVp8l, err := decodeLosslessVp8lToRGBA(parsed.ImageData)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,11 +296,11 @@ func TestDecodeAlphaPlaneExtractsGreenChannel(t *testing.T) {
 	// TestDecodeLossyWebpToRGBAAppliesRawAlphaChunk.
 	t.Skip("sample_lossless.webp payload is not decodable as an alpha plane; reference implementation fails identically")
 	data := loadSample(t, "sample_lossless.webp")
-	parsed, err := ParseStillWebp(data)
+	parsed, err := parseStillWebp(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	image, err := DecodeLosslessWebpToRGBA(data)
+	image, err := decodeLosslessWebpToRGBA(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,13 +322,13 @@ func TestDecodeAlphaPlaneExtractsGreenChannel(t *testing.T) {
 }
 
 func TestDecodeLossyWebpToRGBAAppliesRawAlphaChunk(t *testing.T) {
-	base, err := DecodeLossyWebpToRGBA(loadSample(t, "sample.webp"))
+	base, err := decodeLossyWebpToRGBA(loadSample(t, "sample.webp"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	alpha := makeAlphaPlane(base.Width, base.Height)
 	webp := makeLossyAlphaStillWebp(t, alpha)
-	image, err := DecodeLossyWebpToRGBA(webp)
+	image, err := decodeLossyWebpToRGBA(webp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestDecodeLossyWebpToRGBAAppliesRawAlphaChunk(t *testing.T) {
 
 func TestParseAnimationWebpReadsSampleMetadata(t *testing.T) {
 	data := loadSample(t, "sample_animation.webp")
-	parsed, err := ParseAnimationWebp(data)
+	parsed, err := parseAnimationWebp(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestDecodeAnimationWebpMatchesReferencePixels(t *testing.T) {
 }
 
 func TestDecodeAnimationWebpHandlesLossyAlphaFrames(t *testing.T) {
-	base, err := DecodeLossyWebpToRGBA(loadSample(t, "sample.webp"))
+	base, err := decodeLossyWebpToRGBA(loadSample(t, "sample.webp"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +441,7 @@ func TestGetFeaturesParsesAnimatedVp8xHeaderWithoutFrames(t *testing.T) {
 		'R', 'I', 'F', 'F', 22, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', 'X', 10, 0,
 		0, 0, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x03, 0x00, 0x00,
 	}
-	features, err := GetFeatures(data)
+	features, err := Features(data)
 	if err != nil {
 		t.Fatal(err)
 	}

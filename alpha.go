@@ -12,35 +12,35 @@ const (
 )
 
 // AlphaHeader is a parsed one-byte ALPH header.
-type AlphaHeader struct {
+type alphaHeader struct {
 	Compression   uint8
 	Filter        uint8
 	Preprocessing uint8
 }
 
 // parseAlphaHeader parses the one-byte header that prefixes an ALPH payload.
-func parseAlphaHeader(data []byte) (AlphaHeader, error) {
+func parseAlphaHeader(data []byte) (alphaHeader, error) {
 	if len(data) == 0 {
-		return AlphaHeader{}, notEnoughData("ALPH header")
+		return alphaHeader{}, notEnoughData("ALPH header")
 	}
 	header := data[0]
 
 	reserved := header >> 6
 	if reserved != 0 {
-		return AlphaHeader{}, bitstreamErr("ALPH reserved bits must be zero")
+		return alphaHeader{}, bitstreamErr("ALPH reserved bits must be zero")
 	}
 
-	alpha := AlphaHeader{
+	alpha := alphaHeader{
 		Compression:   header & 0x03,
 		Filter:        (header >> 2) & 0x03,
 		Preprocessing: (header >> 4) & 0x03,
 	}
 
 	if alpha.Compression > lossyAlphaLosslessCompression {
-		return AlphaHeader{}, bitstreamErr("unsupported ALPH compression method")
+		return alphaHeader{}, bitstreamErr("unsupported ALPH compression method")
 	}
 	if alpha.Preprocessing > lossyAlphaPreprocessedLevels {
-		return AlphaHeader{}, bitstreamErr("unsupported ALPH preprocessing mode")
+		return alphaHeader{}, bitstreamErr("unsupported ALPH preprocessing mode")
 	}
 
 	return alpha, nil

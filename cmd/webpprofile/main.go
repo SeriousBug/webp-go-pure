@@ -33,11 +33,11 @@ func main() {
 	var fn func() ([]byte, error)
 	switch *mode {
 	case "lossless":
-		fn = func() ([]byte, error) { return webp.EncodeLossless(&buf, 6, nil) }
+		fn = func() ([]byte, error) { return webp.EncodeLossless(&buf, &webp.LosslessOptions{Effort: 6}) }
 	case "lossy-fast":
-		fn = func() ([]byte, error) { return webp.EncodeLossy(&buf, 0, 90, nil) }
+		fn = func() ([]byte, error) { return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: 90, Effort: 0}) }
 	case "lossy-slow":
-		fn = func() ([]byte, error) { return webp.EncodeLossy(&buf, 9, 90, nil) }
+		fn = func() ([]byte, error) { return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: 90, Effort: 9}) }
 	default:
 		fmt.Fprintln(os.Stderr, "bad mode")
 		os.Exit(1)
@@ -70,15 +70,15 @@ func main() {
 	}
 }
 
-func load(path string) (webp.ImageBuffer, error) {
+func load(path string) (webp.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return webp.ImageBuffer{}, err
+		return webp.Image{}, err
 	}
 	defer f.Close()
 	im, _, err := image.Decode(f)
 	if err != nil {
-		return webp.ImageBuffer{}, err
+		return webp.Image{}, err
 	}
 	b := im.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -94,7 +94,7 @@ func load(path string) (webp.ImageBuffer, error) {
 			i += 4
 		}
 	}
-	return webp.ImageBuffer{Width: w, Height: h, RGBA: rgba}, nil
+	return webp.Image{Width: w, Height: h, RGBA: rgba}, nil
 }
 
 func must(err error) {

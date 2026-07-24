@@ -1048,12 +1048,12 @@ func decodeLosslessStreamToArgb(data []byte, width, height int) ([]uint32, error
 }
 
 // DecodeLosslessVp8lToRGBA decodes a raw VP8L frame payload to RGBA.
-func DecodeLosslessVp8lToRGBA(data []byte) (DecodedImage, error) {
+func decodeLosslessVp8lToRGBA(data []byte) (decodedImage, error) {
 	width, height, argb, err := lldecDecodeVp8lToArgb(data)
 	if err != nil {
-		return DecodedImage{}, err
+		return decodedImage{}, err
 	}
-	return DecodedImage{
+	return decodedImage{
 		Width:  width,
 		Height: height,
 		RGBA:   lldecArgbToRgba(argb),
@@ -1061,13 +1061,13 @@ func DecodeLosslessVp8lToRGBA(data []byte) (DecodedImage, error) {
 }
 
 // DecodeLosslessWebpToRGBA decodes a still lossless WebP container to RGBA.
-func DecodeLosslessWebpToRGBA(data []byte) (DecodedImage, error) {
-	parsed, err := ParseStillWebp(data)
+func decodeLosslessWebpToRGBA(data []byte) (decodedImage, error) {
+	parsed, err := parseStillWebp(data)
 	if err != nil {
-		return DecodedImage{}, err
+		return decodedImage{}, err
 	}
 	if parsed.Features.Format != FormatLossless {
-		return DecodedImage{}, unsupportedErr("expected a still lossless WebP image")
+		return decodedImage{}, unsupportedErr("expected a still lossless WebP image")
 	}
-	return DecodeLosslessVp8lToRGBA(parsed.ImageData)
+	return decodeLosslessVp8lToRGBA(parsed.ImageData)
 }

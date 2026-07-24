@@ -1,14 +1,14 @@
 package webp
 
 // DecodedImage is a decoded RGBA image.
-type DecodedImage struct {
+type decodedImage struct {
 	Width  int
 	Height int
 	RGBA   []byte
 }
 
 // DecodedYuvImage is a decoded YUV420 image.
-type DecodedYuvImage struct {
+type decodedYuvImage struct {
 	Width    int
 	Height   int
 	YStride  int
@@ -19,7 +19,7 @@ type DecodedYuvImage struct {
 }
 
 // DecodedAnimationFrame is one fully composited animation frame.
-type DecodedAnimationFrame struct {
+type AnimationFrame struct {
 	// Duration is the display duration in milliseconds.
 	Duration int
 	// RGBA is the packed RGBA8 canvas after compositing this frame.
@@ -27,10 +27,10 @@ type DecodedAnimationFrame struct {
 }
 
 // DecodedAnimation is a decoded animated WebP sequence.
-type DecodedAnimation struct {
+type Animation struct {
 	Width           int
 	Height          int
 	BackgroundColor uint32
 	LoopCount       uint16
-	Frames          []DecodedAnimationFrame
+	Frames          []AnimationFrame
 }
