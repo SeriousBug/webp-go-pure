@@ -25,8 +25,8 @@ const (
 	elosslessMinHuffmanBits                       = 2
 	elosslessNumHuffmanBits                       = 3
 	elosslessColorCacheHashMul             uint32 = 0x1e35_a7bd
-	elosslessMatchHashBits                        = 15
-	elosslessMatchHashSize                        = 1 << elosslessMatchHashBits
+	elosslessMinMatchHashBits                     = 15
+	elosslessMaxMatchHashBits                     = 20
 	elosslessMatchChainDepthLevel1                = 4
 	elosslessMatchChainDepthLevel2                = 8
 	elosslessMatchChainDepthLevel3                = 16

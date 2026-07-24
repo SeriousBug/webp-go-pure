@@ -257,14 +257,14 @@ type elosslessPreview struct {
 	valid   bool
 }
 
-func elosslessPreviewUpdateMatchChain(argb []uint32, index int, heads, prev []int) elosslessPreview {
+func elosslessPreviewUpdateMatchChain(argb []uint32, index int, heads, prev []int, hashShift uint32) elosslessPreview {
 	if index+elosslessMinLength > len(argb) {
 		return elosslessPreview{}
 	}
-	hash := elosslessHashMatchPixels(argb, index)
+	hash := elosslessHashMatchPixels(argb, index, hashShift)
 	oldPrev := prev[index]
 	oldHead := heads[hash]
-	elosslessUpdateMatchChain(argb, index, heads, prev)
+	elosslessUpdateMatchChain(argb, index, heads, prev, hashShift)
 	return elosslessPreview{hash: hash, oldPrev: oldPrev, oldHead: oldHead, valid: true}
 }
 
@@ -275,31 +275,45 @@ func elosslessRestorePreviewedMatchChain(index int, preview elosslessPreview, he
 	}
 }
 
-func elosslessHashMatchPixels(argb []uint32, index int) int {
+// elosslessMatchHashParams sizes the hash-chain head table to the image: about
+// one bucket per pixel keeps chains short, clamped so small images don't pay for
+// an oversized memset and huge images don't blow the table up. Returns the head
+// count and the hash right-shift (32 - bits).
+func elosslessMatchHashParams(n int) (size int, hashShift uint32) {
+	b := bits.Len(uint(n - 1))
+	if b < elosslessMinMatchHashBits {
+		b = elosslessMinMatchHashBits
+	} else if b > elosslessMaxMatchHashBits {
+		b = elosslessMaxMatchHashBits
+	}
+	return 1 << b, uint32(32 - b)
+}
+
+func elosslessHashMatchPixels(argb []uint32, index int, hashShift uint32) int {
 	a := argb[index]
 	b := bits.RotateLeft32(argb[index+1], 7)
 	c := bits.RotateLeft32(argb[index+2], 13)
 	d := bits.RotateLeft32(argb[index+3], 21)
 	hash := a ^ b ^ c ^ (d * elosslessColorCacheHashMul)
-	return int((hash * elosslessColorCacheHashMul) >> (32 - elosslessMatchHashBits))
+	return int((hash * elosslessColorCacheHashMul) >> hashShift)
 }
 
-func elosslessUpdateMatchChain(argb []uint32, index int, heads, prev []int) {
+func elosslessUpdateMatchChain(argb []uint32, index int, heads, prev []int, hashShift uint32) {
 	if index+elosslessMinLength > len(argb) {
 		return
 	}
-	hash := elosslessHashMatchPixels(argb, index)
+	hash := elosslessHashMatchPixels(argb, index, hashShift)
 	prev[index] = heads[hash]
 	heads[hash] = index
 }
 
-func elosslessFindBestHashMatch(width int, argb []uint32, index, maxLen int, heads, prev []int, matchChainDepth int) elosslessMatch {
+func elosslessFindBestHashMatch(width int, argb []uint32, index, maxLen int, heads, prev []int, matchChainDepth int, hashShift uint32) elosslessMatch {
 	var best elosslessMatch
 	if matchChainDepth == 0 || maxLen < elosslessMinLength || index+elosslessMinLength > len(argb) {
 		return best
 	}
 
-	hash := elosslessHashMatchPixels(argb, index)
+	hash := elosslessHashMatchPixels(argb, index, hashShift)
 	candidate := heads[hash]
 	remaining := matchChainDepth
 
@@ -359,7 +373,7 @@ func elosslessSinglePixelCostBits(cacheHit bool) int {
 	return elosslessApproxLiteralCostBits
 }
 
-func elosslessFindBestMatch(width int, argb []uint32, index int, options elosslessTokenBuildOptions, heads, prev, windowOffsets []int) elosslessMatch {
+func elosslessFindBestMatch(width int, argb []uint32, index int, options elosslessTokenBuildOptions, heads, prev, windowOffsets []int, hashShift uint32) elosslessMatch {
 	maxLen := len(argb) - index
 	if elosslessMaxLength < maxLen {
 		maxLen = elosslessMaxLength
@@ -380,7 +394,7 @@ func elosslessFindBestMatch(width int, argb []uint32, index int, options elossle
 			elosslessConsiderMatch(width, &best, m.distance, m.length)
 		}
 	}
-	m := elosslessFindBestHashMatch(width, argb, index, maxLen, heads, prev, options.matchChainDepth)
+	m := elosslessFindBestHashMatch(width, argb, index, maxLen, heads, prev, options.matchChainDepth, hashShift)
 	if m.set {
 		elosslessConsiderMatch(width, &best, m.distance, m.length)
 	}
@@ -408,7 +422,8 @@ func elosslessBuildTokensGreedy(width int, argb []uint32, options elosslessToken
 		}
 		cache = &c
 	}
-	heads := make([]int, elosslessMatchHashSize)
+	headSize, hashShift := elosslessMatchHashParams(len(argb))
+	heads := make([]int, headSize)
 	elosslessFillInt(heads, elosslessIntMax)
 	prev := make([]int, len(argb))
 	elosslessFillInt(prev, elosslessIntMax)
@@ -424,15 +439,15 @@ func elosslessBuildTokensGreedy(width int, argb []uint32, options elosslessToken
 		if cache != nil {
 			cacheKey, cacheHit = cache.lookup(argb[index])
 		}
-		bestMatch := elosslessFindBestMatch(width, argb, index, options, heads, prev, windowOffsets)
+		bestMatch := elosslessFindBestMatch(width, argb, index, options, heads, prev, windowOffsets, hashShift)
 
 		if options.lazyMatching {
 			if bestMatch.set {
 				distance := bestMatch.distance
 				length := bestMatch.length
 				if length < 64 && index+1 < len(argb) {
-					preview := elosslessPreviewUpdateMatchChain(argb, index, heads, prev)
-					nextMatch := elosslessFindBestMatch(width, argb, index+1, options, heads, prev, windowOffsets)
+					preview := elosslessPreviewUpdateMatchChain(argb, index, heads, prev, hashShift)
+					nextMatch := elosslessFindBestMatch(width, argb, index+1, options, heads, prev, windowOffsets, hashShift)
 					elosslessRestorePreviewedMatchChain(index, preview, heads, prev)
 
 					currentGain := elosslessMatchGainBits(width, distance, length)
@@ -464,7 +479,7 @@ func elosslessBuildTokensGreedy(width int, argb []uint32, options elosslessToken
 				}
 			}
 			for position := index; position < index+length; position++ {
-				elosslessUpdateMatchChain(argb, position, heads, prev)
+				elosslessUpdateMatchChain(argb, position, heads, prev, hashShift)
 			}
 			index += length
 		} else if cacheHit {
@@ -472,14 +487,14 @@ func elosslessBuildTokensGreedy(width int, argb []uint32, options elosslessToken
 			if cache != nil {
 				cache.insert(argb[index])
 			}
-			elosslessUpdateMatchChain(argb, index, heads, prev)
+			elosslessUpdateMatchChain(argb, index, heads, prev, hashShift)
 			index++
 		} else {
 			tokens = append(tokens, elosslessToken{kind: elosslessTokLiteral, argb: argb[index]})
 			if cache != nil {
 				cache.insert(argb[index])
 			}
-			elosslessUpdateMatchChain(argb, index, heads, prev)
+			elosslessUpdateMatchChain(argb, index, heads, prev, hashShift)
 			index++
 		}
 	}
@@ -571,7 +586,7 @@ func elosslessPushMatchCandidate(width int, candidates *[][2]int, distance, leng
 	*candidates = append(*candidates, [2]int{distance, length})
 }
 
-func elosslessCollectMatchCandidates(width int, argb []uint32, index int, options elosslessTokenBuildOptions, heads, prev, windowOffsets []int) [][2]int {
+func elosslessCollectMatchCandidates(width int, argb []uint32, index int, options elosslessTokenBuildOptions, heads, prev, windowOffsets []int, hashShift uint32) [][2]int {
 	maxLen := len(argb) - index
 	if elosslessMaxLength < maxLen {
 		maxLen = elosslessMaxLength
@@ -596,7 +611,7 @@ func elosslessCollectMatchCandidates(width int, argb []uint32, index int, option
 		}
 	}
 	if options.matchChainDepth > 0 && maxLen >= elosslessMinLength && index+elosslessMinLength <= len(argb) {
-		hash := elosslessHashMatchPixels(argb, index)
+		hash := elosslessHashMatchPixels(argb, index, hashShift)
 		candidate := heads[hash]
 		remaining := options.matchChainDepth
 		for candidate != elosslessIntMax && remaining > 0 {
@@ -735,7 +750,8 @@ func elosslessBuildTokensWithTraceback(width int, argb []uint32, options elossle
 		bestCosts[i] = elosslessIntMax
 		previous[i] = elosslessIntMax
 	}
-	heads := make([]int, elosslessMatchHashSize)
+	headSize, hashShift := elosslessMatchHashParams(len(argb))
+	heads := make([]int, headSize)
 	elosslessFillInt(heads, elosslessIntMax)
 	prev := make([]int, len(argb))
 	elosslessFillInt(prev, elosslessIntMax)
@@ -783,7 +799,7 @@ func elosslessBuildTokensWithTraceback(width int, argb []uint32, options elossle
 
 		baseCost := bestCosts[index]
 		if baseCost == elosslessIntMax {
-			elosslessUpdateMatchChain(argb, index, heads, prev)
+			elosslessUpdateMatchChain(argb, index, heads, prev, hashShift)
 			continue
 		}
 
@@ -804,7 +820,7 @@ func elosslessBuildTokensWithTraceback(width int, argb []uint32, options elossle
 			steps[index+1] = elosslessTracebackStep{kind: elosslessStepLiteral}
 		}
 
-		for _, dl := range elosslessCollectMatchCandidates(width, argb, index, options, heads, prev, windowOffsets) {
+		for _, dl := range elosslessCollectMatchCandidates(width, argb, index, options, heads, prev, windowOffsets, hashShift) {
 			distance := dl[0]
 			length := dl[1]
 			minLength := elosslessMinMatchLengthForDistance(width, distance)
@@ -840,7 +856,7 @@ func elosslessBuildTokensWithTraceback(width int, argb []uint32, options elossle
 			}
 		}
 
-		elosslessUpdateMatchChain(argb, index, heads, prev)
+		elosslessUpdateMatchChain(argb, index, heads, prev, hashShift)
 	}
 
 	tokens := make([]elosslessToken, 0, len(argb))
