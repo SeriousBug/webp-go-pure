@@ -419,7 +419,7 @@ func elossyDcPredictValue(plane []uint8, stride, x, y, size int) uint8 {
 	}
 }
 
-func elossyAddTransform(plane []uint8, stride, x, y int, coeffs *[16]int16) {
+func elossyAddTransformGo(plane []uint8, stride, x, y int, coeffs *[16]int16) {
 	allZero := true
 	for _, coeff := range coeffs {
 		if coeff != 0 {
