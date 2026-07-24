@@ -372,6 +372,17 @@ func elosslessMakeSparseHist(h *elosslessHistogramSet) elosslessSparseHist {
 	return s
 }
 
+func elosslessMergeSparseInto(dst *elosslessHistogramSet, s *elosslessSparseHist) {
+	for c := 0; c < 5; c++ {
+		d := dst[c]
+		sym := s.sym[c]
+		cnt := s.cnt[c]
+		for k, symbol := range sym {
+			d[symbol] += cnt[k]
+		}
+	}
+}
+
 func elosslessSparseHistCost(s *elosslessSparseHist, codes *elosslessHuffmanGroupCodes) int {
 	channelCodes := [5]*elosslessHuffmanCode{&codes.green, &codes.red, &codes.blue, &codes.alpha, &codes.dist}
 	total := 0
@@ -635,7 +646,7 @@ func elosslessAssignTilesToGroups(nonEmptyTiles [][2]int, tileSparse []elossless
 	}
 }
 
-func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, tileSparse []elosslessSparseHist, seedHistograms []elosslessHistogramSet) (*elosslessMetaHuffmanPlan, error) {
+func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles [][2]int, tileSparse []elosslessSparseHist, seedHistograms []elosslessHistogramSet) (*elosslessMetaHuffmanPlan, error) {
 	if len(seedHistograms) <= 1 {
 		return nil, nil
 	}
@@ -653,25 +664,27 @@ func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles
 	for iter := 0; iter < 4; iter++ {
 		elosslessAssignTilesToGroups(nonEmptyTiles, tileSparse, groupCodes, assignments)
 
+		accum := make([]elosslessHistogramSet, len(groupCodes))
+		used := make([]bool, len(groupCodes))
+		for i := range accum {
+			accum[i] = elosslessNewHistograms(colorCacheBits)
+		}
+		for _, t := range nonEmptyTiles {
+			tile := t[0]
+			g := assignments[tile]
+			elosslessMergeSparseInto(&accum[g], &tileSparse[tile])
+			used[g] = true
+		}
 		remap := make([]int, len(groupCodes))
 		for i := range remap {
 			remap[i] = elosslessIntMax
 		}
 		var mergedHistograms []elosslessHistogramSet
-		for groupIndex := range groupCodes {
-			histograms := elosslessNewHistograms(colorCacheBits)
-			used := false
-			for _, t := range nonEmptyTiles {
-				tile := t[0]
-				if assignments[tile] == groupIndex {
-					elosslessMergeHistograms(&histograms, &tileHistograms[tile])
-					used = true
-				}
-			}
-			if used {
-				elosslessNormalizeHistograms(&histograms)
+		for groupIndex := range accum {
+			if used[groupIndex] {
+				elosslessNormalizeHistograms(&accum[groupIndex])
 				remap[groupIndex] = len(mergedHistograms)
-				mergedHistograms = append(mergedHistograms, histograms)
+				mergedHistograms = append(mergedHistograms, accum[groupIndex])
 			}
 		}
 		if len(mergedHistograms) <= 1 {
@@ -809,7 +822,7 @@ func elosslessBuildMetaHuffmanPlan(width, height int, tokens []elosslessToken, c
 	var bestPlan *elosslessMetaHuffmanPlan
 	bestCost := elosslessIntMax
 	for _, seedHistograms := range seedCandidates {
-		plan, err := elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits, nonEmptyTiles, tileHistograms, tileSparse, seedHistograms)
+		plan, err := elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits, nonEmptyTiles, tileSparse, seedHistograms)
 		if err != nil {
 			return nil, err
 		}
