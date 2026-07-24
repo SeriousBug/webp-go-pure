@@ -422,22 +422,29 @@ func elossyRecordCoefficientsStats(stats *elossyCoeffStats, coeffType, ctx, firs
 	return true
 }
 
+// elossyEntropyCost[p] is the cost in 1/256-bit units of a decision whose
+// probability of the observed outcome is p/256, i.e. round(-log2(p/256)*256).
+// It mirrors libwebp's VP8EntropyCost table. Index 0 is clamped to p=1 so the
+// cost stays finite. Precomputing this removes math.Log2 from the RD-optimization
+// inner loop, where elossyBitCost is called millions of times per encode.
+var elossyEntropyCost [256]uint16
+
+func init() {
+	for p := 0; p < 256; p++ {
+		pp := p
+		if pp < 1 {
+			pp = 1
+		}
+		elossyEntropyCost[p] = uint16((-math.Log2(float64(pp)/256.0))*256.0 + 0.5)
+	}
+}
+
 // bit_cost returns the bit cost of a boolean decision at the given probability.
 func elossyBitCost(bit bool, prob uint8) uint32 {
-	var p uint16
 	if bit {
-		p = 255
-		if uint16(prob) <= 255 {
-			p = 255 - uint16(prob)
-		}
-	} else {
-		p = uint16(prob)
+		return uint32(elossyEntropyCost[255-prob])
 	}
-	if p < 1 {
-		p = 1
-	}
-	pf := float64(p) / 256.0
-	return uint32((-math.Log2(pf))*256.0 + 0.5)
+	return uint32(elossyEntropyCost[prob])
 }
 
 func elossyCalcTokenProbability(nb, total uint32) uint8 {

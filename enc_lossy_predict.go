@@ -451,10 +451,11 @@ func elossyAddTransform(plane []uint8, stride, x, y int, coeffs *[16]int16) {
 		c := elossyMul2(tmp[4+row]) - elossyMul1(tmp[12+row])
 		d := elossyMul1(tmp[4+row]) + elossyMul2(tmp[12+row])
 		offset := (y+row)*stride + x
-		plane[offset] = elossyClipByte(int32(plane[offset]) + ((a + d) >> 3))
-		plane[offset+1] = elossyClipByte(int32(plane[offset+1]) + ((b + c) >> 3))
-		plane[offset+2] = elossyClipByte(int32(plane[offset+2]) + ((b - c) >> 3))
-		plane[offset+3] = elossyClipByte(int32(plane[offset+3]) + ((a - d) >> 3))
+		out := plane[offset : offset+4 : offset+4]
+		out[0] = elossyClipByte(int32(out[0]) + ((a + d) >> 3))
+		out[1] = elossyClipByte(int32(out[1]) + ((b + c) >> 3))
+		out[2] = elossyClipByte(int32(out[2]) + ((b - c) >> 3))
+		out[3] = elossyClipByte(int32(out[3]) + ((a - d) >> 3))
 	}
 }
 
@@ -463,10 +464,12 @@ func elossyForwardTransformAt(src []uint8, srcStride, srcX, srcY int, pred []uin
 	for row := 0; row < 4; row++ {
 		srcOffset := (srcY+row)*srcStride + srcX
 		predOffset := (predY+row)*predStride + predX
-		d0 := int32(src[srcOffset]) - int32(pred[predOffset])
-		d1 := int32(src[srcOffset+1]) - int32(pred[predOffset+1])
-		d2 := int32(src[srcOffset+2]) - int32(pred[predOffset+2])
-		d3 := int32(src[srcOffset+3]) - int32(pred[predOffset+3])
+		srcRow := src[srcOffset : srcOffset+4 : srcOffset+4]
+		predRow := pred[predOffset : predOffset+4 : predOffset+4]
+		d0 := int32(srcRow[0]) - int32(predRow[0])
+		d1 := int32(srcRow[1]) - int32(predRow[1])
+		d2 := int32(srcRow[2]) - int32(predRow[2])
+		d3 := int32(srcRow[3]) - int32(predRow[3])
 		a0 := d0 + d3
 		a1 := d1 + d2
 		a2 := d1 - d2
@@ -619,9 +622,10 @@ func elossyBlockSse4x4(source []uint8, stride, x, y int, candidate *[16]uint8) u
 	var sse uint64
 	for row := 0; row < 4; row++ {
 		srcOffset := (y+row)*stride + x
-		candOffset := row * 4
+		srcRow := source[srcOffset : srcOffset+4 : srcOffset+4]
+		candRow := candidate[row*4 : row*4+4]
 		for col := 0; col < 4; col++ {
-			diff := int32(source[srcOffset+col]) - int32(candidate[candOffset+col])
+			diff := int32(srcRow[col]) - int32(candRow[col])
 			sse += uint64(diff * diff)
 		}
 	}
@@ -789,8 +793,10 @@ func elossyBlockSse(source []uint8, sourceStride, x, y int, reconstructed []uint
 	for row := 0; row < height; row++ {
 		srcOffset := (y+row)*sourceStride + x
 		reconOffset := row * reconstructedStride
+		srcRow := source[srcOffset : srcOffset+width : srcOffset+width]
+		reconRow := reconstructed[reconOffset : reconOffset+width : reconOffset+width]
 		for col := 0; col < width; col++ {
-			diff := int32(source[srcOffset+col]) - int32(reconstructed[reconOffset+col])
+			diff := int32(srcRow[col]) - int32(reconRow[col])
 			sse += uint64(diff * diff)
 		}
 	}
