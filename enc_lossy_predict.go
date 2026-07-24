@@ -788,7 +788,7 @@ func elossyUvModeRate(mode uint8) uint32 {
 	}
 }
 
-func elossyBlockSse(source []uint8, sourceStride, x, y int, reconstructed []uint8, reconstructedStride, width, height int) uint64 {
+func elossyBlockSseGo(source []uint8, sourceStride, x, y int, reconstructed []uint8, reconstructedStride, width, height int) uint64 {
 	var sse uint64
 	for row := 0; row < height; row++ {
 		srcOffset := (y+row)*sourceStride + x
