@@ -1110,4 +1110,3 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 
 	return writer.finish(), reconstructed, modes
 }
-
