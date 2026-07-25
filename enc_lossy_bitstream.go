@@ -75,12 +75,28 @@ func elossyEncodeIntra4Mode(writer *vp8BoolWriter, topMode, leftMode, mode uint8
 	})
 }
 
+// elossyIntra4ModeRates is the cost of signaling each sub-block mode under each
+// pair of neighbouring modes. The i4x4 search prices all ten modes for all
+// sixteen sub-blocks of every macroblock, and the probabilities are constants,
+// so the whole thing is a thousand-entry table.
+var elossyIntra4ModeRates [numBModes][numBModes][numBModes]uint16
+
+func init() {
+	for top := 0; top < numBModes; top++ {
+		for left := 0; left < numBModes; left++ {
+			for mode := 0; mode < numBModes; mode++ {
+				var rate uint32
+				elossyWalkIntra4ModeBits(uint8(top), uint8(left), uint8(mode), func(bit bool, prob uint8) {
+					rate += elossyBitCost(bit, prob)
+				})
+				elossyIntra4ModeRates[top][left][mode] = uint16(rate)
+			}
+		}
+	}
+}
+
 func elossyIntra4ModeRate(topMode, leftMode, mode uint8) uint32 {
-	var rate uint32
-	elossyWalkIntra4ModeBits(topMode, leftMode, mode, func(bit bool, prob uint8) {
-		rate += elossyBitCost(bit, prob)
-	})
-	return rate
+	return uint32(elossyIntra4ModeRates[topMode][leftMode][mode])
 }
 
 func elossyUpdateModeCache(mode *elossyMacroblockMode, top []uint8, left *[4]uint8) {
@@ -242,48 +258,100 @@ func elossyLargeValueRate(value uint32, probs *[11]uint8) uint32 {
 	return rate
 }
 
-func elossyCoefficientsRate(probabilities *elossyCoeffProbTables, coeffType, ctx, first int, levels *[16]int16) uint32 {
+// elossyMaxTabulatedLevel is the largest magnitude the level cost tables cover.
+// Above it the cost still varies with the level (the category-6 residue bits),
+// so those rare coefficients fall back to deriving the cost bit by bit.
+const elossyMaxTabulatedLevel = 67
+
+// elossyRateModel is a probability table plus the cost of coding each level
+// magnitude under it. The mode search prices every candidate block's
+// coefficients, and walking the token tree bit by bit to do so cost a fifth of
+// the encode; the table collapses that to one lookup per coefficient.
+type elossyRateModel struct {
+	probs *elossyCoeffProbTables
+	// level[type][band][ctx][v] is the cost of coding magnitude v, including
+	// the non-zero flag and, for ctx > 0, the preceding "not end of block"
+	// flag. Contexts reached after a zero coefficient carry no such flag,
+	// which is exactly the ctx == 0 case.
+	level [numTypes][numBands][numCtx][elossyMaxTabulatedLevel + 1]uint16
+}
+
+func elossyBuildRateModel(probabilities *elossyCoeffProbTables) *elossyRateModel {
+	model := &elossyRateModel{probs: probabilities}
+	for coeffType := 0; coeffType < numTypes; coeffType++ {
+		for band := 0; band < numBands; band++ {
+			for ctx := 0; ctx < numCtx; ctx++ {
+				probs := &probabilities[coeffType][band][ctx]
+				var notLast uint32
+				if ctx > 0 {
+					notLast = elossyBitCost(true, probs[0])
+				}
+				table := &model.level[coeffType][band][ctx]
+				table[0] = uint16(notLast + elossyBitCost(false, probs[1]))
+				nonZero := notLast + elossyBitCost(true, probs[1])
+				for value := uint32(1); value <= elossyMaxTabulatedLevel; value++ {
+					cost := nonZero + elossyBitCost(value > 1, probs[2])
+					if value > 1 {
+						cost += elossyLargeValueRate(value, probs)
+					}
+					table[value] = uint16(cost)
+				}
+			}
+		}
+	}
+	return model
+}
+
+// elossyUntabulatedLevelRate prices a coefficient whose magnitude is past the
+// end of the level tables.
+func elossyUntabulatedLevelRate(model *elossyRateModel, coeffType, band, ctx int, value uint32) uint32 {
+	probs := &model.probs[coeffType][band][ctx]
+	rate := elossyBitCost(true, probs[1]) + elossyBitCost(true, probs[2]) + elossyLargeValueRate(value, probs)
+	if ctx > 0 {
+		rate += elossyBitCost(true, probs[0])
+	}
+	return rate
+}
+
+func elossyCoefficientsRate(model *elossyRateModel, coeffType, ctx, first int, levels *[16]int16) uint32 {
 	last := elossyLastNonZero(levels, first)
-	scan := first
-	probs := elossyCoeffProbs(probabilities, coeffType, scan, ctx)
-	rate := elossyBitCost(last >= scan, probs[0])
-	if last < scan {
-		return rate
+	band := elossyBands[first]
+	if last < first {
+		return elossyBitCost(false, model.probs[coeffType][band][ctx][0])
 	}
 
-	for scan < 16 {
-		coeff := levels[elossyZigzag[scan]]
-		rate += elossyBitCost(coeff != 0, probs[1])
-		scan++
-		if coeff == 0 {
-			if scan == 16 {
-				return rate
-			}
-			probs = elossyCoeffProbs(probabilities, coeffType, scan, 0)
-			continue
-		}
+	var rate uint32
+	if ctx == 0 {
+		rate = elossyBitCost(true, model.probs[coeffType][band][ctx][0])
+	}
 
-		value := uint32(int32(coeff))
+	typeLevels := &model.level[coeffType]
+	negativeCost := elossyBitCost(true, 128)
+	positiveCost := elossyBitCost(false, 128)
+	for scan := first; scan <= last; scan++ {
+		coeff := levels[elossyZigzag[scan]]
+		value := uint32(coeff)
 		if coeff < 0 {
 			value = uint32(-int32(coeff))
+			rate += negativeCost
+		} else if coeff > 0 {
+			rate += positiveCost
 		}
-		gt1 := value > 1
-		rate += elossyBitCost(gt1, probs[2])
-		nextCtx := 1
-		if gt1 {
-			rate += elossyLargeValueRate(value, probs)
-			nextCtx = 2
+		if value <= elossyMaxTabulatedLevel {
+			rate += uint32(typeLevels[band][ctx][value])
+		} else {
+			rate += elossyUntabulatedLevelRate(model, coeffType, band, ctx, value)
 		}
-		rate += elossyBitCost(coeff < 0, 128)
+		if value > 1 {
+			ctx = 2
+		} else {
+			ctx = int(value)
+		}
+		band = elossyBands[scan+1]
+	}
 
-		if scan == 16 {
-			return rate
-		}
-		probs = elossyCoeffProbs(probabilities, coeffType, scan, nextCtx)
-		rate += elossyBitCost(last >= scan, probs[0])
-		if last < scan {
-			return rate
-		}
+	if last < 15 {
+		rate += elossyBitCost(false, model.probs[coeffType][band][ctx][0])
 	}
 	return rate
 }
@@ -428,16 +496,18 @@ func elossyRecordCoefficientsStats(stats *elossyCoeffStats, coeffType, ctx, firs
 // It mirrors libwebp's VP8EntropyCost table. Index 0 is clamped to p=1 so the
 // cost stays finite. Precomputing this removes math.Log2 from the RD-optimization
 // inner loop, where elossyBitCost is called millions of times per encode.
-var elossyEntropyCost [256]uint16
+var elossyEntropyCost = buildElossyEntropyCost()
 
-func init() {
+func buildElossyEntropyCost() [256]uint16 {
+	var table [256]uint16
 	for p := 0; p < 256; p++ {
 		pp := p
 		if pp < 1 {
 			pp = 1
 		}
-		elossyEntropyCost[p] = uint16((-math.Log2(float64(pp)/256.0))*256.0 + 0.5)
+		table[p] = uint16((-math.Log2(float64(pp)/256.0))*256.0 + 0.5)
 	}
+	return table
 }
 
 // bit_cost returns the bit cost of a boolean decision at the given probability.
@@ -686,7 +756,7 @@ func elossyCommitTrials(out *elossyMacroblockCoeffs, reconstructed *elossyPlanes
 // elossyAnalyzeMacroblock predicts, transforms, quantizes and refines one
 // macroblock, updating the reconstruction. It reads the neighbouring non-zero
 // contexts but leaves updating them to token emission.
-func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, probabilities *elossyCoeffProbTables, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode elossyMacroblockMode, quant *elossyQuantMatrices, top *elossyNonZeroContext, left *elossyNonZeroContext) {
+func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode elossyMacroblockMode, quant *elossyQuantMatrices, top *elossyNonZeroContext, left *elossyNonZeroContext) {
 	yX := mbX * 16
 	yY := mbY * 16
 	uvX := mbX * 8
@@ -718,7 +788,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, probabilities *elossyC
 				coeffs := elossyForwardTransform(source.y, source.yStride, reconstructed.y, reconstructed.yStride, blockX, blockY)
 				ctx := int((left.nz>>subY)&1) + int((top.nz>>subX)&1)
 				levels, _ := elossyQuantizeBlock(&coeffs, quant.y1[0], quant.y1[1], 0)
-				coeffsR := elossyMaybeRefineLevels(profile.refineI4Final, source.y, source.yStride, blockX, blockY, &predictionBlock, probabilities, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.i4, &levels)
+				coeffsR := elossyMaybeRefineLevels(profile.refineI4Final, source.y, source.yStride, blockX, blockY, &predictionBlock, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.i4, &levels)
 				yLevels[block] = levels
 				yCoeffs[block] = coeffsR
 				elossyAddTransform(reconstructed.y, reconstructed.yStride, blockX, blockY, &yCoeffs[block])
@@ -739,7 +809,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, probabilities *elossyC
 				predictionBlock := elossyCopyBlock4(reconstructed.y, reconstructed.yStride, yX+subX*4, yY+subY*4)
 				levels, _ := elossyQuantizeBlock(&acOnly, quant.y1[0], quant.y1[1], 1)
 				ctx := int(l + (refineTnz & 1))
-				coeffsR := elossyMaybeRefineLevels(profile.refineI16, source.y, source.yStride, yX+subX*4, yY+subY*4, &predictionBlock, probabilities, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.i16, &levels)
+				coeffsR := elossyMaybeRefineLevels(profile.refineI16, source.y, source.yStride, yX+subX*4, yY+subY*4, &predictionBlock, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.i16, &levels)
 				yLevels[block] = levels
 				yCoeffs[block] = coeffsR
 				hasAc := uint8(0)
@@ -756,7 +826,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, probabilities *elossyC
 		y2Input := elossyForwardWht(&yDc)
 		predictionBlock := elossyCopyBlock16(reconstructed.y, reconstructed.yStride, yX, yY)
 		levels, _ := elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
-		y2Coeffs := elossyMaybeRefineY2Levels(profile, source.y, source.yStride, yX, yY, &predictionBlock, &yCoeffs, probabilities, int(top.nzDc+left.nzDc), quant.y2[0], quant.y2[1], rd.i16, &levels)
+		y2Coeffs := elossyMaybeRefineY2Levels(profile, source.y, source.yStride, yX, yY, &predictionBlock, &yCoeffs, model, int(top.nzDc+left.nzDc), quant.y2[0], quant.y2[1], rd.i16, &levels)
 		y2Levels = levels
 		y2Dc := elossyInverseWht(&y2Coeffs)
 		for block := 0; block < 16; block++ {
@@ -772,7 +842,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, probabilities *elossyC
 			coeffs := elossyForwardTransform(source.u, source.uvStride, reconstructed.u, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
 			predictionBlock := elossyCopyBlock4(reconstructed.u, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
 			levels, _ := elossyQuantizeBlock(&coeffs, quant.uv[0], quant.uv[1], 0)
-			coeffsR := elossyMaybeRefineLevels(profile.refineChroma, source.u, source.uvStride, uvX+subX*4, uvY+subY*4, &predictionBlock, probabilities, 2, 0, 0, quant.uv[0], quant.uv[1], rd.uv, &levels)
+			coeffsR := elossyMaybeRefineLevels(profile.refineChroma, source.u, source.uvStride, uvX+subX*4, uvY+subY*4, &predictionBlock, model, 2, 0, 0, quant.uv[0], quant.uv[1], rd.uv, &levels)
 			uLevels[block] = levels
 			uCoeffs[block] = coeffsR
 		}
@@ -786,7 +856,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, probabilities *elossyC
 			coeffs := elossyForwardTransform(source.v, source.uvStride, reconstructed.v, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
 			predictionBlock := elossyCopyBlock4(reconstructed.v, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
 			levels, _ := elossyQuantizeBlock(&coeffs, quant.uv[0], quant.uv[1], 0)
-			coeffsR := elossyMaybeRefineLevels(profile.refineChroma, source.v, source.uvStride, uvX+subX*4, uvY+subY*4, &predictionBlock, probabilities, 2, 0, 0, quant.uv[0], quant.uv[1], rd.uv, &levels)
+			coeffsR := elossyMaybeRefineLevels(profile.refineChroma, source.v, source.uvStride, uvX+subX*4, uvY+subY*4, &predictionBlock, model, 2, 0, 0, quant.uv[0], quant.uv[1], rd.uv, &levels)
 			vLevels[block] = levels
 			vCoeffs[block] = coeffsR
 		}
@@ -987,6 +1057,7 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 	topModes := make([]uint8, mbWidth*4)
 	modes := make([]elossyMacroblockMode, 0, mbWidth*mbHeight)
 	var coeffs elossyMacroblockCoeffs
+	model := elossyBuildRateModel(probabilities)
 	var trials elossyMbTrials
 	var segmentRd [numMbSegments]elossyRdMultipliers
 	for index := 0; index < numMbSegments; index++ {
@@ -1002,13 +1073,13 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 			quant := &segmentQuants[segmentID]
 			rd := &segmentRd[segmentID]
 			top := topModes[mbX*4 : mbX*4+4]
-			mode := elossyChooseMacroblockMode(&trials, source, &reconstructed, mbX, mbY, profile, quant, rd, probabilities, &topContexts[mbX], &leftContext, top, &leftModes)
+			mode := elossyChooseMacroblockMode(&trials, source, &reconstructed, mbX, mbY, profile, quant, rd, model, &topContexts[mbX], &leftContext, top, &leftModes)
 			mode.segment = uint8(segmentID)
 			elossyUpdateModeCache(&mode, top, &leftModes)
 			if trials.valid {
 				elossyCommitTrials(&coeffs, &reconstructed, mbX, mbY, &trials)
 			} else {
-				elossyAnalyzeMacroblock(&coeffs, probabilities, source, &reconstructed, mbX, mbY, profile, mode, quant, &topContexts[mbX], &leftContext)
+				elossyAnalyzeMacroblock(&coeffs, model, source, &reconstructed, mbX, mbY, profile, mode, quant, &topContexts[mbX], &leftContext)
 			}
 			mode.skip = elossyEmitMacroblockTokens(writer, probabilities, &coeffs, &topContexts[mbX], &leftContext, stats)
 			modes = append(modes, mode)
