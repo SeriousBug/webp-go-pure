@@ -1,6 +1,9 @@
 package webp
 
-import "math/bits"
+import (
+	"math"
+	"math/bits"
+)
 
 // clip_byte
 func elossyClipByte(value int32) uint8 {
@@ -933,7 +936,10 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 	return elossyRdScore(distortion, rate, rd.i16) + uint64(elossyI16ModeRate(mode))*uint64(rdMode)
 }
 
-func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, quant *elossyQuantMatrices, rd *elossyRdMultipliers, model *elossyRateModel, topContext *elossyNonZeroContext, leftContext *elossyNonZeroContext, topModes []uint8, leftModes *[4]uint8) (uint64, [16]uint8) {
+// limit is the score the whole-macroblock modes already achieved. The i4x4
+// score only accumulates, so once the sub-blocks decided so far exceed it the
+// remaining ones cannot change the outcome and the search stops.
+func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, quant *elossyQuantMatrices, rd *elossyRdMultipliers, model *elossyRateModel, topContext *elossyNonZeroContext, leftContext *elossyNonZeroContext, topModes []uint8, leftModes *[4]uint8, limit uint64) (uint64, [16]uint8) {
 	modes := [numBModes]uint8{
 		bDCPred, bTMPred, bVEPred, bHEPred, bRDPred, bVRPred, bLDPred, bVLPred,
 		bHDPred, bHUPred,
@@ -1004,6 +1010,11 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 			leftMode = bestMode
 			l = bestNonZero
 			tnz = (tnz >> 1) | (bestNonZero << 7)
+
+			if totalScore >= limit {
+				elossyRestoreBlock16(reconstructed.y, reconstructed.yStride, x, y, &backup)
+				return math.MaxUint64, subModes
+			}
 		}
 		tnz >>= 4
 		lnz = (lnz >> 1) | (l << 7)
@@ -1173,7 +1184,7 @@ func elossyChooseMacroblockMode(trials *elossyMbTrials, source *elossyPlanes, re
 
 	var subLuma [16]uint8
 	if profile.allowI4x4 {
-		i4Score, i4SubLuma := elossyEvaluateLuma4Mode(spareLuma, source, reconstructed, mbX, mbY, profile, quant, rd, model, topContext, leftContext, topModes, leftModes)
+		i4Score, i4SubLuma := elossyEvaluateLuma4Mode(spareLuma, source, reconstructed, mbX, mbY, profile, quant, rd, model, topContext, leftContext, topModes, leftModes, bestLumaScore)
 		if i4Score < bestLumaScore {
 			bestLuma = bPred
 			subLuma = i4SubLuma
