@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" role="img">
+<rect width="900" height="470" fill="#1a1a19"/>
+<text x="40.0" y="34.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="19" fill="#ffffff" text-anchor="start" font-weight="600">Size and quality against libwebp</text>
+<text x="40.0" y="56.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="13" fill="#c3c2b7" text-anchor="start">Each point is one test image, encoded at quality 90. Up and to the left is better: smaller file, higher PSNR.</text>
+<circle cx="45.0" cy="80.0" r="5.0" fill="#3987e5"/>
+<text x="56.0" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#c3c2b7" text-anchor="start">webp-go-pure</text>
+<circle cx="169.5" cy="80.0" r="5.0" fill="#d95926"/>
+<text x="180.5" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#c3c2b7" text-anchor="start">webp-rust</text>
+<circle cx="273.4" cy="80.0" r="5.0" fill="#898781"/>
+<text x="284.4" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#c3c2b7" text-anchor="start">libwebp and wasm (reference, at the crosshair)</text>
+<line x1="78.0" y1="357.8" x2="435.0" y2="357.8" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="68.0" y="361.8" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">-6</text>
+<line x1="78.0" y1="322.3" x2="435.0" y2="322.3" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="68.0" y="326.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">-5</text>
+<line x1="78.0" y1="286.7" x2="435.0" y2="286.7" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="68.0" y="290.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">-4</text>
+<line x1="78.0" y1="251.2" x2="435.0" y2="251.2" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="68.0" y="255.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">-3</text>
+<line x1="78.0" y1="215.7" x2="435.0" y2="215.7" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="68.0" y="219.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">-2</text>
+<line x1="78.0" y1="180.2" x2="435.0" y2="180.2" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="68.0" y="184.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">-1</text>
+<line x1="78.0" y1="144.6" x2="435.0" y2="144.6" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="68.0" y="148.6" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">+0</text>
+<text x="133.0" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">0.6</text>
+<text x="189.1" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">0.8</text>
+<text x="245.3" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">1.0</text>
+<text x="301.4" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">1.2</text>
+<text x="357.6" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">1.4</text>
+<text x="413.7" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">1.6</text>
+<line x1="245.3" y1="118.0" x2="245.3" y2="372.0" stroke="#383835" stroke-width="1.0"/>
+<line x1="78.0" y1="144.6" x2="435.0" y2="144.6" stroke="#383835" stroke-width="1.0"/>
+<circle cx="245.3" cy="144.6" r="7.0" fill="#1a1a19"/>
+<circle cx="245.3" cy="144.6" r="5.0" fill="#898781"/>
+<text x="256.5" y="102.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="14" fill="#ffffff" text-anchor="middle" font-weight="600">lossy-fast</text>
+<circle cx="398.9" cy="145.7" r="7.0" fill="#1a1a19"/>
+<circle cx="398.9" cy="145.7" r="5.0" fill="#3987e5"/>
+<circle cx="308.4" cy="178.4" r="7.0" fill="#1a1a19"/>
+<circle cx="308.4" cy="178.4" r="5.0" fill="#d95926"/>
+<circle cx="381.2" cy="143.2" r="7.0" fill="#1a1a19"/>
+<circle cx="381.2" cy="143.2" r="5.0" fill="#3987e5"/>
+<path d="M 265.8 365.0 l 6 -10 l -12 0 z" fill="#d95926" stroke="#1a1a19" stroke-width="2"/>
+<circle cx="364.7" cy="153.9" r="7.0" fill="#1a1a19"/>
+<circle cx="364.7" cy="153.9" r="5.0" fill="#3987e5"/>
+<path d="M 283.7 365.0 l 6 -10 l -12 0 z" fill="#d95926" stroke="#1a1a19" stroke-width="2"/>
+<circle cx="398.4" cy="141.1" r="7.0" fill="#1a1a19"/>
+<circle cx="398.4" cy="141.1" r="5.0" fill="#3987e5"/>
+<circle cx="312.4" cy="185.1" r="7.0" fill="#1a1a19"/>
+<circle cx="312.4" cy="185.1" r="5.0" fill="#d95926"/>
+<circle cx="290.8" cy="161.0" r="7.0" fill="#1a1a19"/>
+<circle cx="290.8" cy="161.0" r="5.0" fill="#3987e5"/>
+<circle cx="201.6" cy="144.6" r="7.0" fill="#1a1a19"/>
+<circle cx="201.6" cy="144.6" r="5.0" fill="#d95926"/>
+<circle cx="273.0" cy="135.8" r="7.0" fill="#1a1a19"/>
+<circle cx="273.0" cy="135.8" r="5.0" fill="#3987e5"/>
+<circle cx="211.6" cy="147.8" r="7.0" fill="#1a1a19"/>
+<circle cx="211.6" cy="147.8" r="5.0" fill="#d95926"/>
+<circle cx="418.2" cy="141.4" r="7.0" fill="#1a1a19"/>
+<circle cx="418.2" cy="141.4" r="5.0" fill="#3987e5"/>
+<path d="M 333.0 365.0 l 6 -10 l -12 0 z" fill="#d95926" stroke="#1a1a19" stroke-width="2"/>
+<line x1="509.0" y1="357.8" x2="866.0" y2="357.8" stroke="#2c2c2a" stroke-width="1.0"/>
+<line x1="509.0" y1="322.3" x2="866.0" y2="322.3" stroke="#2c2c2a" stroke-width="1.0"/>
+<line x1="509.0" y1="286.7" x2="866.0" y2="286.7" stroke="#2c2c2a" stroke-width="1.0"/>
+<line x1="509.0" y1="251.2" x2="866.0" y2="251.2" stroke="#2c2c2a" stroke-width="1.0"/>
+<line x1="509.0" y1="215.7" x2="866.0" y2="215.7" stroke="#2c2c2a" stroke-width="1.0"/>
+<line x1="509.0" y1="180.2" x2="866.0" y2="180.2" stroke="#2c2c2a" stroke-width="1.0"/>
+<line x1="509.0" y1="144.6" x2="866.0" y2="144.6" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="564.0" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">0.6</text>
+<text x="620.1" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">0.8</text>
+<text x="676.3" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">1.0</text>
+<text x="732.4" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">1.2</text>
+<text x="788.6" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">1.4</text>
+<text x="844.7" y="392.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">1.6</text>
+<line x1="676.3" y1="118.0" x2="676.3" y2="372.0" stroke="#383835" stroke-width="1.0"/>
+<line x1="509.0" y1="144.6" x2="866.0" y2="144.6" stroke="#383835" stroke-width="1.0"/>
+<circle cx="676.3" cy="144.6" r="7.0" fill="#1a1a19"/>
+<circle cx="676.3" cy="144.6" r="5.0" fill="#898781"/>
+<text x="687.5" y="102.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="14" fill="#ffffff" text-anchor="middle" font-weight="600">lossy-slow</text>
+<circle cx="666.3" cy="182.7" r="7.0" fill="#1a1a19"/>
+<circle cx="666.3" cy="182.7" r="5.0" fill="#3987e5"/>
+<circle cx="598.5" cy="262.6" r="7.0" fill="#1a1a19"/>
+<circle cx="598.5" cy="262.6" r="5.0" fill="#d95926"/>
+<circle cx="657.0" cy="166.3" r="7.0" fill="#1a1a19"/>
+<circle cx="657.0" cy="166.3" r="5.0" fill="#3987e5"/>
+<circle cx="525.8" cy="282.1" r="7.0" fill="#1a1a19"/>
+<circle cx="525.8" cy="282.1" r="5.0" fill="#d95926"/>
+<circle cx="663.0" cy="160.6" r="7.0" fill="#1a1a19"/>
+<circle cx="663.0" cy="160.6" r="5.0" fill="#3987e5"/>
+<circle cx="590.9" cy="254.1" r="7.0" fill="#1a1a19"/>
+<circle cx="590.9" cy="254.1" r="5.0" fill="#d95926"/>
+<circle cx="675.5" cy="155.7" r="7.0" fill="#1a1a19"/>
+<circle cx="675.5" cy="155.7" r="5.0" fill="#3987e5"/>
+<circle cx="582.6" cy="275.7" r="7.0" fill="#1a1a19"/>
+<circle cx="582.6" cy="275.7" r="5.0" fill="#d95926"/>
+<circle cx="630.2" cy="183.4" r="7.0" fill="#1a1a19"/>
+<circle cx="630.2" cy="183.4" r="5.0" fill="#3987e5"/>
+<circle cx="547.8" cy="263.3" r="7.0" fill="#1a1a19"/>
+<circle cx="547.8" cy="263.3" r="5.0" fill="#d95926"/>
+<circle cx="663.5" cy="246.2" r="7.0" fill="#1a1a19"/>
+<circle cx="663.5" cy="246.2" r="5.0" fill="#3987e5"/>
+<circle cx="592.8" cy="354.9" r="7.0" fill="#1a1a19"/>
+<circle cx="592.8" cy="354.9" r="5.0" fill="#d95926"/>
+<circle cx="674.6" cy="154.9" r="7.0" fill="#1a1a19"/>
+<circle cx="674.6" cy="154.9" r="5.0" fill="#3987e5"/>
+<circle cx="603.1" cy="272.9" r="7.0" fill="#1a1a19"/>
+<circle cx="603.1" cy="272.9" r="5.0" fill="#d95926"/>
+<text x="472.0" y="416.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#c3c2b7" text-anchor="middle">output size relative to libwebp  (1.0 = same size, left = smaller)</text>
+<text transform="translate(26,245.0) rotate(-90)" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12.5" fill="#c3c2b7" text-anchor="middle">PSNR vs libwebp (dB)</text>
+<text x="40.0" y="442.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">Triangles on the floor of the lossy-fast panel are webp-rust files that decode as garbage, 25 to 33 dB below libwebp (see the bug</text>
+<text x="40.0" y="458.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">section).</text>
+</svg>

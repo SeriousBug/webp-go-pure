@@ -44,7 +44,7 @@ echo
 echo "Results (budget ${BUDGET_MS}ms/measurement, quality 90 for lossy):"
 echo
 {
-  echo "file,mode,engine,width,height,bytes,iters,ms_per_op"
+  echo "file,mode,engine,width,height,bytes,psnr_db,iters,ms_per_op"
   sort -t, -k3,3 -k2,2 -k1,1 "$RESULTS" \
-    | awk -F, '{print $3","$2","$1","$4","$5","$6","$7","$8}'
+    | awk -F, '{print $3","$2","$1","$4","$5","$6","$7","$8","$9}'
 } | column -t -s,

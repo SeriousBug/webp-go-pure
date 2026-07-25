@@ -62,7 +62,24 @@ budget elapses, reporting mean ms/op and the output size. Encodes that already
 exceed the budget in a single call are reported as one iteration. Timings are
 wall-clock and machine-dependent; treat them as relative, not absolute.
 
+For the lossy modes each engine's own output is decoded back and scored against
+the pixels that engine was handed, reported as `psnr_db` over RGB (lossless is
+exact, so it shows `-`). Size alone would rank an encoder that quantizes harder
+as the winner, so the two columns have to be read together.
+
 ## Results
 
-See `benchmark/results.md` for a captured run (machine and date noted there).
-Regenerate with `benchmark/run.sh`.
+See `benchmark/results.md` for captured runs on arm64 and amd64 (machines and
+date noted there). Regenerate with `benchmark/run.sh`.
+
+The figures in `results.md` are generated from the tables in that same file, so
+they cannot drift from the numbers:
+
+```sh
+benchmark/chart/chart.go        # rewrites benchmark/charts/*.svg
+```
+
+It writes a light and a dark variant of each figure; `results.md` picks between
+them with GitHub's `#gh-light-mode-only` / `#gh-dark-mode-only` anchors. The
+first line of `chart.go` is a comment to Go and a command to `sh`, so it runs
+directly as a script or as `go run ./chart` from `benchmark/`.

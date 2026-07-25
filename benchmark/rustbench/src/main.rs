@@ -2,12 +2,15 @@
 // port is based on) across three modes, emitting CSV lines compatible with the
 // Go webpbench tool:
 //
-//   engine,mode,file,width,height,bytes,iters,ms_per_op
+//   engine,mode,file,width,height,bytes,psnr_db,iters,ms_per_op
+//
+// psnr_db scores the encoder's own output against the pixels it was handed, and
+// is "-" for lossless.
 //
 // Usage: rustbench <dir> [budget_ms] [min_iters] [max_iters]
 use std::time::{Duration, Instant};
 
-use webp_rust::{encode_lossless, encode_lossy, ImageBuffer};
+use webp_rust::{decode, encode_lossless, encode_lossy, ImageBuffer};
 
 const LOSSY_QUALITY: usize = 90;
 const OURS_FAST_OPT: usize = 0;
@@ -66,9 +69,23 @@ fn main() {
 
         for (mode, f) in modes {
             match measure(&f, budget, min_iters, max_iters) {
-                Ok((size, iters, per_op_ms)) => println!(
-                    "webp-rust,{mode},{name},{w},{h},{size},{iters},{per_op_ms:.3}"
-                ),
+                Ok((out, iters, per_op_ms)) => {
+                    let size = out.len();
+                    let quality = if mode == "lossless" {
+                        "-".to_string()
+                    } else {
+                        match psnr_of(&buffer.rgba, &out) {
+                            Some(db) => format!("{db:.2}"),
+                            None => {
+                                eprintln!("webp-rust/{mode} {name}: psnr failed");
+                                continue;
+                            }
+                        }
+                    };
+                    println!(
+                        "webp-rust,{mode},{name},{w},{h},{size},{quality},{iters},{per_op_ms:.3}"
+                    );
+                }
                 Err(e) => eprintln!("webp-rust/{mode} {name}: {e:?}"),
             }
         }
@@ -80,8 +97,8 @@ fn measure<E>(
     budget: Duration,
     min_iters: u32,
     max_iters: u32,
-) -> Result<(usize, u32, f64), E> {
-    let size = f()?.len(); // warmup
+) -> Result<(Vec<u8>, u32, f64), E> {
+    let out = f()?; // warmup
     let start = Instant::now();
     let mut iters: u32 = 0;
     loop {
@@ -90,7 +107,30 @@ fn measure<E>(
         let elapsed = start.elapsed();
         if iters >= max_iters || (iters >= min_iters && elapsed >= budget) {
             let per_op_ms = elapsed.as_secs_f64() * 1000.0 / iters as f64;
-            return Ok((size, iters, per_op_ms));
+            return Ok((out, iters, per_op_ms));
         }
     }
+}
+
+/// Scores encoded output against the source pixels the encoder was given, over
+/// RGB only. Decoding uses webp-rust's own decoder.
+fn psnr_of(src: &[u8], encoded: &[u8]) -> Option<f64> {
+    let dec = decode(encoded).ok()?;
+    if dec.rgba.len() != src.len() {
+        return None;
+    }
+    let mut sum = 0.0f64;
+    let mut n = 0u64;
+    for (i, (&a, &b)) in src.iter().zip(dec.rgba.iter()).enumerate() {
+        if i % 4 == 3 {
+            continue;
+        }
+        let d = a as f64 - b as f64;
+        sum += d * d;
+        n += 1;
+    }
+    if sum == 0.0 {
+        return Some(f64::INFINITY);
+    }
+    Some(10.0 * (255.0 * 255.0 / (sum / n as f64)).log10())
 }

@@ -1,0 +1,221 @@
+//usr/bin/env true; cd "$(dirname "$0")"; exec go run . "$@"
+
+// chart renders the captured benchmark results as SVG figures for results.md.
+//
+// The first line is a comment to Go and a command to sh, so this file runs as a
+// script (./benchmark/chart/chart.go) as well as via `go run ./chart`.
+//
+// It reads the tables embedded in results.md (each fenced block under a "## "
+// heading is one machine) so the figures and the tables cannot drift apart, and
+// writes a light and a dark variant of each figure, which results.md selects
+// between with GitHub's #gh-light-mode-only / #gh-dark-mode-only anchors.
+//
+//	go run ./chart -md ../results.md -out ../charts
+//
+// Two figures, because size/quality and speed are different questions:
+//
+//   - rate-distortion: output size and PSNR, both relative to libwebp, one point
+//     per image. Engines that are strictly better sit up and to the left.
+//   - encode time: geometric mean of each engine's ms/op relative to libwebp,
+//     grouped by mode, one panel per machine, log scale.
+package main
+
+import (
+	"bufio"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+type row struct {
+	engine, mode, file string
+	bytes              int
+	psnr               float64
+	hasPSNR            bool
+	ms                 float64
+}
+
+type dataset struct {
+	label string
+	rows  []row
+}
+
+const (
+	engOurs    = "ours"
+	engLibwebp = "libwebp"
+	engWasm    = "wasm"
+	engRust    = "webp-rust"
+)
+
+var lossyModes = []string{"lossy-fast", "lossy-slow"}
+var allModes = []string{"lossless", "lossy-fast", "lossy-slow"}
+
+type theme struct {
+	name                            string
+	surface, plane                  string
+	inkPrimary, inkSecondary, muted string
+	grid, axis                      string
+	series                          map[string]string
+}
+
+var themes = []theme{
+	{
+		name: "light", surface: "#fcfcfb", plane: "#f9f9f7",
+		inkPrimary: "#0b0b0b", inkSecondary: "#52514e", muted: "#898781",
+		grid: "#e1e0d9", axis: "#c3c2b7",
+		series: map[string]string{engOurs: "#2a78d6", engRust: "#eb6834", engWasm: "#1baf7a"},
+	},
+	{
+		name: "dark", surface: "#1a1a19", plane: "#0d0d0d",
+		inkPrimary: "#ffffff", inkSecondary: "#c3c2b7", muted: "#898781",
+		grid: "#2c2c2a", axis: "#383835",
+		series: map[string]string{engOurs: "#3987e5", engRust: "#d95926", engWasm: "#199e70"},
+	},
+}
+
+func main() {
+	md := flag.String("md", "../results.md", "results.md to read the tables from")
+	out := flag.String("out", "../charts", "directory to write the SVGs into")
+	flag.Parse()
+
+	sets, err := parseMarkdown(*md)
+	if err != nil {
+		fatal(err)
+	}
+	if len(sets) == 0 {
+		fatal(fmt.Errorf("no result tables found in %s", *md))
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		fatal(err)
+	}
+
+	for _, th := range themes {
+		figures := map[string]string{
+			"rate-distortion": rateDistortion(sets[0], th),
+			"encode-time":     encodeTime(sets, th),
+		}
+		for name, svg := range figures {
+			path := filepath.Join(*out, fmt.Sprintf("%s-%s.svg", name, th.name))
+			if err := os.WriteFile(path, []byte(svg), 0o644); err != nil {
+				fatal(err)
+			}
+			fmt.Println("wrote", path)
+		}
+	}
+}
+
+// parseMarkdown reads every fenced block that follows a "## " heading and holds
+// benchmark rows, taking the heading as the panel label.
+func parseMarkdown(path string) ([]dataset, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var sets []dataset
+	var heading string
+	var fenced bool
+	var cur dataset
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.HasPrefix(line, "## "):
+			heading = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+		case strings.HasPrefix(line, "```"):
+			if fenced {
+				if len(cur.rows) > 0 {
+					sets = append(sets, cur)
+				}
+				cur = dataset{}
+			} else {
+				cur = dataset{label: heading}
+			}
+			fenced = !fenced
+		case fenced:
+			if r, ok := parseRow(line); ok {
+				cur.rows = append(cur.rows, r)
+			}
+		}
+	}
+	return sets, sc.Err()
+}
+
+// parseRow accepts both the whitespace-aligned table in results.md and the raw
+// comma-separated output of webpbench/rustbench.
+func parseRow(line string) (row, bool) {
+	fields := strings.Fields(strings.ReplaceAll(line, ",", " "))
+	if len(fields) != 9 || fields[0] == "file" || fields[0] == "engine" {
+		return row{}, false
+	}
+	// results.md orders columns file,mode,engine; the tools emit engine,mode,file.
+	file, mode, engine := fields[0], fields[1], fields[2]
+	if engine == "lossless" || engine == "lossy-fast" || engine == "lossy-slow" {
+		file, mode, engine = fields[2], fields[1], fields[0]
+	}
+	bytes, err := strconv.Atoi(fields[5])
+	if err != nil {
+		return row{}, false
+	}
+	ms, err := strconv.ParseFloat(fields[8], 64)
+	if err != nil {
+		return row{}, false
+	}
+	r := row{engine: engine, mode: mode, file: file, bytes: bytes, ms: ms}
+	if psnr, err := strconv.ParseFloat(fields[6], 64); err == nil {
+		r.psnr, r.hasPSNR = psnr, true
+	}
+	return r, true
+}
+
+func (d dataset) find(engine, mode, file string) (row, bool) {
+	for _, r := range d.rows {
+		if r.engine == engine && r.mode == mode && r.file == file {
+			return r, true
+		}
+	}
+	return row{}, false
+}
+
+func (d dataset) files() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range d.rows {
+		if !seen[r.file] {
+			seen[r.file] = true
+			out = append(out, r.file)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func fatal(err error) {
+	fmt.Fprintln(os.Stderr, "chart:", err)
+	os.Exit(1)
+}
+
+// shortName trims the pexels-<subject>-<ids> filenames down to the subject.
+func shortName(file string) string {
+	name := strings.TrimSuffix(file, filepath.Ext(file))
+	name = strings.TrimPrefix(name, "pexels-")
+	parts := strings.Split(name, "-")
+	var words []string
+	for _, p := range parts {
+		if _, err := strconv.Atoi(p); err == nil {
+			break
+		}
+		words = append(words, p)
+	}
+	if len(words) == 0 {
+		return name
+	}
+	return strings.Join(words, "-")
+}
