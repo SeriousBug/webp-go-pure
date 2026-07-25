@@ -632,14 +632,18 @@ func elossyQuantizeBlockGo(coeffs *[16]int16, dcQuant, acQuant uint16, first int
 	return levels
 }
 
+func elossyQuantizeBlock(coeffs *[16]int16, dcQuant, acQuant uint16, first int) [16]int16 {
+	var levels [16]int16
+	elossyQuantizeBlockInto(coeffs, dcQuant, acQuant, first, &levels)
+	return levels
+}
+
 func elossyDequantizeLevels(levels *[16]int16, dcQuant, acQuant uint16) [16]int16 {
 	var dequantized [16]int16
-	for index := 0; index < 16; index++ {
-		quant := int32(acQuant)
-		if index == 0 {
-			quant = int32(dcQuant)
-		}
-		dequantized[index] = int16(int32(levels[index]) * quant)
+	dequantized[0] = levels[0] * int16(dcQuant)
+	ac := int16(acQuant)
+	for index := 1; index < 16; index++ {
+		dequantized[index] = levels[index] * ac
 	}
 	return dequantized
 }
@@ -679,18 +683,34 @@ func elossyQuantizeLevels(trellis bool, coeffs *[16]int16, model *elossyRateMode
 		dequantized, _ := elossyTrellisQuantize(coeffs, model, coeffType, ctx, first, dcQuant, acQuant, lambda, levels)
 		return dequantized
 	}
-	*levels = elossyQuantizeBlock(coeffs, dcQuant, acQuant, first)
+	elossyQuantizeBlockInto(coeffs, dcQuant, acQuant, first, levels)
 	return elossyDequantizeLevels(levels, dcQuant, acQuant)
 }
 
 // elossyQuantizeLevelsRate also reports what coding the levels costs, which the
-// mode search needs and the trellis has already worked out along the way.
-func elossyQuantizeLevelsRate(trellis bool, coeffs *[16]int16, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) ([16]int16, uint32) {
-	if trellis {
-		return elossyTrellisQuantize(coeffs, model, coeffType, ctx, first, dcQuant, acQuant, lambda, levels)
+// mode search needs to score a trial.
+func elossyQuantizeLevelsRate(coeffs *[16]int16, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, levels *[16]int16) ([16]int16, uint32) {
+	elossyQuantizeBlockInto(coeffs, dcQuant, acQuant, first, levels)
+	var zigzagged [16]int16
+	last := elossyZigzagLast(levels, &zigzagged, first)
+	rate := elossyScannedCoefficientsRate(model, coeffType, ctx, first, &zigzagged, last)
+
+	// Dequantizing off the scan-ordered levels stops at the last non-zero one
+	// instead of walking all sixteen positions, and the scan the rate needed
+	// has already been paid for.
+	var dequantized [16]int16
+	scan := first
+	if scan == 0 {
+		if last >= 0 {
+			dequantized[0] = zigzagged[0] * int16(dcQuant)
+		}
+		scan = 1
 	}
-	*levels = elossyQuantizeBlock(coeffs, dcQuant, acQuant, first)
-	return elossyDequantizeLevels(levels, dcQuant, acQuant), elossyCoefficientsRate(model, coeffType, ctx, first, levels)
+	ac := int16(acQuant)
+	for ; scan <= last; scan++ {
+		dequantized[elossyZigzag[scan]] = zigzagged[scan] * ac
+	}
+	return dequantized, rate
 }
 
 // rd_score computes a rate-distortion score for the current candidate.
@@ -774,6 +794,15 @@ type elossyLumaTrial struct {
 	levels   [16][16]int16
 	y2Levels [16]int16
 	recon    [256]uint8
+	// pred and acCoeffs are the whole-block mode's prediction and its residual
+	// with the DC removed. A whole-block prediction only reads neighbouring
+	// macroblocks, which are already final, so the residual survives
+	// re-quantization and the trellis pass needs neither the prediction nor the
+	// forward transform again. The i4x4 path leaves them stale: there each
+	// sub-block predicts from the previous one's reconstruction, so changing a
+	// level invalidates every residual after it.
+	pred     [256]uint8
+	acCoeffs [16][16]int16
 	subModes [16]uint8
 	isI4x4   bool
 	// distortion and nonZero describe the i16 trial only and drive the intra4
@@ -788,6 +817,12 @@ type elossyChromaTrial struct {
 	vLevels [4][16]int16
 	uRecon  [64]uint8
 	vRecon  [64]uint8
+	// uPred/vPred and uCoeffs/vCoeffs let the trellis pass re-quantize the
+	// winner without predicting and transforming again, as for luma i16.
+	uPred   [64]uint8
+	vPred   [64]uint8
+	uCoeffs [4][16]int16
+	vCoeffs [4][16]int16
 }
 
 func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, quant *elossyQuantMatrices, rd *elossyRdMultipliers, model *elossyRateModel, top *elossyNonZeroContext, left *elossyNonZeroContext, mode uint8) uint64 {
@@ -796,6 +831,7 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 	var prediction [16 * 16]uint8
 	elossyFillPredictionBlock(reconstructed.y, reconstructed.yStride, reconstructed.yStride, x, y, mode, prediction[:], 16, 16)
 	trial.isI4x4 = false
+	trial.pred = prediction
 	trial.recon = prediction
 	candidate := trial.recon[:]
 	var yDc [16]int16
@@ -814,9 +850,10 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 			yDc[block] = coeffs[0]
 			acOnly := coeffs
 			acOnly[0] = 0
+			trial.acCoeffs[block] = acOnly
 			ctx := int(l + (refineTnz & 1))
 			var levels [16]int16
-			coeffsR, blockRate := elossyQuantizeLevelsRate(profile.refineI16, &acOnly, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.trellisI16, &levels)
+			coeffsR, blockRate := elossyQuantizeLevelsRate(&acOnly, model, 0, ctx, 1, quant.y1[0], quant.y1[1], &levels)
 			rate += blockRate
 			yLevels[block] = levels
 			yCoeffs[block] = coeffsR
@@ -876,7 +913,8 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 	var totalScore uint64
 	var subModes [16]uint8
 	var predictions [numBModes][16]uint8
-	var screen elossyModeScreen
+	var residuals [numBModes][16]int16
+	var screen, rdScreen elossyModeScreen
 	var localTop [4]uint8
 	copy(localTop[:], topModes)
 	localLeft := *leftModes
@@ -897,6 +935,8 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 			bestMode := uint8(bDCPred)
 			var bestRecon [16]uint8
 			var bestLevels [16]int16
+			bestPrediction := uint8(0)
+			rdScreen.reset(profile.refineI4TopK)
 			bestScore := uint64(0xffffffffffffffff)
 			bestNonZero := uint8(0)
 
@@ -922,8 +962,9 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 				mode := modes[index]
 				predictionBlock := predictions[index]
 				coeffs := elossyForwardTransformAt(source.y, source.yStride, blockX, blockY, predictionBlock[:], 4, 0, 0)
+				residuals[index] = coeffs
 				var levels [16]int16
-				dequantized, coeffRate := elossyQuantizeLevelsRate(profile.refineI4Search, &coeffs, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.trellisI4, &levels)
+				dequantized, coeffRate := elossyQuantizeLevelsRate(&coeffs, model, 3, ctx, 0, quant.y1[0], quant.y1[1], &levels)
 				candidate := predictionBlock
 				elossyAddTransform(candidate[:], 4, 0, 0, &dequantized)
 				distortion := elossyBlockSse4x4(source.y, source.yStride, blockX, blockY, &candidate)
@@ -932,14 +973,56 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 					rdMode = 1
 				}
 				score := elossyRdScore(distortion, coeffRate, rd.i4) + uint64(elossyIntra4ModeRate(topMode, leftMode, mode))*uint64(rdMode)
+				if profile.refineI4TopK > 0 {
+					rdScreen.add(index, score)
+				}
 				if score < bestScore {
 					bestMode = mode
 					bestRecon = candidate
 					bestLevels = levels
+					bestPrediction = index
 					bestScore = score
 					bestNonZero = 0
 					if elossyBlockHasNonZero(&levels, 0) {
 						bestNonZero = 1
+					}
+				}
+			}
+
+			// The winner is re-quantized here rather than in a second pass over
+			// the macroblock: a sub-block predicts from the one before it, so the
+			// levels that end up coded have to be the ones whose reconstruction
+			// the rest of the search sees. Where the profile asks for it the
+			// runners-up are re-scored too, since plain quantization prices the
+			// modes differently enough to pick another one.
+			if profile.refineI4 {
+				winner := [1]uint8{bestPrediction}
+				refined := winner[:]
+				if profile.refineI4TopK > 0 {
+					refined = rdScreen.selected()
+				}
+				bestScore = 0xffffffffffffffff
+				for _, index := range refined {
+					mode := modes[index]
+					var levels [16]int16
+					dequantized, coeffRate := elossyTrellisQuantize(&residuals[index], model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.trellisI4, &levels)
+					candidate := predictions[index]
+					elossyAddTransform(candidate[:], 4, 0, 0, &dequantized)
+					distortion := elossyBlockSse4x4(source.y, source.yStride, blockX, blockY, &candidate)
+					rdMode := rd.mode
+					if rdMode < 1 {
+						rdMode = 1
+					}
+					score := elossyRdScore(distortion, coeffRate, rd.i4) + uint64(elossyIntra4ModeRate(topMode, leftMode, mode))*uint64(rdMode)
+					if score < bestScore {
+						bestMode = mode
+						bestRecon = candidate
+						bestLevels = levels
+						bestScore = score
+						bestNonZero = 0
+						if elossyBlockHasNonZero(&levels, 0) {
+							bestNonZero = 1
+						}
 					}
 				}
 			}
@@ -984,6 +1067,8 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 	var predictionV [8 * 8]uint8
 	elossyFillPredictionBlock(reconstructed.u, reconstructed.uvStride, reconstructed.uvStride, x, y, mode, predictionU[:], 8, 8)
 	elossyFillPredictionBlock(reconstructed.v, reconstructed.uvStride, reconstructed.uvStride, x, y, mode, predictionV[:], 8, 8)
+	trial.uPred = predictionU
+	trial.vPred = predictionV
 	trial.uRecon = predictionU
 	trial.vRecon = predictionV
 	candidateU := trial.uRecon[:]
@@ -997,9 +1082,10 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 		for subX := 0; subX < 2; subX++ {
 			block := subY*2 + subX
 			coeffsU := elossyForwardTransformAt(source.u, source.uvStride, x+subX*4, y+subY*4, predictionU[:], 8, subX*4, subY*4)
+			trial.uCoeffs[block] = coeffsU
 			ctx := int(l + (tnzU & 1))
 			var levelsU [16]int16
-			coeffsUR, blockRate := elossyQuantizeLevelsRate(profile.refineChroma, &coeffsU, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levelsU)
+			coeffsUR, blockRate := elossyQuantizeLevelsRate(&coeffsU, model, 2, ctx, 0, quant.uv[0], quant.uv[1], &levelsU)
 			trial.uLevels[block] = levelsU
 			hasCoeffs := uint8(0)
 			if elossyBlockHasNonZero(&levelsU, 0) {
@@ -1021,9 +1107,10 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 		for subX := 0; subX < 2; subX++ {
 			block := subY*2 + subX
 			coeffsV := elossyForwardTransformAt(source.v, source.uvStride, x+subX*4, y+subY*4, predictionV[:], 8, subX*4, subY*4)
+			trial.vCoeffs[block] = coeffsV
 			ctx := int(l + (tnzV & 1))
 			var levelsV [16]int16
-			coeffsVR, blockRate := elossyQuantizeLevelsRate(profile.refineChroma, &coeffsV, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levelsV)
+			coeffsVR, blockRate := elossyQuantizeLevelsRate(&coeffsV, model, 2, ctx, 0, quant.uv[0], quant.uv[1], &levelsV)
 			trial.vLevels[block] = levelsV
 			hasCoeffs := uint8(0)
 			if elossyBlockHasNonZero(&levelsV, 0) {
@@ -1075,7 +1162,10 @@ type elossyMbTrials struct {
 	chroma     [2]elossyChromaTrial
 	bestLuma   *elossyLumaTrial
 	bestChroma *elossyChromaTrial
-	valid      bool
+	// valid says whether the trials hold a searched result to finalize from.
+	// The fast mode search picks predictors without ever quantizing, so its
+	// macroblocks have to be encoded from scratch.
+	valid bool
 }
 
 // elossyIntra4Gated decides whether the i16 result is already good enough that
@@ -1186,9 +1276,7 @@ func elossyChooseMacroblockMode(trials *elossyMbTrials, source *elossyPlanes, re
 
 	trials.bestLuma = keptLuma
 	trials.bestChroma = keptChroma
-	// The i4x4 search and the final emission may refine levels differently; only
-	// then does the chosen mode have to be re-encoded from scratch.
-	trials.valid = bestLuma != bPred || profile.refineI4Search == profile.refineI4Final
+	trials.valid = true
 
 	return elossyMacroblockMode{
 		luma:    bestLuma,

@@ -98,12 +98,18 @@ type elossyEncodedLossyCandidate struct {
 	reconstructed elossyPlanes
 }
 
+// The refine* flags select trellis quantization for the mode the search
+// settles on. Every trial is quantized plainly and only the winner, or the
+// handful of candidates refineI4TopK names, goes through the trellis, which is
+// what libwebp does below its top method.
 type elossyLossySearchProfile struct {
-	fastModeSearch      bool
-	allowI4x4           bool
-	refineI16           bool
-	refineI4Search      bool
-	refineI4Final       bool
+	fastModeSearch bool
+	allowI4x4      bool
+	refineI16      bool
+	refineI4       bool
+	// refineI4TopK is how many of the plain-quantized 4x4 candidates are
+	// re-scored through the trellis. Zero refines only the plain winner.
+	refineI4TopK        int
 	refineChroma        bool
 	updateProbabilities bool
 	// modeScreenTopK is how many modes survive the Hadamard-domain pre-screen
@@ -295,22 +301,11 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			modeScreenTopK:      elossyModeScreenTopK,
 			i4GateStrength:      elossyIntra4GateStrength,
 		}
-	case 6:
+	case 6, 7:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
 			refineI16:           true,
-			refineI4Final:       true,
-			refineChroma:        true,
-			updateProbabilities: true,
-			modeScreenTopK:      elossyModeScreenTopK,
-			i4GateStrength:      elossyIntra4GateStrength,
-		}
-	case 7:
-		return elossyLossySearchProfile{
-			allowI4x4:           true,
-			refineI16:           true,
-			refineI4Search:      true,
-			refineI4Final:       true,
+			refineI4:            true,
 			refineChroma:        true,
 			updateProbabilities: true,
 			modeScreenTopK:      elossyModeScreenTopK,
@@ -320,10 +315,11 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
 			refineI16:           true,
-			refineI4Search:      true,
-			refineI4Final:       true,
+			refineI4:            true,
+			refineI4TopK:        elossyRefineI4TopK,
 			refineChroma:        true,
 			updateProbabilities: true,
+			modeScreenTopK:      elossyTopEffortModeScreenTopK,
 			i4GateStrength:      elossyIntra4GateStrengthTopEffort,
 		}
 	}
@@ -342,6 +338,20 @@ const (
 	elossyIntra4GateStrength          = 8
 	elossyIntra4GateStrengthTopEffort = 4
 )
+
+// elossyTopEffortModeScreenTopK is how wide the top effort's Hadamard
+// pre-screen is. The effort used to trial all ten 4x4 modes. Trials are cheaper
+// now that they quantize plainly, but they are no longer the final word either,
+// so spending them on five modes and refining the best of those lands the same
+// file size for two thirds of the search.
+const elossyTopEffortModeScreenTopK = 5
+
+// elossyRefineI4TopK is how many of the plain-quantized 4x4 candidates the top
+// effort re-scores through the trellis. Plain quantization prices the modes
+// closely but not identically, and re-scoring the best three recovers the file
+// size that scoring only the plain winner gives up, at a fraction of what
+// running the trellis on every candidate costs.
+const elossyRefineI4TopK = 3
 
 // elossyMaxFullSearchCandidates caps how many segmentation candidates get the
 // full rate-distortion search. The rest are eliminated by the ranking pass.

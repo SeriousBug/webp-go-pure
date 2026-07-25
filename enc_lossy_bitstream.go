@@ -333,6 +333,12 @@ func elossyUntabulatedLevelRate(model *elossyRateModel, coeffType, band, ctx int
 func elossyCoefficientsRate(model *elossyRateModel, coeffType, ctx, first int, levels *[16]int16) uint32 {
 	var zigzagged [16]int16
 	last := elossyZigzagLast(levels, &zigzagged, first)
+	return elossyScannedCoefficientsRate(model, coeffType, ctx, first, &zigzagged, last)
+}
+
+// elossyScannedCoefficientsRate is elossyCoefficientsRate for levels that are
+// already in scan order, which the caller often has anyway.
+func elossyScannedCoefficientsRate(model *elossyRateModel, coeffType, ctx, first int, zigzagged *[16]int16, last int) uint32 {
 	band := elossyBands[first]
 	if last < first {
 		return elossyBitCost(false, model.probs[coeffType][band][ctx][0])
@@ -720,14 +726,42 @@ type elossyMacroblockCoeffs struct {
 	skip   bool
 }
 
-// elossyCommitTrials takes the levels and reconstruction the mode search
-// already produced for the winning modes and installs them, sparing a second
-// transform-quantize-refine pass over the macroblock.
-func elossyCommitTrials(out *elossyMacroblockCoeffs, reconstructed *elossyPlanes, mbX, mbY int, trials *elossyMbTrials) {
-	luma := trials.bestLuma
-	chroma := trials.bestChroma
+func elossyLumaLevelsAllZero(out *elossyMacroblockCoeffs) bool {
+	first := 0
+	if !out.isI4x4 {
+		first = 1
+		if elossyBlockHasNonZero(&out.y2, 0) {
+			return false
+		}
+	}
+	for i := range out.y {
+		if elossyBlockHasNonZero(&out.y[i], first) {
+			return false
+		}
+	}
+	return true
+}
 
+func elossyChromaLevelsAllZero(out *elossyMacroblockCoeffs) bool {
+	for i := range out.u {
+		if elossyBlockHasNonZero(&out.u[i], 0) || elossyBlockHasNonZero(&out.v[i], 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// elossyCommitLumaTrial installs the levels and reconstruction the mode search
+// already produced for the winning luma mode, sparing a second
+// transform-quantize pass over the macroblock.
+func elossyCommitLumaTrial(out *elossyMacroblockCoeffs, reconstructed *elossyPlanes, mbX, mbY int, luma *elossyLumaTrial) {
 	elossyRestoreBlock16(reconstructed.y, reconstructed.yStride, mbX*16, mbY*16, &luma.recon)
+	out.y = luma.levels
+	out.y2 = luma.y2Levels
+	out.isI4x4 = luma.isI4x4
+}
+
+func elossyCommitChromaTrial(out *elossyMacroblockCoeffs, reconstructed *elossyPlanes, mbX, mbY int, chroma *elossyChromaTrial) {
 	uvX := mbX * 8
 	uvY := mbY * 8
 	for row := 0; row < 8; row++ {
@@ -735,202 +769,250 @@ func elossyCommitTrials(out *elossyMacroblockCoeffs, reconstructed *elossyPlanes
 		copy(reconstructed.u[dst:dst+8], chroma.uRecon[row*8:row*8+8])
 		copy(reconstructed.v[dst:dst+8], chroma.vRecon[row*8:row*8+8])
 	}
-
-	out.y = luma.levels
-	out.y2 = luma.y2Levels
 	out.u = chroma.uLevels
 	out.v = chroma.vLevels
-	out.isI4x4 = luma.isI4x4
-
-	yAllZero := true
-	first := 0
-	if !luma.isI4x4 {
-		first = 1
-		if elossyBlockHasNonZero(&out.y2, 0) {
-			yAllZero = false
-		}
-	}
-	if yAllZero {
-		for i := range out.y {
-			if elossyBlockHasNonZero(&out.y[i], first) {
-				yAllZero = false
-				break
-			}
-		}
-	}
-	uvAllZero := true
-	for i := range out.u {
-		if elossyBlockHasNonZero(&out.u[i], 0) || elossyBlockHasNonZero(&out.v[i], 0) {
-			uvAllZero = false
-			break
-		}
-	}
-	out.skip = yAllZero && uvAllZero
 }
 
-// elossyAnalyzeMacroblock predicts, transforms, quantizes and refines one
-// macroblock, updating the reconstruction. It reads the neighbouring non-zero
-// contexts but leaves updating them to token emission.
-func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode elossyMacroblockMode, quant *elossyQuantMatrices, top *elossyNonZeroContext, left *elossyNonZeroContext) {
+// elossyAnalyzeLuma predicts, transforms and quantizes the luma of one
+// macroblock under the already-chosen mode, updating the reconstruction. It
+// reads the neighbouring non-zero contexts but leaves updating them to token
+// emission.
+func elossyAnalyzeLuma(out *elossyMacroblockCoeffs, model *elossyRateModel, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode *elossyMacroblockMode, quant *elossyQuantMatrices, rd *elossyRdMultipliers, top *elossyNonZeroContext, left *elossyNonZeroContext) {
 	yX := mbX * 16
 	yY := mbY * 16
-	uvX := mbX * 8
-	uvY := mbY * 8
 	isI4x4 := mode.luma == bPred
-	rd := elossyBuildRdMultipliers(quant)
-
-	if !isI4x4 {
-		elossyPredictBlock(reconstructed.y, reconstructed.yStride, reconstructed.yStride, yX, yY, mode.luma, 16)
-	}
-	elossyPredictBlock(reconstructed.u, reconstructed.uvStride, reconstructed.uvStride, uvX, uvY, mode.chroma, 8)
-	elossyPredictBlock(reconstructed.v, reconstructed.uvStride, reconstructed.uvStride, uvX, uvY, mode.chroma, 8)
+	out.isI4x4 = isI4x4
 
 	// The level arrays are the caller's output buffer, written in place: they
 	// are half a kilobyte per macroblock and returning them by value dominated
 	// the encode.
 	yLevels := &out.y
 	var yCoeffs [16][16]int16
-	var y2Levels [16]int16
+	tnz := top.nz & 0x0f
+	lnz := left.nz & 0x0f
 
 	if isI4x4 {
+		out.y2 = [16]int16{}
 		for subY := 0; subY < 4; subY++ {
+			l := lnz & 1
 			for subX := 0; subX < 4; subX++ {
 				block := subY*4 + subX
 				blockX := yX + subX*4
 				blockY := yY + subY*4
 				elossyPredictLuma4Block(reconstructed.y, reconstructed.yStride, reconstructed.yStride, blockX, blockY, mode.subLuma[block])
 				coeffs := elossyForwardTransform(source.y, source.yStride, reconstructed.y, reconstructed.yStride, blockX, blockY)
-				ctx := int((left.nz>>subY)&1) + int((top.nz>>subX)&1)
+				ctx := int(l + (tnz & 1))
 				var levels [16]int16
-				coeffsR := elossyQuantizeLevels(profile.refineI4Final, &coeffs, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.trellisI4, &levels)
+				coeffsR := elossyQuantizeLevels(profile.refineI4, &coeffs, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.trellisI4, &levels)
 				yLevels[block] = levels
-				yCoeffs[block] = coeffsR
-				elossyAddTransform(reconstructed.y, reconstructed.yStride, blockX, blockY, &yCoeffs[block])
-			}
-		}
-	} else {
-		var yDc [16]int16
-		refineTnz := top.nz & 0x0f
-		refineLnz := left.nz & 0x0f
-		for subY := 0; subY < 4; subY++ {
-			l := refineLnz & 1
-			for subX := 0; subX < 4; subX++ {
-				block := subY*4 + subX
-				coeffs := elossyForwardTransform(source.y, source.yStride, reconstructed.y, reconstructed.yStride, yX+subX*4, yY+subY*4)
-				yDc[block] = coeffs[0]
-				acOnly := coeffs
-				acOnly[0] = 0
-				ctx := int(l + (refineTnz & 1))
-				var levels [16]int16
-				coeffsR := elossyQuantizeLevels(profile.refineI16, &acOnly, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.trellisI16, &levels)
-				yLevels[block] = levels
-				yCoeffs[block] = coeffsR
-				hasAc := uint8(0)
-				if elossyBlockHasNonZero(&yLevels[block], 1) {
-					hasAc = 1
+				elossyAddTransform(reconstructed.y, reconstructed.yStride, blockX, blockY, &coeffsR)
+				hasCoeffs := uint8(0)
+				if elossyBlockHasNonZero(&levels, 0) {
+					hasCoeffs = 1
 				}
-				l = hasAc
-				refineTnz = (refineTnz >> 1) | (hasAc << 7)
+				l = hasCoeffs
+				tnz = (tnz >> 1) | (hasCoeffs << 7)
 			}
-			refineTnz >>= 4
-			refineLnz = (refineLnz >> 1) | (l << 7)
+			tnz >>= 4
+			lnz = (lnz >> 1) | (l << 7)
 		}
+		return
+	}
 
-		y2Input := elossyForwardWht(&yDc)
-		levels := elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
-		y2Coeffs := elossyDequantizeLevels(&levels, quant.y2[0], quant.y2[1])
-		y2Levels = levels
-		y2Dc := elossyInverseWht(&y2Coeffs)
-		for block := 0; block < 16; block++ {
+	elossyPredictBlock(reconstructed.y, reconstructed.yStride, reconstructed.yStride, yX, yY, mode.luma, 16)
+	var yDc [16]int16
+	for subY := 0; subY < 4; subY++ {
+		l := lnz & 1
+		for subX := 0; subX < 4; subX++ {
+			block := subY*4 + subX
+			coeffs := elossyForwardTransform(source.y, source.yStride, reconstructed.y, reconstructed.yStride, yX+subX*4, yY+subY*4)
+			yDc[block] = coeffs[0]
+			acOnly := coeffs
+			acOnly[0] = 0
+			ctx := int(l + (tnz & 1))
+			var levels [16]int16
+			coeffsR := elossyQuantizeLevels(profile.refineI16, &acOnly, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.trellisI16, &levels)
+			yLevels[block] = levels
+			yCoeffs[block] = coeffsR
+			hasAc := uint8(0)
+			if elossyBlockHasNonZero(&levels, 1) {
+				hasAc = 1
+			}
+			l = hasAc
+			tnz = (tnz >> 1) | (hasAc << 7)
+		}
+		tnz >>= 4
+		lnz = (lnz >> 1) | (l << 7)
+	}
+
+	y2Input := elossyForwardWht(&yDc)
+	out.y2 = elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
+	y2Coeffs := elossyDequantizeLevels(&out.y2, quant.y2[0], quant.y2[1])
+	y2Dc := elossyInverseWht(&y2Coeffs)
+	for subY := 0; subY < 4; subY++ {
+		for subX := 0; subX < 4; subX++ {
+			block := subY*4 + subX
 			yCoeffs[block][0] = y2Dc[block]
+			elossyAddTransform(reconstructed.y, reconstructed.yStride, yX+subX*4, yY+subY*4, &yCoeffs[block])
 		}
 	}
+}
 
-	uLevels := &out.u
-	var uCoeffs [4][16]int16
-	for subY := 0; subY < 2; subY++ {
-		for subX := 0; subX < 2; subX++ {
-			block := subY*2 + subX
-			coeffs := elossyForwardTransform(source.u, source.uvStride, reconstructed.u, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
-			var levels [16]int16
-			coeffsR := elossyQuantizeLevels(profile.refineChroma, &coeffs, model, 2, 0, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levels)
-			uLevels[block] = levels
-			uCoeffs[block] = coeffsR
-		}
-	}
+func elossyAnalyzeChroma(out *elossyMacroblockCoeffs, model *elossyRateModel, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode *elossyMacroblockMode, quant *elossyQuantMatrices, rd *elossyRdMultipliers, top *elossyNonZeroContext, left *elossyNonZeroContext) {
+	uvX := mbX * 8
+	uvY := mbY * 8
+	elossyPredictBlock(reconstructed.u, reconstructed.uvStride, reconstructed.uvStride, uvX, uvY, mode.chroma, 8)
+	elossyPredictBlock(reconstructed.v, reconstructed.uvStride, reconstructed.uvStride, uvX, uvY, mode.chroma, 8)
 
-	vLevels := &out.v
-	var vCoeffs [4][16]int16
-	for subY := 0; subY < 2; subY++ {
-		for subX := 0; subX < 2; subX++ {
-			block := subY*2 + subX
-			coeffs := elossyForwardTransform(source.v, source.uvStride, reconstructed.v, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
-			var levels [16]int16
-			coeffsR := elossyQuantizeLevels(profile.refineChroma, &coeffs, model, 2, 0, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levels)
-			vLevels[block] = levels
-			vCoeffs[block] = coeffsR
-		}
+	planes := [2]struct {
+		source []uint8
+		recon  []uint8
+		levels *[4][16]int16
+		tnz    uint8
+		lnz    uint8
+	}{
+		{source.u, reconstructed.u, &out.u, top.nz >> 4, left.nz >> 4},
+		{source.v, reconstructed.v, &out.v, top.nz >> 6, left.nz >> 6},
 	}
-
-	yAllZero := true
-	if isI4x4 {
-		for i := range yLevels {
-			if elossyBlockHasNonZero(&yLevels[i], 0) {
-				yAllZero = false
-				break
-			}
-		}
-	} else {
-		if elossyBlockHasNonZero(&y2Levels, 0) {
-			yAllZero = false
-		} else {
-			for i := range yLevels {
-				if elossyBlockHasNonZero(&yLevels[i], 1) {
-					yAllZero = false
-					break
-				}
-			}
-		}
-	}
-	uAllZero := true
-	for i := range uLevels {
-		if elossyBlockHasNonZero(&uLevels[i], 0) {
-			uAllZero = false
-			break
-		}
-	}
-	vAllZero := true
-	for i := range vLevels {
-		if elossyBlockHasNonZero(&vLevels[i], 0) {
-			vAllZero = false
-			break
-		}
-	}
-	skip := yAllZero && uAllZero && vAllZero
-
-	// A skipped macroblock has an all-zero residual, so adding it back is a
-	// no-op and the prediction alone is the reconstruction.
-	if !skip {
-		if !isI4x4 {
-			for subY := 0; subY < 4; subY++ {
-				for subX := 0; subX < 4; subX++ {
-					block := subY*4 + subX
-					elossyAddTransform(reconstructed.y, reconstructed.yStride, yX+subX*4, yY+subY*4, &yCoeffs[block])
-				}
-			}
-		}
+	for _, plane := range planes {
+		tnz := plane.tnz
+		lnz := plane.lnz
 		for subY := 0; subY < 2; subY++ {
+			l := lnz & 1
 			for subX := 0; subX < 2; subX++ {
 				block := subY*2 + subX
-				elossyAddTransform(reconstructed.u, reconstructed.uvStride, uvX+subX*4, uvY+subY*4, &uCoeffs[block])
-				elossyAddTransform(reconstructed.v, reconstructed.uvStride, uvX+subX*4, uvY+subY*4, &vCoeffs[block])
+				blockX := uvX + subX*4
+				blockY := uvY + subY*4
+				coeffs := elossyForwardTransform(plane.source, source.uvStride, plane.recon, reconstructed.uvStride, blockX, blockY)
+				ctx := int(l + (tnz & 1))
+				var levels [16]int16
+				coeffsR := elossyQuantizeLevels(profile.refineChroma, &coeffs, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levels)
+				plane.levels[block] = levels
+				elossyAddTransform(plane.recon, reconstructed.uvStride, blockX, blockY, &coeffsR)
+				hasCoeffs := uint8(0)
+				if elossyBlockHasNonZero(&levels, 0) {
+					hasCoeffs = 1
+				}
+				l = hasCoeffs
+				tnz = (tnz >> 1) | (hasCoeffs << 3)
 			}
+			tnz >>= 2
+			lnz = (lnz >> 1) | (l << 5)
+		}
+	}
+}
+
+// elossyRefineLumaI16 re-quantizes the winning whole-block luma mode with the
+// trellis. The mode search kept the prediction and the residual it produced,
+// and neither depends on how the levels are chosen, so the pass is the trellis
+// and the reconstruction it implies and nothing else. The Y2 block is quantized
+// plainly in both passes, so its levels carry over unchanged.
+func elossyRefineLumaI16(out *elossyMacroblockCoeffs, model *elossyRateModel, reconstructed *elossyPlanes, mbX, mbY int, luma *elossyLumaTrial, quant *elossyQuantMatrices, rd *elossyRdMultipliers, top *elossyNonZeroContext, left *elossyNonZeroContext) {
+	recon := luma.pred
+	var yCoeffs [16][16]int16
+	tnz := top.nz & 0x0f
+	lnz := left.nz & 0x0f
+	for subY := 0; subY < 4; subY++ {
+		l := lnz & 1
+		for subX := 0; subX < 4; subX++ {
+			block := subY*4 + subX
+			ctx := int(l + (tnz & 1))
+			var levels [16]int16
+			coeffsR, _ := elossyTrellisQuantize(&luma.acCoeffs[block], model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.trellisI16, &levels)
+			out.y[block] = levels
+			yCoeffs[block] = coeffsR
+			hasAc := uint8(0)
+			if elossyBlockHasNonZero(&levels, 1) {
+				hasAc = 1
+			}
+			l = hasAc
+			tnz = (tnz >> 1) | (hasAc << 7)
+		}
+		tnz >>= 4
+		lnz = (lnz >> 1) | (l << 7)
+	}
+
+	out.y2 = luma.y2Levels
+	out.isI4x4 = false
+	y2Coeffs := elossyDequantizeLevels(&out.y2, quant.y2[0], quant.y2[1])
+	y2Dc := elossyInverseWht(&y2Coeffs)
+	for block := 0; block < 16; block++ {
+		yCoeffs[block][0] = y2Dc[block]
+		elossyAddTransform(recon[:], 16, (block&3)*4, (block>>2)*4, &yCoeffs[block])
+	}
+	elossyRestoreBlock16(reconstructed.y, reconstructed.yStride, mbX*16, mbY*16, &recon)
+}
+
+func elossyRefineChroma(out *elossyMacroblockCoeffs, model *elossyRateModel, reconstructed *elossyPlanes, mbX, mbY int, chroma *elossyChromaTrial, quant *elossyQuantMatrices, rd *elossyRdMultipliers, top *elossyNonZeroContext, left *elossyNonZeroContext) {
+	uvX := mbX * 8
+	uvY := mbY * 8
+	uRecon := chroma.uPred
+	vRecon := chroma.vPred
+	planes := [2]struct {
+		coeffs *[4][16]int16
+		levels *[4][16]int16
+		recon  *[64]uint8
+		tnz    uint8
+		lnz    uint8
+	}{
+		{&chroma.uCoeffs, &out.u, &uRecon, top.nz >> 4, left.nz >> 4},
+		{&chroma.vCoeffs, &out.v, &vRecon, top.nz >> 6, left.nz >> 6},
+	}
+	for _, plane := range planes {
+		tnz := plane.tnz
+		lnz := plane.lnz
+		for subY := 0; subY < 2; subY++ {
+			l := lnz & 1
+			for subX := 0; subX < 2; subX++ {
+				block := subY*2 + subX
+				ctx := int(l + (tnz & 1))
+				var levels [16]int16
+				coeffsR, _ := elossyTrellisQuantize(&plane.coeffs[block], model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levels)
+				plane.levels[block] = levels
+				elossyAddTransform(plane.recon[:], 8, subX*4, subY*4, &coeffsR)
+				hasCoeffs := uint8(0)
+				if elossyBlockHasNonZero(&levels, 0) {
+					hasCoeffs = 1
+				}
+				l = hasCoeffs
+				tnz = (tnz >> 1) | (hasCoeffs << 3)
+			}
+			tnz >>= 2
+			lnz = (lnz >> 1) | (l << 5)
 		}
 	}
 
-	out.y2 = y2Levels
-	out.isI4x4 = isI4x4
-	out.skip = skip
+	for row := 0; row < 8; row++ {
+		dst := (uvY+row)*reconstructed.uvStride + uvX
+		copy(reconstructed.u[dst:dst+8], uRecon[row*8:row*8+8])
+		copy(reconstructed.v[dst:dst+8], vRecon[row*8:row*8+8])
+	}
+}
+
+// elossyFinalizeMacroblock produces the levels and reconstruction the token
+// partition encodes. Each plane group either keeps what the mode search
+// computed or, when the profile refines that group with the trellis, is
+// re-quantized under the chosen mode. Levels and reconstruction come from the
+// same pass either way, which is what keeps the emitted tokens and the
+// neighbours the next macroblock predicts from in agreement.
+func elossyFinalizeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode *elossyMacroblockMode, quant *elossyQuantMatrices, rd *elossyRdMultipliers, top *elossyNonZeroContext, left *elossyNonZeroContext, trials *elossyMbTrials) {
+	switch {
+	case !trials.valid:
+		elossyAnalyzeLuma(out, model, source, reconstructed, mbX, mbY, profile, mode, quant, rd, top, left)
+	case mode.luma != bPred && profile.refineI16:
+		elossyRefineLumaI16(out, model, reconstructed, mbX, mbY, trials.bestLuma, quant, rd, top, left)
+	default:
+		elossyCommitLumaTrial(out, reconstructed, mbX, mbY, trials.bestLuma)
+	}
+	switch {
+	case !trials.valid:
+		elossyAnalyzeChroma(out, model, source, reconstructed, mbX, mbY, profile, mode, quant, rd, top, left)
+	case profile.refineChroma:
+		elossyRefineChroma(out, model, reconstructed, mbX, mbY, trials.bestChroma, quant, rd, top, left)
+	default:
+		elossyCommitChromaTrial(out, reconstructed, mbX, mbY, trials.bestChroma)
+	}
+	out.skip = elossyLumaLevelsAllZero(out) && elossyChromaLevelsAllZero(out)
 }
 
 // elossyEmitMacroblockTokens writes one macroblock's coefficient tokens and
@@ -1090,11 +1172,7 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 			mode := elossyChooseMacroblockMode(&trials, source, &reconstructed, mbX, mbY, profile, quant, rd, model, &topContexts[mbX], &leftContext, top, &leftModes)
 			mode.segment = uint8(segmentID)
 			elossyUpdateModeCache(&mode, top, &leftModes)
-			if trials.valid {
-				elossyCommitTrials(&coeffs, &reconstructed, mbX, mbY, &trials)
-			} else {
-				elossyAnalyzeMacroblock(&coeffs, model, source, &reconstructed, mbX, mbY, profile, mode, quant, &topContexts[mbX], &leftContext)
-			}
+			elossyFinalizeMacroblock(&coeffs, model, source, &reconstructed, mbX, mbY, profile, &mode, quant, rd, &topContexts[mbX], &leftContext, &trials)
 			mode.skip = elossyEmitMacroblockTokens(writer, probabilities, &coeffs, &topContexts[mbX], &leftContext, stats)
 			modes = append(modes, mode)
 		}
