@@ -792,7 +792,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel
 				predictionBlock := elossyCopyBlock4(reconstructed.y, reconstructed.yStride, blockX, blockY)
 				coeffs := elossyForwardTransform(source.y, source.yStride, reconstructed.y, reconstructed.yStride, blockX, blockY)
 				ctx := int((left.nz>>subY)&1) + int((top.nz>>subX)&1)
-				levels, _ := elossyQuantizeBlock(&coeffs, quant.y1[0], quant.y1[1], 0)
+				levels := elossyQuantizeBlock(&coeffs, quant.y1[0], quant.y1[1], 0)
 				coeffsR := elossyMaybeRefineLevels(profile.refineI4Final, source.y, source.yStride, blockX, blockY, &predictionBlock, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.i4, &levels)
 				yLevels[block] = levels
 				yCoeffs[block] = coeffsR
@@ -812,7 +812,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel
 				acOnly := coeffs
 				acOnly[0] = 0
 				predictionBlock := elossyCopyBlock4(reconstructed.y, reconstructed.yStride, yX+subX*4, yY+subY*4)
-				levels, _ := elossyQuantizeBlock(&acOnly, quant.y1[0], quant.y1[1], 1)
+				levels := elossyQuantizeBlock(&acOnly, quant.y1[0], quant.y1[1], 1)
 				ctx := int(l + (refineTnz & 1))
 				coeffsR := elossyMaybeRefineLevels(profile.refineI16, source.y, source.yStride, yX+subX*4, yY+subY*4, &predictionBlock, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.i16, &levels)
 				yLevels[block] = levels
@@ -830,7 +830,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel
 
 		y2Input := elossyForwardWht(&yDc)
 		predictionBlock := elossyCopyBlock16(reconstructed.y, reconstructed.yStride, yX, yY)
-		levels, _ := elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
+		levels := elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
 		y2Coeffs := elossyMaybeRefineY2Levels(profile, source.y, source.yStride, yX, yY, &predictionBlock, &yCoeffs, model, int(top.nzDc+left.nzDc), quant.y2[0], quant.y2[1], rd.i16, &levels)
 		y2Levels = levels
 		y2Dc := elossyInverseWht(&y2Coeffs)
@@ -846,7 +846,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel
 			block := subY*2 + subX
 			coeffs := elossyForwardTransform(source.u, source.uvStride, reconstructed.u, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
 			predictionBlock := elossyCopyBlock4(reconstructed.u, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
-			levels, _ := elossyQuantizeBlock(&coeffs, quant.uv[0], quant.uv[1], 0)
+			levels := elossyQuantizeBlock(&coeffs, quant.uv[0], quant.uv[1], 0)
 			coeffsR := elossyMaybeRefineLevels(profile.refineChroma, source.u, source.uvStride, uvX+subX*4, uvY+subY*4, &predictionBlock, model, 2, 0, 0, quant.uv[0], quant.uv[1], rd.uv, &levels)
 			uLevels[block] = levels
 			uCoeffs[block] = coeffsR
@@ -860,7 +860,7 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel
 			block := subY*2 + subX
 			coeffs := elossyForwardTransform(source.v, source.uvStride, reconstructed.v, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
 			predictionBlock := elossyCopyBlock4(reconstructed.v, reconstructed.uvStride, uvX+subX*4, uvY+subY*4)
-			levels, _ := elossyQuantizeBlock(&coeffs, quant.uv[0], quant.uv[1], 0)
+			levels := elossyQuantizeBlock(&coeffs, quant.uv[0], quant.uv[1], 0)
 			coeffsR := elossyMaybeRefineLevels(profile.refineChroma, source.v, source.uvStride, uvX+subX*4, uvY+subY*4, &predictionBlock, model, 2, 0, 0, quant.uv[0], quant.uv[1], rd.uv, &levels)
 			vLevels[block] = levels
 			vCoeffs[block] = coeffsR

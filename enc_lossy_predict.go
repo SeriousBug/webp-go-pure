@@ -616,19 +616,19 @@ func elossyQuantizeCoefficient(coeff int16, quant uint16) (int16, int16) {
 	return int16(level), int16(level * q)
 }
 
-func elossyQuantizeBlock(coeffs *[16]int16, dcQuant, acQuant uint16, first int) ([16]int16, [16]int16) {
+// elossyQuantizeBlock returns the quantized levels only. Every caller
+// dequantizes through the refinement step, which produces the reconstruction
+// levels it settles on, so producing them here as well was wasted work.
+func elossyQuantizeBlock(coeffs *[16]int16, dcQuant, acQuant uint16, first int) [16]int16 {
 	var levels [16]int16
-	var dequantized [16]int16
 	for index := first; index < 16; index++ {
 		quant := acQuant
 		if index == 0 {
 			quant = dcQuant
 		}
-		level, dequant := elossyQuantizeCoefficient(coeffs[index], quant)
-		levels[index] = level
-		dequantized[index] = dequant
+		levels[index], _ = elossyQuantizeCoefficient(coeffs[index], quant)
 	}
-	return levels, dequantized
+	return levels
 }
 
 func elossyDequantizeLevels(levels *[16]int16, dcQuant, acQuant uint16) [16]int16 {
@@ -902,7 +902,7 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 			yDc[block] = coeffs[0]
 			acOnly := coeffs
 			acOnly[0] = 0
-			levels, _ := elossyQuantizeBlock(&acOnly, quant.y1[0], quant.y1[1], 1)
+			levels := elossyQuantizeBlock(&acOnly, quant.y1[0], quant.y1[1], 1)
 			predictionBlock := elossyCopyBlock4FromBuffer(prediction[:], 16, subX*4, subY*4)
 			ctx := int(l + (refineTnz & 1))
 			coeffsR := elossyMaybeRefineLevels(profile.refineI16, source.y, source.yStride, x+subX*4, y+subY*4, &predictionBlock, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.i16, &levels)
@@ -922,7 +922,7 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 	y2Input := elossyForwardWht(&yDc)
 	var prediction16 [256]uint8
 	copy(prediction16[:], prediction[:])
-	trial.y2Levels, _ = elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
+	trial.y2Levels = elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
 	y2Coeffs := elossyMaybeRefineY2Levels(profile, source.y, source.yStride, x, y, &prediction16, &yCoeffs, model, int(top.nzDc+left.nzDc), quant.y2[0], quant.y2[1], rd.i16, &trial.y2Levels)
 	rate += elossyCoefficientsRate(model, 1, int(top.nzDc+left.nzDc), 0, &trial.y2Levels)
 	y2Dc := elossyInverseWht(&y2Coeffs)
@@ -1007,7 +1007,7 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 				var predictionBlock [16]uint8
 				elossyFillLuma4PredictionFrom(&neighbors, mode, predictionBlock[:], 4)
 				coeffs := elossyForwardTransformAt(source.y, source.yStride, blockX, blockY, predictionBlock[:], 4, 0, 0)
-				levels, _ := elossyQuantizeBlock(&coeffs, quant.y1[0], quant.y1[1], 0)
+				levels := elossyQuantizeBlock(&coeffs, quant.y1[0], quant.y1[1], 0)
 				dequantized := elossyMaybeRefineLevels(profile.refineI4Search, source.y, source.yStride, blockX, blockY, &predictionBlock, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.i4, &levels)
 				candidate := predictionBlock
 				elossyAddTransform(candidate[:], 4, 0, 0, &dequantized)
@@ -1084,7 +1084,7 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 			block := subY*2 + subX
 			coeffsU := elossyForwardTransformAt(source.u, source.uvStride, x+subX*4, y+subY*4, predictionU[:], 8, subX*4, subY*4)
 			predictionBlockU := elossyCopyBlock4FromBuffer(predictionU[:], 8, subX*4, subY*4)
-			levelsU, _ := elossyQuantizeBlock(&coeffsU, quant.uv[0], quant.uv[1], 0)
+			levelsU := elossyQuantizeBlock(&coeffsU, quant.uv[0], quant.uv[1], 0)
 			ctx := int(l + (tnzU & 1))
 			coeffsUR := elossyMaybeRefineLevels(profile.refineChroma, source.u, source.uvStride, x+subX*4, y+subY*4, &predictionBlockU, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.uv, &levelsU)
 			trial.uLevels[block] = levelsU
@@ -1109,7 +1109,7 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 			block := subY*2 + subX
 			coeffsV := elossyForwardTransformAt(source.v, source.uvStride, x+subX*4, y+subY*4, predictionV[:], 8, subX*4, subY*4)
 			predictionBlockV := elossyCopyBlock4FromBuffer(predictionV[:], 8, subX*4, subY*4)
-			levelsV, _ := elossyQuantizeBlock(&coeffsV, quant.uv[0], quant.uv[1], 0)
+			levelsV := elossyQuantizeBlock(&coeffsV, quant.uv[0], quant.uv[1], 0)
 			ctx := int(l + (tnzV & 1))
 			coeffsVR := elossyMaybeRefineLevels(profile.refineChroma, source.v, source.uvStride, x+subX*4, y+subY*4, &predictionBlockV, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.uv, &levelsV)
 			trial.vLevels[block] = levelsV
