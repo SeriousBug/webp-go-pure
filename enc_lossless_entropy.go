@@ -348,6 +348,58 @@ func elosslessHistogramCost(histograms *elosslessHistogramSet, codes *elosslessH
 		sum(histograms[4], &codes.dist)
 }
 
+// elosslessSparseHist stores only the non-zero (symbol, count) entries of a
+// histogram set. Per-tile histograms are sparse (a small image tile touches few
+// distinct residual values), so evaluating the assignment cost against a group's
+// Huffman code lengths over just the non-zeros is far cheaper than scanning the
+// full dense arrays, while producing identical totals.
+type elosslessSparseHist struct {
+	sym [5][]uint16
+	cnt [5][]uint32
+}
+
+func elosslessMakeSparseHist(h *elosslessHistogramSet) elosslessSparseHist {
+	var s elosslessSparseHist
+	for c := 0; c < 5; c++ {
+		hist := h[c]
+		for i, v := range hist {
+			if v != 0 {
+				s.sym[c] = append(s.sym[c], uint16(i))
+				s.cnt[c] = append(s.cnt[c], v)
+			}
+		}
+	}
+	return s
+}
+
+func elosslessMergeSparseInto(dst *elosslessHistogramSet, s *elosslessSparseHist) {
+	for c := 0; c < 5; c++ {
+		d := dst[c]
+		sym := s.sym[c]
+		cnt := s.cnt[c]
+		for k, symbol := range sym {
+			d[symbol] += cnt[k]
+		}
+	}
+}
+
+func elosslessSparseHistCost(s *elosslessSparseHist, codes *elosslessHuffmanGroupCodes) int {
+	channelCodes := [5]*elosslessHuffmanCode{&codes.green, &codes.red, &codes.blue, &codes.alpha, &codes.dist}
+	total := 0
+	for c := 0; c < 5; c++ {
+		lengths := channelCodes[c].getCodeLengths()
+		nLen := len(lengths)
+		sym := s.sym[c]
+		cnt := s.cnt[c]
+		for k, symbol := range sym {
+			if int(symbol) < nLen {
+				total += int(cnt[k]) * int(lengths[symbol])
+			}
+		}
+	}
+	return total
+}
+
 func elosslessHistogramEntropyCost(histogram []uint32) float64 {
 	total := 0.0
 	for _, count := range histogram {
@@ -383,12 +435,33 @@ func elosslessHistogramSetEntropyCost(histograms *elosslessHistogramSet) float64
 	return sum
 }
 
-func elosslessHistogramMergePenalty(lhs, rhs *elosslessHistogramSet) float64 {
-	merged := elosslessCloneHistogramSet(lhs)
-	elosslessMergeHistograms(&merged, rhs)
-	return elosslessHistogramSetEntropyCost(&merged) -
-		elosslessHistogramSetEntropyCost(lhs) -
-		elosslessHistogramSetEntropyCost(rhs)
+// elosslessCombinedChannelEntropy returns the Shannon entropy cost of the
+// element-wise sum of two histograms without materializing the sum.
+func elosslessCombinedChannelEntropy(a, b []uint32) float64 {
+	total := 0.0
+	for i := range a {
+		total += float64(a[i] + b[i])
+	}
+	if total == 0.0 {
+		return 0.0
+	}
+	sum := 0.0
+	for i := range a {
+		c := a[i] + b[i]
+		if c != 0 {
+			cf := float64(c)
+			sum += cf * math.Log2(total/cf)
+		}
+	}
+	return sum
+}
+
+func elosslessCombinedHistogramSetEntropy(a, b *elosslessHistogramSet) float64 {
+	return elosslessCombinedChannelEntropy(a[0], b[0]) +
+		elosslessCombinedChannelEntropy(a[1], b[1]) +
+		elosslessCombinedChannelEntropy(a[2], b[2]) +
+		elosslessCombinedChannelEntropy(a[3], b[3]) +
+		elosslessCombinedChannelEntropy(a[4], b[4])
 }
 
 func elosslessHistogramPartitionIndex(value, minValue, maxValue float64, partitions int) int {
@@ -461,12 +534,43 @@ func elosslessEntropyHistogramCandidates(nonEmptyTiles [][2]int, tileHistograms 
 		return nil
 	}
 
-	for len(candidates) > targetCount {
+	// Greedy pairwise merge minimizing total entropy. The merge penalty for a
+	// pair is combinedEntropy(i,j) - selfCost[i] - selfCost[j]; caching each
+	// candidate's self-entropy and the pairwise combined entropies keeps the
+	// entropy evaluations at O(n^2) overall instead of recomputing them for
+	// every pair on every merge step.
+	n := len(candidates)
+	selfCost := make([]float64, n)
+	comb := make([][]float64, n)
+	for i := 0; i < n; i++ {
+		selfCost[i] = elosslessHistogramSetEntropyCost(&candidates[i].histograms)
+		comb[i] = make([]float64, n)
+	}
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			comb[i][j] = elosslessCombinedHistogramSetEntropy(&candidates[i].histograms, &candidates[j].histograms)
+		}
+	}
+	recomputeRow := func(i, active int) {
+		for j := 0; j < active; j++ {
+			if j == i {
+				continue
+			}
+			v := elosslessCombinedHistogramSetEntropy(&candidates[i].histograms, &candidates[j].histograms)
+			if i < j {
+				comb[i][j] = v
+			} else {
+				comb[j][i] = v
+			}
+		}
+	}
+
+	for n > targetCount {
 		bestLhs, bestRhs := -1, -1
 		bestPenalty := math.Inf(1)
-		for lhs := 0; lhs < len(candidates); lhs++ {
-			for rhs := lhs + 1; rhs < len(candidates); rhs++ {
-				penalty := elosslessHistogramMergePenalty(&candidates[lhs].histograms, &candidates[rhs].histograms)
+		for lhs := 0; lhs < n; lhs++ {
+			for rhs := lhs + 1; rhs < n; rhs++ {
+				penalty := comb[lhs][rhs] - selfCost[lhs] - selfCost[rhs]
 				if penalty < bestPenalty {
 					bestPenalty = penalty
 					bestLhs, bestRhs = lhs, rhs
@@ -478,11 +582,20 @@ func elosslessEntropyHistogramCandidates(nonEmptyTiles [][2]int, tileHistograms 
 			break
 		}
 		rhsCandidate := candidates[bestRhs]
-		candidates[bestRhs] = candidates[len(candidates)-1]
-		candidates = candidates[:len(candidates)-1]
 		elosslessMergeHistograms(&candidates[bestLhs].histograms, &rhsCandidate.histograms)
 		elosslessNormalizeHistograms(&candidates[bestLhs].histograms)
 		candidates[bestLhs].weight += rhsCandidate.weight
+		selfCost[bestLhs] = elosslessHistogramSetEntropyCost(&candidates[bestLhs].histograms)
+
+		last := n - 1
+		candidates[bestRhs] = candidates[last]
+		selfCost[bestRhs] = selfCost[last]
+		candidates = candidates[:last]
+		n = last
+		if bestRhs < n {
+			recomputeRow(bestRhs, n)
+		}
+		recomputeRow(bestLhs, n)
 	}
 
 	return candidates
@@ -517,13 +630,13 @@ func elosslessBuildWeightedSeedHistograms(nonEmptyTiles [][2]int, tileHistograms
 	return out
 }
 
-func elosslessAssignTilesToGroups(nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, groupCodes []elosslessHuffmanGroupCodes, assignments []int) {
+func elosslessAssignTilesToGroups(nonEmptyTiles [][2]int, tileSparse []elosslessSparseHist, groupCodes []elosslessHuffmanGroupCodes, assignments []int) {
 	for _, t := range nonEmptyTiles {
 		tile := t[0]
 		bestGroup := 0
 		bestCost := elosslessIntMax
 		for groupIndex := range groupCodes {
-			cost := elosslessHistogramCost(&tileHistograms[tile], &groupCodes[groupIndex])
+			cost := elosslessSparseHistCost(&tileSparse[tile], &groupCodes[groupIndex])
 			if cost < bestCost {
 				bestCost = cost
 				bestGroup = groupIndex
@@ -533,7 +646,7 @@ func elosslessAssignTilesToGroups(nonEmptyTiles [][2]int, tileHistograms []eloss
 	}
 }
 
-func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, seedHistograms []elosslessHistogramSet) (*elosslessMetaHuffmanPlan, error) {
+func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles [][2]int, tileSparse []elosslessSparseHist, seedHistograms []elosslessHistogramSet) (*elosslessMetaHuffmanPlan, error) {
 	if len(seedHistograms) <= 1 {
 		return nil, nil
 	}
@@ -549,27 +662,29 @@ func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles
 	assignments := make([]int, tileCount)
 
 	for iter := 0; iter < 4; iter++ {
-		elosslessAssignTilesToGroups(nonEmptyTiles, tileHistograms, groupCodes, assignments)
+		elosslessAssignTilesToGroups(nonEmptyTiles, tileSparse, groupCodes, assignments)
 
+		accum := make([]elosslessHistogramSet, len(groupCodes))
+		used := make([]bool, len(groupCodes))
+		for i := range accum {
+			accum[i] = elosslessNewHistograms(colorCacheBits)
+		}
+		for _, t := range nonEmptyTiles {
+			tile := t[0]
+			g := assignments[tile]
+			elosslessMergeSparseInto(&accum[g], &tileSparse[tile])
+			used[g] = true
+		}
 		remap := make([]int, len(groupCodes))
 		for i := range remap {
 			remap[i] = elosslessIntMax
 		}
 		var mergedHistograms []elosslessHistogramSet
-		for groupIndex := range groupCodes {
-			histograms := elosslessNewHistograms(colorCacheBits)
-			used := false
-			for _, t := range nonEmptyTiles {
-				tile := t[0]
-				if assignments[tile] == groupIndex {
-					elosslessMergeHistograms(&histograms, &tileHistograms[tile])
-					used = true
-				}
-			}
-			if used {
-				elosslessNormalizeHistograms(&histograms)
+		for groupIndex := range accum {
+			if used[groupIndex] {
+				elosslessNormalizeHistograms(&accum[groupIndex])
 				remap[groupIndex] = len(mergedHistograms)
-				mergedHistograms = append(mergedHistograms, histograms)
+				mergedHistograms = append(mergedHistograms, accum[groupIndex])
 			}
 		}
 		if len(mergedHistograms) <= 1 {
@@ -597,11 +712,11 @@ func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles
 	}, nil
 }
 
-func elosslessMetaHuffmanAssignmentCost(nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, plan *elosslessMetaHuffmanPlan) int {
+func elosslessMetaHuffmanAssignmentCost(nonEmptyTiles [][2]int, tileSparse []elosslessSparseHist, plan *elosslessMetaHuffmanPlan) int {
 	total := 0
 	for _, t := range nonEmptyTiles {
 		tile := t[0]
-		total += elosslessHistogramCost(&tileHistograms[tile], &plan.groups[plan.assignments[tile]])
+		total += elosslessSparseHistCost(&tileSparse[tile], &plan.groups[plan.assignments[tile]])
 	}
 	return total
 }
@@ -686,6 +801,11 @@ func elosslessBuildMetaHuffmanPlan(width, height int, tokens []elosslessToken, c
 		return nonEmptyTiles[j][1] < nonEmptyTiles[i][1]
 	})
 
+	tileSparse := make([]elosslessSparseHist, tileCount)
+	for _, t := range nonEmptyTiles {
+		tileSparse[t[0]] = elosslessMakeSparseHist(&tileHistograms[t[0]])
+	}
+
 	groupCount := maxGroups
 	if len(nonEmptyTiles) < groupCount {
 		groupCount = len(nonEmptyTiles)
@@ -702,14 +822,14 @@ func elosslessBuildMetaHuffmanPlan(width, height int, tokens []elosslessToken, c
 	var bestPlan *elosslessMetaHuffmanPlan
 	bestCost := elosslessIntMax
 	for _, seedHistograms := range seedCandidates {
-		plan, err := elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits, nonEmptyTiles, tileHistograms, seedHistograms)
+		plan, err := elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits, nonEmptyTiles, tileSparse, seedHistograms)
 		if err != nil {
 			return nil, err
 		}
 		if plan != nil {
 			plan.huffmanBits = huffmanBits
 			plan.huffmanXsize = huffmanXsize
-			cost := elosslessMetaHuffmanAssignmentCost(nonEmptyTiles, tileHistograms, plan)
+			cost := elosslessMetaHuffmanAssignmentCost(nonEmptyTiles, tileSparse, plan)
 			if cost < bestCost {
 				bestCost = cost
 				bestPlan = plan
@@ -857,7 +977,7 @@ func elosslessWriteTokens(bw *bitWriter, tokens []elosslessToken, width int, gre
 	return nil
 }
 
-func elosslessWriteSingleGroupImageStream(bw *bitWriter, width int, tokens []elosslessToken, allowMetaHuffman bool, colorCacheBits int, group *elosslessHuffmanGroupCodes) error {
+func elosslessWriteSingleGroupPrefix(bw *bitWriter, allowMetaHuffman bool, colorCacheBits int, group *elosslessHuffmanGroupCodes) error {
 	if err := bw.putBits(elosslessBoolBit(colorCacheBits > 0), 1); err != nil {
 		return err
 	}
@@ -871,15 +991,49 @@ func elosslessWriteSingleGroupImageStream(bw *bitWriter, width int, tokens []elo
 			return err
 		}
 	}
+	return elosslessWriteHuffmanGroup(bw, group)
+}
 
-	if err := elosslessWriteHuffmanGroup(bw, group); err != nil {
+func elosslessWriteSingleGroupImageStream(bw *bitWriter, width int, tokens []elosslessToken, allowMetaHuffman bool, colorCacheBits int, group *elosslessHuffmanGroupCodes) error {
+	if err := elosslessWriteSingleGroupPrefix(bw, allowMetaHuffman, colorCacheBits, group); err != nil {
 		return err
 	}
-
 	return elosslessWriteTokens(bw, tokens, width, &group.green, &group.red, &group.blue, &group.alpha, &group.dist)
 }
 
-func elosslessWriteMetaHuffmanImageStream(bw *bitWriter, width int, tokens []elosslessToken, colorCacheBits int, plan *elosslessMetaHuffmanPlan) error {
+// elosslessCountSingleGroupTokenBits returns the exact number of bits
+// elosslessWriteTokens would emit for these tokens under one Huffman group,
+// without emitting them, by summing the code depths and extra bits.
+func elosslessCountSingleGroupTokenBits(tokens []elosslessToken, width int, group *elosslessHuffmanGroupCodes) (int, error) {
+	bits := 0
+	for _, token := range tokens {
+		switch token.kind {
+		case elosslessTokLiteral:
+			argb := token.argb
+			bits += group.green.symbolDepth(int((argb >> 8) & 0xff))
+			bits += group.red.symbolDepth(int((argb >> 16) & 0xff))
+			bits += group.blue.symbolDepth(int(argb & 0xff))
+			bits += group.alpha.symbolDepth(int((argb >> 24) & 0xff))
+		case elosslessTokCache:
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes + elosslessNumLengthCodes + token.key)
+		case elosslessTokCopy:
+			lengthPrefix, err := elosslessPrefixEncode(token.length)
+			if err != nil {
+				return 0, err
+			}
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes+lengthPrefix.symbol) + lengthPrefix.extraBits
+			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+			distPrefix, err := elosslessPrefixEncode(planeCode)
+			if err != nil {
+				return 0, err
+			}
+			bits += group.dist.symbolDepth(distPrefix.symbol) + distPrefix.extraBits
+		}
+	}
+	return bits, nil
+}
+
+func elosslessWriteMetaHuffmanPrefix(bw *bitWriter, colorCacheBits int, plan *elosslessMetaHuffmanPlan) error {
 	if err := bw.putBits(elosslessBoolBit(colorCacheBits > 0), 1); err != nil {
 		return err
 	}
@@ -908,7 +1062,49 @@ func elosslessWriteMetaHuffmanImageStream(bw *bitWriter, width int, tokens []elo
 			return err
 		}
 	}
+	return nil
+}
+
+func elosslessWriteMetaHuffmanImageStream(bw *bitWriter, width int, tokens []elosslessToken, colorCacheBits int, plan *elosslessMetaHuffmanPlan) error {
+	if err := elosslessWriteMetaHuffmanPrefix(bw, colorCacheBits, plan); err != nil {
+		return err
+	}
 	return elosslessWriteTokensWithMeta(bw, tokens, width, plan)
+}
+
+// elosslessCountMetaTokenBits returns the exact number of bits
+// elosslessWriteTokensWithMeta would emit for these tokens, without emitting them.
+func elosslessCountMetaTokenBits(tokens []elosslessToken, width int, plan *elosslessMetaHuffmanPlan) (int, error) {
+	bits := 0
+	pos := 0
+	for _, token := range tokens {
+		tile := elosslessTileIndexForPos(width, plan.huffmanBits, plan.huffmanXsize, pos)
+		group := &plan.groups[plan.assignments[tile]]
+		switch token.kind {
+		case elosslessTokLiteral:
+			argb := token.argb
+			bits += group.green.symbolDepth(int((argb >> 8) & 0xff))
+			bits += group.red.symbolDepth(int((argb >> 16) & 0xff))
+			bits += group.blue.symbolDepth(int(argb & 0xff))
+			bits += group.alpha.symbolDepth(int((argb >> 24) & 0xff))
+		case elosslessTokCache:
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes + elosslessNumLengthCodes + token.key)
+		case elosslessTokCopy:
+			lengthPrefix, err := elosslessPrefixEncode(token.length)
+			if err != nil {
+				return 0, err
+			}
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes+lengthPrefix.symbol) + lengthPrefix.extraBits
+			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+			distPrefix, err := elosslessPrefixEncode(planeCode)
+			if err != nil {
+				return 0, err
+			}
+			bits += group.dist.symbolDepth(distPrefix.symbol) + distPrefix.extraBits
+		}
+		pos += elosslessTokenLen(token)
+	}
+	return bits, nil
 }
 
 func elosslessWriteImageStreamFromTokens(bw *bitWriter, width, height int, tokens []elosslessToken, emitMetaHuffmanFlag bool, entropySearchLevel uint8, colorCacheBits int) error {
@@ -968,20 +1164,32 @@ func elosslessWriteImageStream(bw *bitWriter, width int, argb []uint32, emitMeta
 	return elosslessWriteImageStreamFromTokens(bw, width, len(argb)/width, tokens, emitMetaHuffmanFlag, entropySearchLevel, options.colorCacheBits)
 }
 
+// elosslessEstimateSingleGroupImageStreamSize returns the byte size of the
+// single-group image stream. The prefix (color-cache flags and Huffman trees) is
+// emitted so its exact bit length is known, and the token bits are counted by
+// summing code depths rather than emitting the whole stream.
 func elosslessEstimateSingleGroupImageStreamSize(width int, tokens []elosslessToken, colorCacheBits int, allowMetaHuffman bool, group *elosslessHuffmanGroupCodes) (int, error) {
 	bw := newBitWriter()
-	if err := elosslessWriteSingleGroupImageStream(bw, width, tokens, allowMetaHuffman, colorCacheBits, group); err != nil {
+	if err := elosslessWriteSingleGroupPrefix(bw, allowMetaHuffman, colorCacheBits, group); err != nil {
 		return 0, err
 	}
-	return len(bw.intoBytes()), nil
+	tokenBits, err := elosslessCountSingleGroupTokenBits(tokens, width, group)
+	if err != nil {
+		return 0, err
+	}
+	return (bw.bitPos + tokenBits + 7) / 8, nil
 }
 
 func elosslessEstimateMetaHuffmanImageStreamSize(width int, tokens []elosslessToken, colorCacheBits int, plan *elosslessMetaHuffmanPlan) (int, error) {
 	bw := newBitWriter()
-	if err := elosslessWriteMetaHuffmanImageStream(bw, width, tokens, colorCacheBits, plan); err != nil {
+	if err := elosslessWriteMetaHuffmanPrefix(bw, colorCacheBits, plan); err != nil {
 		return 0, err
 	}
-	return len(bw.intoBytes()), nil
+	tokenBits, err := elosslessCountMetaTokenBits(tokens, width, plan)
+	if err != nil {
+		return 0, err
+	}
+	return (bw.bitPos + tokenBits + 7) / 8, nil
 }
 
 func elosslessEstimateImageStreamSize(width, height int, tokens []elosslessToken, colorCacheBits int, emitMetaHuffmanFlag bool, entropySearchLevel uint8) (int, error) {
@@ -1084,7 +1292,7 @@ func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTok
 				return 0, err
 			}
 		} else {
-			tokens, err := elosslessBuildTokens(width, argb, elosslessTokenBuildOptionsFor(profile.matchSearchLevel, cacheBits))
+			tokens, err := elosslessApplyColorCacheToTokens(argb, baseTokens, cacheBits)
 			if err != nil {
 				return 0, err
 			}

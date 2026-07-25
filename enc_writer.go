@@ -48,15 +48,38 @@ func (w *bitWriter) putBits(value uint32, numBits int) error {
 	if numBits > 32 {
 		return encBitstream("bit write is too wide")
 	}
-	for bitIndex := 0; bitIndex < numBits; bitIndex++ {
-		byteIndex := w.bitPos >> 3
-		if byteIndex == len(w.bytes) {
-			w.bytes = append(w.bytes, 0)
-		}
-		bit := byte((value >> uint(bitIndex)) & 1)
-		w.bytes[byteIndex] |= bit << uint(w.bitPos&7)
-		w.bitPos++
+	if numBits == 0 {
+		return nil
 	}
+	if numBits < 32 {
+		value &= (1 << uint(numBits)) - 1
+	}
+
+	byteIndex := w.bitPos >> 3
+	bitOffset := uint(w.bitPos & 7)
+	need := (w.bitPos + numBits + 7) >> 3
+	for len(w.bytes) < need {
+		w.bytes = append(w.bytes, 0)
+	}
+
+	w.bytes[byteIndex] |= byte(value << bitOffset)
+	written := 8 - int(bitOffset)
+	if written < numBits {
+		v := value >> uint(written)
+		byteIndex++
+		remaining := numBits - written
+		for remaining >= 8 {
+			w.bytes[byteIndex] = byte(v)
+			v >>= 8
+			byteIndex++
+			remaining -= 8
+		}
+		if remaining > 0 {
+			w.bytes[byteIndex] |= byte(v)
+		}
+	}
+
+	w.bitPos += numBits
 	return nil
 }
 

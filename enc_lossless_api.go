@@ -40,16 +40,19 @@ func encodeLosslessRgbaToVp8lWithOptions(width, height int, rgba []byte, options
 		if err != nil {
 			return nil, err
 		}
+		bestEstimate := elosslessIntMax
 		for _, ranked := range rankedPlans {
-			estimate := ranked.score
 			plan := ranked.plan
-			if haveProfileBest && elosslessShouldStopTransformSearch(len(profileBest), estimate, &profile) {
+			if bestEstimate != elosslessIntMax && elosslessShouldStopTransformSearch(bestEstimate, ranked.score, &profile) {
 				break
 			}
 
 			encoded, err := elosslessEncodeTransformPlanToVp8l(width, height, rgba, &plan, &profile)
 			if err != nil {
 				return nil, err
+			}
+			if ranked.score < bestEstimate {
+				bestEstimate = ranked.score
 			}
 			if !haveProfileBest || len(encoded) < len(profileBest) {
 				profileBest = encoded
