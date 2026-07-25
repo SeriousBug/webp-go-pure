@@ -37,13 +37,20 @@ func elossyBuildCandidateVp8Frame(width, height, mbWidth, mbHeight int, candidat
 func elossyRunCandidatePass(width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, table *elossyCoeffProbTables, mbLimit int) (elossyEncodedLossyCandidate, elossyCoeffProbTables) {
 	var stats elossyCoeffStats
 	partition, reconstructed, modes := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, segmentQuants, table, &stats, mbLimit)
+	// A limited pass only reconstructs its prefix, so the rest of the plane is
+	// still blank and scoring it would swamp the distortion with the untouched
+	// remainder.
+	sseHeight := height
+	if rows := elossyLimitedRows(mbWidth, mbHeight, mbLimit); rows < mbHeight {
+		sseHeight = min(height, rows*16)
+	}
 	return elossyEncodedLossyCandidate{
 		baseQuant:      segment.quantizer[0],
 		segment:        *segment,
 		probabilities:  *table,
 		modes:          modes,
 		tokenPartition: partition,
-		distortion:     elossyReconstructionSse(source, &reconstructed, width, height),
+		distortion:     elossyReconstructionSse(source, &reconstructed, width, sseHeight),
 	}, elossyFinalizeTokenProbabilities(&stats)
 }
 
@@ -128,55 +135,50 @@ func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWid
 	return bestVp8, nil
 }
 
-// elossyShortlistCandidates ranks segmentation candidates with the cheap
-// stats-profile search and returns the indices worth searching in full, along
-// with the probability table each cheap pass converged on so the full search
-// does not have to repeat it.
+// elossyShortlistCandidates ranks segmentation candidates and returns the
+// indices worth searching in full.
 //
-// The cheap pass is run for its own sake regardless: the full search needs a
-// converged table to score rates against. Ranking on its output costs only the
-// frame build, and spares the fully exhaustive candidate sets several complete
-// searches whose result was never going to be selected.
-func elossyShortlistCandidates(width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, candidates []elossySegmentConfig, baseQuant int32, filter *elossyFilterConfig) ([]int, []*elossyCoeffProbTables, error) {
+// Ranking runs the real search, refinement included, over a prefix of the
+// frame. Judging candidates by a reduced search over the whole frame is both
+// slower and worse: the level refinement is what moves the candidates apart, so
+// dropping it is dropping the signal being ranked on, and it mis-ordered
+// candidates often enough that the top three all had to be searched in full to
+// be safe. The prefix carries that signal, so one full search suffices.
+//
+// Candidates are scored on their token partition rather than a built frame:
+// a truncated pass has no frame to build, and the partition is where a
+// segmentation's cost difference shows up anyway.
+func elossyShortlistCandidates(source *elossyPlanes, width, height, mbWidth, mbHeight int, profile *elossyLossySearchProfile, candidates []elossySegmentConfig, baseQuant int32) []int {
 	if len(candidates) <= elossyMaxFullSearchCandidates || !profile.updateProbabilities {
 		indices := make([]int, len(candidates))
-		tables := make([]*elossyCoeffProbTables, len(candidates))
 		for i := range candidates {
 			indices[i] = i
 		}
-		return indices, tables, nil
+		return indices
 	}
 
-	statsProfile := elossyStatsProfile(profile)
+	limit := elossyRankingMacroblockLimit(mbWidth * mbHeight)
 	type ranked struct {
 		index int
 		cost  uint64
-		table elossyCoeffProbTables
 	}
 	scored := make([]ranked, 0, len(candidates))
 	for i := range candidates {
 		segmentQuants := elossyBuildSegmentQuantizers(&candidates[i])
-		candidate, table := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, &statsProfile, &candidates[i], &segmentQuants, &elossyCoeffsProba0, 0)
-		frame, err := elossyBuildCandidateVp8Frame(width, height, mbWidth, mbHeight, &candidate, filter)
-		if err != nil {
-			return nil, nil, err
-		}
+		candidate, _ := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, profile, &candidates[i], &segmentQuants, &elossyCoeffsProba0, limit)
 		scored = append(scored, ranked{
 			index: i,
-			cost:  elossyFrameRdCost(candidate.distortion, len(frame), baseQuant),
-			table: table,
+			cost:  elossyFrameRdCost(candidate.distortion, len(candidate.tokenPartition), baseQuant),
 		})
 	}
 	sort.SliceStable(scored, func(a, b int) bool { return scored[a].cost < scored[b].cost })
 
 	scored = scored[:elossyMaxFullSearchCandidates]
 	indices := make([]int, len(scored))
-	tables := make([]*elossyCoeffProbTables, len(scored))
 	for i := range scored {
 		indices[i] = scored[i].index
-		tables[i] = &scored[i].table
 	}
-	return indices, tables, nil
+	return indices
 }
 
 // EncodeLossyRgbaToVp8WithOptions encodes RGBA pixels to a raw lossy VP8 frame
@@ -196,19 +198,16 @@ func encodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *Lo
 	source := elossyRgbaToYuv420(width, height, rgba, mbWidth, mbHeight)
 	candidates := elossyBuildSegmentCandidates(&source, mbWidth, mbHeight, baseQuant, options.Effort)
 
-	// Candidates are ranked on rate *and* distortion using a cheap frame built
-	// with the heuristic filter; only the winner pays for the filter search.
+	// Candidates are ranked on rate *and* distortion; only the winner pays for
+	// the filter search.
 	heuristic := elossyHeuristicFilter(baseQuant)
-	shortlist, searchTables, err := elossyShortlistCandidates(width, height, &source, mbWidth, mbHeight, &profile, candidates, baseQuant, &heuristic)
-	if err != nil {
-		return nil, err
-	}
+	shortlist := elossyShortlistCandidates(&source, width, height, mbWidth, mbHeight, &profile, candidates, baseQuant)
 
 	var best elossyEncodedLossyCandidate
 	var bestCost uint64
 	found := false
-	for i, index := range shortlist {
-		candidate, err := elossyEncodeLossyCandidate(width, height, &source, mbWidth, mbHeight, &profile, &candidates[index], searchTables[i])
+	for _, index := range shortlist {
+		candidate, err := elossyEncodeLossyCandidate(width, height, &source, mbWidth, mbHeight, &profile, &candidates[index], nil)
 		if err != nil {
 			return nil, err
 		}

@@ -1081,10 +1081,7 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 	// A limit means the caller only wants the token statistics, so the pass
 	// stops after that many macroblocks and the partition, modes and
 	// reconstruction it returns cover just the prefix.
-	limitRows := mbHeight
-	if mbLimit > 0 && mbLimit < mbWidth*mbHeight {
-		limitRows = (mbLimit + mbWidth - 1) / mbWidth
-	}
+	limitRows := elossyLimitedRows(mbWidth, mbHeight, mbLimit)
 	for mbY := 0; mbY < limitRows; mbY++ {
 		var leftContext elossyNonZeroContext
 		var leftModes [4]uint8

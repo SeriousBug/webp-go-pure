@@ -300,14 +300,14 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 	}
 }
 
+// elossyMaxFullSearchCandidates caps how many segmentation candidates get the
+// full rate-distortion search. The rest are eliminated by the ranking pass.
+const elossyMaxFullSearchCandidates = 1
+
 // elossyStatsProfile is the reduced search used only to converge the
 // coefficient probability table. It keeps the mode search that shapes the
 // token distribution and drops the level refinement, which is what makes the
 // full search expensive and barely moves the resulting probabilities.
-// elossyMaxFullSearchCandidates caps how many segmentation candidates get the
-// full rate-distortion search. The rest are eliminated on the cheap pass.
-const elossyMaxFullSearchCandidates = 3
-
 func elossyStatsProfile(profile *elossyLossySearchProfile) elossyLossySearchProfile {
 	return elossyLossySearchProfile{
 		fastModeSearch: profile.fastModeSearch,
@@ -714,4 +714,30 @@ func elossyStatsMacroblockLimit(mbCount int) int {
 		limit = minimum
 	}
 	return limit
+}
+
+// elossyLimitedRows is how many macroblock rows a pass covers under mbLimit.
+// A pass is truncated to whole rows so every macroblock it does encode still
+// sees the neighbours its prediction depends on.
+func elossyLimitedRows(mbWidth, mbHeight, mbLimit int) int {
+	if mbLimit <= 0 || mbLimit >= mbWidth*mbHeight {
+		return mbHeight
+	}
+	return (mbLimit + mbWidth - 1) / mbWidth
+}
+
+// elossyRankingMacroblockLimit is how many macroblocks the candidate ranking
+// pass encodes. Ranking only has to order the candidates, not measure them, so
+// it runs the real search over a prefix of the frame rather than a reduced
+// search over all of it: the refinement the reduced search dropped is what
+// separates the candidates in the first place.
+func elossyRankingMacroblockLimit(mbCount int) int {
+	const minimum = 512
+	if mbCount <= minimum {
+		return mbCount
+	}
+	if limit := mbCount / 8; limit > minimum {
+		return limit
+	}
+	return minimum
 }
