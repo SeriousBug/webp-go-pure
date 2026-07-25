@@ -84,6 +84,10 @@ type elossyEncodedLossyCandidate struct {
 	probabilities  elossyCoeffProbTables
 	modes          []elossyMacroblockMode
 	tokenPartition []byte
+	// distortion is the SSE of the encoder's own reconstruction against the
+	// source, before loop filtering. Candidates are compared on rate *and*
+	// distortion, so a segmentation that only wins on size cannot be chosen.
+	distortion uint64
 }
 
 type elossyLossySearchProfile struct {
@@ -189,6 +193,19 @@ func elossyBuildRdMultipliers(quant *elossyQuantMatrices) elossyRdMultipliers {
 		uv:   max(3*qUv*qUv, 128) >> 6,
 		mode: max(qI4*qI4, 128) >> 7,
 	}
+}
+
+// elossyFrameRdCost scores a whole candidate frame as distortion plus rate
+// weighted by lambda, so a segmentation cannot win on size alone.
+//
+// Lambda uses the same 3*q^2/128 form as the block-level intra4 multiplier,
+// keeping the frame trade-off consistent with the decisions the block search
+// already made. It is evaluated unshifted here because the block multiplier's
+// >>7 truncates to uselessly coarse values at high quality.
+func elossyFrameRdCost(distortion uint64, size int, baseQuant int32) uint64 {
+	quant := elossyBuildQuantMatrices(int32(elossyClippedQuantizer(baseQuant)))
+	q := uint64(max(quant.y1[1], 8))
+	return distortion*128 + uint64(size)*8*max(3*q*q, 128)
 }
 
 func elossyClippedQuantizer(value int32) uint8 {

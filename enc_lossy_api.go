@@ -31,29 +31,33 @@ func elossyBuildCandidateVp8Frame(width, height, mbWidth, mbHeight int, candidat
 
 // elossyEncodeLossyCandidate encodes one lossy candidate and captures its token
 // partition, probabilities, and modes.
-func elossyEncodeLossyCandidate(source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig) (elossyEncodedLossyCandidate, error) {
+func elossyEncodeLossyCandidate(width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig) (elossyEncodedLossyCandidate, error) {
 	segmentQuants := elossyBuildSegmentQuantizers(segment)
 	var probabilities elossyCoeffProbTables
 	var modes []elossyMacroblockMode
 	var tokenPartition []byte
+	var reconstructed elossyPlanes
 
 	if profile.updateProbabilities {
 		var stats elossyCoeffStats
-		initialPartition, _, initialModes := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, &stats)
+		initialPartition, initialRecon, initialModes := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, &stats)
 		probabilities = elossyFinalizeTokenProbabilities(&stats)
 		if probabilities == elossyCoeffsProba0 {
 			tokenPartition = initialPartition
 			modes = initialModes
+			reconstructed = initialRecon
 		} else {
-			partition, _, m := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &probabilities, nil)
+			partition, recon, m := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &probabilities, nil)
 			tokenPartition = partition
 			modes = m
+			reconstructed = recon
 		}
 	} else {
-		partition, _, m := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, nil)
+		partition, recon, m := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, nil)
 		tokenPartition = partition
 		probabilities = coeffsProba0
 		modes = m
+		reconstructed = recon
 	}
 
 	return elossyEncodedLossyCandidate{
@@ -62,7 +66,18 @@ func elossyEncodeLossyCandidate(source *elossyPlanes, mbWidth, mbHeight int, pro
 		probabilities:  probabilities,
 		modes:          modes,
 		tokenPartition: tokenPartition,
+		distortion:     elossyReconstructionSse(source, &reconstructed, width, height),
 	}, nil
+}
+
+// elossyReconstructionSse measures the encoder's own reconstruction against the
+// source over the visible region, ignoring macroblock padding.
+func elossyReconstructionSse(source *elossyPlanes, reconstructed *elossyPlanes, width, height int) uint64 {
+	uvWidth := (width + 1) / 2
+	uvHeight := (height + 1) / 2
+	return elossyPlaneSseRegion(source.y, source.yStride, reconstructed.y, reconstructed.yStride, width, height) +
+		elossyPlaneSseRegion(source.u, source.uvStride, reconstructed.u, reconstructed.uvStride, uvWidth, uvHeight) +
+		elossyPlaneSseRegion(source.v, source.uvStride, reconstructed.v, reconstructed.uvStride, uvWidth, uvHeight)
 }
 
 // elossyFinalizeLossyCandidate finalizes the lossy candidate by choosing the best
@@ -122,22 +137,25 @@ func encodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *Lo
 	source := elossyRgbaToYuv420(width, height, rgba, mbWidth, mbHeight)
 	candidates := elossyBuildSegmentCandidates(&source, mbWidth, mbHeight, baseQuant, options.Effort)
 
-	var bestLen int
-	var bestVp8 []byte
+	// Candidates are ranked on rate *and* distortion using a cheap frame built
+	// with the heuristic filter; only the winner pays for the filter search.
+	heuristic := elossyHeuristicFilter(baseQuant)
+	var best elossyEncodedLossyCandidate
+	var bestCost uint64
 	found := false
 	for i := range candidates {
-		candidate, err := elossyEncodeLossyCandidate(&source, mbWidth, mbHeight, &profile, &candidates[i])
+		candidate, err := elossyEncodeLossyCandidate(width, height, &source, mbWidth, mbHeight, &profile, &candidates[i])
 		if err != nil {
 			return nil, err
 		}
-		vp8, err := elossyFinalizeLossyCandidate(width, height, &source, mbWidth, mbHeight, baseQuant, options.Effort, &candidate)
+		probe, err := elossyBuildCandidateVp8Frame(width, height, mbWidth, mbHeight, &candidate, &heuristic)
 		if err != nil {
 			return nil, err
 		}
-		replace := !found || len(vp8) < bestLen
-		if replace {
-			bestLen = len(vp8)
-			bestVp8 = vp8
+		cost := elossyFrameRdCost(candidate.distortion, len(probe), baseQuant)
+		if !found || cost < bestCost {
+			bestCost = cost
+			best = candidate
 			found = true
 		}
 	}
@@ -145,7 +163,7 @@ func encodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *Lo
 	if !found {
 		return nil, encBitstream("lossy candidate search produced no output")
 	}
-	return bestVp8, nil
+	return elossyFinalizeLossyCandidate(width, height, &source, mbWidth, mbHeight, baseQuant, options.Effort, &best)
 }
 
 // EncodeLossyRgbaToVp8 encodes RGBA pixels to a raw lossy VP8 frame payload.
