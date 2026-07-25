@@ -39,21 +39,28 @@ func elossyEncodeLossyCandidate(width, height int, source *elossyPlanes, mbWidth
 	var reconstructed elossyPlanes
 
 	if profile.updateProbabilities {
+		// The search scores rates against a probability table, so running it
+		// under the default table and then re-estimating leaves the decisions
+		// matched to a table that is no longer in use. Converge the table with
+		// a cheap search first, spend the real search against it once, then
+		// replay the chosen levels under the table those levels imply.
+		var priorStats elossyCoeffStats
+		priorProfile := elossyStatsProfile(profile)
+		elossyEncodeTokenPartition(source, mbWidth, mbHeight, &priorProfile, segment, &segmentQuants, &elossyCoeffsProba0, &priorStats)
+		searchTable := elossyFinalizeTokenProbabilities(&priorStats)
+
 		var stats elossyCoeffStats
-		initialPartition, initialRecon, initialModes := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, &stats)
+		searchPartition, recon, m, coeffs := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &searchTable, &stats)
+		modes = m
+		reconstructed = recon
 		probabilities = elossyFinalizeTokenProbabilities(&stats)
-		if probabilities == elossyCoeffsProba0 {
-			tokenPartition = initialPartition
-			modes = initialModes
-			reconstructed = initialRecon
+		if probabilities == searchTable {
+			tokenPartition = searchPartition
 		} else {
-			partition, recon, m := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &probabilities, nil)
-			tokenPartition = partition
-			modes = m
-			reconstructed = recon
+			tokenPartition = elossyReemitTokenPartition(mbWidth, mbHeight, len(searchPartition), coeffs, &probabilities)
 		}
 	} else {
-		partition, recon, m := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, nil)
+		partition, recon, m, _ := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, nil)
 		tokenPartition = partition
 		probabilities = coeffsProba0
 		modes = m

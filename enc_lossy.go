@@ -302,6 +302,17 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 	}
 }
 
+// elossyStatsProfile is the reduced search used only to converge the
+// coefficient probability table. It keeps the mode search that shapes the
+// token distribution and drops the level refinement, which is what makes the
+// full search expensive and barely moves the resulting probabilities.
+func elossyStatsProfile(profile *elossyLossySearchProfile) elossyLossySearchProfile {
+	return elossyLossySearchProfile{
+		fastModeSearch: profile.fastModeSearch,
+		allowI4x4:      profile.allowI4x4,
+	}
+}
+
 func elossyUseExhaustiveSegmentSearch(optimizationLevel uint8) bool {
 	return optimizationLevel >= 9
 }
