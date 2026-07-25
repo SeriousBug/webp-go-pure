@@ -341,7 +341,8 @@ func elossyFillLuma4PredictionFrom(neighbors *elossyLuma4Neighbors, mode uint8, 
 }
 
 func elossyPredictBlock(plane []uint8, stride, planeWidth, x, y int, mode uint8, n int) {
-	block := make([]uint8, n*n)
+	var scratch [16 * 16]uint8
+	block := scratch[:n*n]
 	elossyFillPredictionBlock(plane, stride, planeWidth, x, y, mode, block, n, n)
 	for row := 0; row < n; row++ {
 		src := row * n
