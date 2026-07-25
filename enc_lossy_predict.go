@@ -1,6 +1,7 @@
 package webp
 
 import (
+	"encoding/binary"
 	"math"
 	"math/bits"
 )
@@ -117,7 +118,166 @@ func elossyAvg3(a, b, c uint8) uint8 {
 	return uint8((uint16(a) + 2*uint16(b) + uint16(c) + 2) >> 2)
 }
 
+// elossyTmClip maps 255 + left + top - topLeft to the clipped prediction. The
+// expression spans [-255, 510], so biasing by 255 lands it in [0, 765]; the
+// table is padded to 1024 so the index mask proves the lookup in range and the
+// bounds check disappears.
+var elossyTmClip = func() [1024]uint8 {
+	var table [1024]uint8
+	for i := 0; i < 766; i++ {
+		table[i] = elossyClipByte(int32(i) - 255)
+	}
+	return table
+}()
+
+// elossyTmPredict16Go is the reference TrueMotion fill; the arm64 build replaces
+// the dispatched elossyTmPredict16 with a NEON version that must match it
+// byte-for-byte.
+func elossyTmPredict16Go(top, left *[16]uint8, topLeft uint8, out *[256]uint8) {
+	bias := 255 - int(topLeft)
+	for row := 0; row < 16; row++ {
+		base := bias + int(left[row])
+		dst := out[row*16 : row*16+16 : row*16+16]
+		for col := 0; col < 16; col++ {
+			dst[col] = elossyTmClip[(base+int(top[col]))&1023]
+		}
+	}
+}
+
+func elossyTmPredict8Go(top, left *[8]uint8, topLeft uint8, out *[64]uint8) {
+	bias := 255 - int(topLeft)
+	for row := 0; row < 8; row++ {
+		base := bias + int(left[row])
+		dst := out[row*8 : row*8+8 : row*8+8]
+		for col := 0; col < 8; col++ {
+			dst[col] = elossyTmClip[(base+int(top[col]))&1023]
+		}
+	}
+}
+
+// elossySplat8 replicates a byte across a 64-bit word so a block row fills with
+// 8-byte stores instead of one store per pixel.
+func elossySplat8(value uint8) uint64 {
+	return uint64(value) * 0x0101010101010101
+}
+
+func elossyPut16(out []uint8, word uint64) {
+	_ = out[15]
+	binary.LittleEndian.PutUint64(out, word)
+	binary.LittleEndian.PutUint64(out[8:], word)
+}
+
+func elossyTopSamples16(plane []uint8, stride, x, y int) (out [16]uint8) {
+	if y == 0 {
+		return [16]uint8{127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127}
+	}
+	copy(out[:], plane[(y-1)*stride+x:])
+	return out
+}
+
+func elossyLeftSamples16(plane []uint8, stride, x, y int) (out [16]uint8) {
+	if x == 0 {
+		return [16]uint8{129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129}
+	}
+	offset := y*stride + x - 1
+	for i := 0; i < 16; i++ {
+		out[i] = plane[offset]
+		offset += stride
+	}
+	return out
+}
+
+func elossyFillPredictionBlock16(plane []uint8, stride, x, y int, mode uint8, out *[256]uint8) {
+	switch mode {
+	case dcPred:
+		word := elossySplat8(elossyDcPredictValue(plane, stride, x, y, 16))
+		for row := 0; row < 256; row += 16 {
+			elossyPut16(out[row:], word)
+		}
+	case vPred:
+		top := elossyTopSamples16(plane, stride, x, y)
+		word := binary.LittleEndian.Uint64(top[:])
+		high := binary.LittleEndian.Uint64(top[8:])
+		for row := 0; row < 256; row += 16 {
+			dst := out[row : row+16]
+			binary.LittleEndian.PutUint64(dst, word)
+			binary.LittleEndian.PutUint64(dst[8:], high)
+		}
+	case hPred:
+		left := elossyLeftSamples16(plane, stride, x, y)
+		for row := 0; row < 16; row++ {
+			elossyPut16(out[row*16:], elossySplat8(left[row]))
+		}
+	case tmPred:
+		top := elossyTopSamples16(plane, stride, x, y)
+		left := elossyLeftSamples16(plane, stride, x, y)
+		elossyTmPredict16(&top, &left, elossyTopLeftSample(plane, stride, x, y), out)
+	default:
+		panic("unsupported macroblock prediction mode")
+	}
+}
+
+func elossyTopSamples8(plane []uint8, stride, x, y int) (out [8]uint8) {
+	if y == 0 {
+		return [8]uint8{127, 127, 127, 127, 127, 127, 127, 127}
+	}
+	copy(out[:], plane[(y-1)*stride+x:])
+	return out
+}
+
+func elossyLeftSamples8(plane []uint8, stride, x, y int) (out [8]uint8) {
+	if x == 0 {
+		return [8]uint8{129, 129, 129, 129, 129, 129, 129, 129}
+	}
+	offset := y*stride + x - 1
+	for i := 0; i < 8; i++ {
+		out[i] = plane[offset]
+		offset += stride
+	}
+	return out
+}
+
+func elossyFillPredictionBlock8(plane []uint8, stride, x, y int, mode uint8, out *[64]uint8) {
+	switch mode {
+	case dcPred:
+		word := elossySplat8(elossyDcPredictValue(plane, stride, x, y, 8))
+		for row := 0; row < 64; row += 8 {
+			binary.LittleEndian.PutUint64(out[row:row+8], word)
+		}
+	case vPred:
+		top := elossyTopSamples8(plane, stride, x, y)
+		word := binary.LittleEndian.Uint64(top[:])
+		for row := 0; row < 64; row += 8 {
+			binary.LittleEndian.PutUint64(out[row:row+8], word)
+		}
+	case hPred:
+		left := elossyLeftSamples8(plane, stride, x, y)
+		for row := 0; row < 8; row++ {
+			binary.LittleEndian.PutUint64(out[row*8:row*8+8], elossySplat8(left[row]))
+		}
+	case tmPred:
+		top := elossyTopSamples8(plane, stride, x, y)
+		left := elossyLeftSamples8(plane, stride, x, y)
+		elossyTmPredict8(&top, &left, elossyTopLeftSample(plane, stride, x, y), out)
+	default:
+		panic("unsupported macroblock prediction mode")
+	}
+}
+
 func elossyFillPredictionBlock(plane []uint8, stride, planeWidth, x, y int, mode uint8, out []uint8, outStride, n int) {
+	// The specialized kernels drop the right-edge clamp, so they only run where
+	// the block sits inside the plane. Every encoder caller passes
+	// planeWidth == stride with a macroblock-aligned x, which always holds.
+	if outStride == n && x+n <= planeWidth {
+		switch n {
+		case 16:
+			elossyFillPredictionBlock16(plane, stride, x, y, mode, (*[256]uint8)(out))
+			return
+		case 8:
+			elossyFillPredictionBlock8(plane, stride, x, y, mode, (*[64]uint8)(out))
+			return
+		}
+	}
 	switch mode {
 	case dcPred:
 		value := elossyDcPredictValue(plane, stride, x, y, n)
@@ -171,7 +331,15 @@ func elossyGatherLuma4Neighbors(plane []uint8, stride, planeWidth, x, y int) elo
 		topLeft: elossyTopLeftSample(plane, stride, x, y),
 		top:     elossyTopSamplesLuma4(plane, stride, planeWidth, x, y),
 	}
-	copy(neighbors.left[:], elossyLeftSamples(plane, stride, x, y, 4))
+	if x == 0 {
+		neighbors.left = [4]uint8{129, 129, 129, 129}
+	} else {
+		offset := y*stride + x - 1
+		for i := 0; i < 4; i++ {
+			neighbors.left[i] = plane[offset]
+			offset += stride
+		}
+	}
 	return neighbors
 }
 
@@ -417,34 +585,46 @@ func elossyMul2(value int32) int32 {
 	return (value * elossyVp8TransformAc3C2) >> 16
 }
 
+// elossySumRowBytes adds `size` contiguous bytes. Splitting the accumulator in
+// two lets the adds pipeline instead of serializing on one dependency chain.
+func elossySumRowBytes(row []uint8) uint32 {
+	var even, odd uint32
+	i := 0
+	for ; i+2 <= len(row); i += 2 {
+		even += uint32(row[i])
+		odd += uint32(row[i+1])
+	}
+	for ; i < len(row); i++ {
+		even += uint32(row[i])
+	}
+	return even + odd
+}
+
+func elossySumColumnBytes(plane []uint8, stride, offset, size int) uint32 {
+	var sum uint32
+	for i := 0; i < size; i++ {
+		sum += uint32(plane[offset])
+		offset += stride
+	}
+	return sum
+}
+
 func elossyDcPredictValue(plane []uint8, stride, x, y, size int) uint8 {
 	hasTop := y > 0
 	hasLeft := x > 0
 	tz := uint(bits.TrailingZeros(uint(size)))
 	switch {
 	case hasTop && hasLeft:
-		topRow := (y - 1) * stride
-		var sumTop uint32
-		for i := 0; i < size; i++ {
-			sumTop += uint32(plane[topRow+x+i])
-		}
-		var sumLeft uint32
-		for i := 0; i < size; i++ {
-			sumLeft += uint32(plane[(y+i)*stride+x-1])
-		}
+		topRow := (y-1)*stride + x
+		sumTop := elossySumRowBytes(plane[topRow : topRow+size : topRow+size])
+		sumLeft := elossySumColumnBytes(plane, stride, y*stride+x-1, size)
 		return uint8((sumTop + sumLeft + uint32(size)) >> (tz + 1))
 	case hasTop && !hasLeft:
-		topRow := (y - 1) * stride
-		var sumTop uint32
-		for i := 0; i < size; i++ {
-			sumTop += uint32(plane[topRow+x+i])
-		}
+		topRow := (y-1)*stride + x
+		sumTop := elossySumRowBytes(plane[topRow : topRow+size : topRow+size])
 		return uint8((sumTop + (uint32(size) >> 1)) >> tz)
 	case !hasTop && hasLeft:
-		var sumLeft uint32
-		for i := 0; i < size; i++ {
-			sumLeft += uint32(plane[(y+i)*stride+x-1])
-		}
+		sumLeft := elossySumColumnBytes(plane, stride, y*stride+x-1, size)
 		return uint8((sumLeft + (uint32(size) >> 1)) >> tz)
 	default:
 		return 128

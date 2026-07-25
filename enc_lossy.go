@@ -1,6 +1,7 @@
 package webp
 
 import (
+	"encoding/binary"
 	"math"
 	"sort"
 )
@@ -464,42 +465,88 @@ func elossyRgbaToYuv420(width, height int, rgba []byte, mbWidth, mbHeight int) e
 	u := make([]uint8, uvStride*uvHeight)
 	v := make([]uint8, uvStride*uvHeight)
 
+	// The planes are padded out to whole macroblocks. Only the padding needs the
+	// edge clamps, so the interior runs without them and the padding replicates
+	// the last real column and row instead of re-deriving them per pixel.
+	rowBytes := width * 4
 	for py := 0; py < yHeight; py++ {
-		srcY := py
-		if srcY > height-1 {
-			srcY = height - 1
+		dst := y[py*yStride : py*yStride+yStride : py*yStride+yStride]
+		if py >= height {
+			copy(dst, y[(height-1)*yStride:height*yStride])
+			continue
 		}
-		for px := 0; px < yStride; px++ {
-			srcX := px
-			if srcX > width-1 {
-				srcX = width - 1
+		src := rgba[py*rowBytes : py*rowBytes+rowBytes : py*rowBytes+rowBytes]
+		offset := 0
+		for px := 0; px < width; px++ {
+			// One 32-bit load beats three byte loads: the alpha byte is discarded
+			// but the bounds check and the address arithmetic are paid once.
+			pixel := binary.LittleEndian.Uint32(src[offset : offset+4 : offset+4])
+			dst[px] = elossyRgbToY(uint8(pixel), uint8(pixel>>8), uint8(pixel>>16))
+			offset += 4
+		}
+		if width < yStride {
+			last := dst[width-1]
+			for px := width; px < yStride; px++ {
+				dst[px] = last
 			}
-			offset := (srcY*width + srcX) * 4
-			y[py*yStride+px] = elossyRgbToY(rgba[offset], rgba[offset+1], rgba[offset+2])
 		}
 	}
 
+	// A chroma row past the image bottom clamps both of its source rows to the
+	// last one, so every such row is identical and only the first is computed.
+	uvRows := (height + 1) / 2
 	for py := 0; py < uvHeight; py++ {
-		for px := 0; px < uvStride; px++ {
-			var sumR, sumG, sumB int32
-			for dy := 0; dy < 2; dy++ {
-				srcY := py*2 + dy
-				if srcY > height-1 {
-					srcY = height - 1
-				}
-				for dx := 0; dx < 2; dx++ {
-					srcX := px*2 + dx
-					if srcX > width-1 {
-						srcX = width - 1
-					}
-					offset := (srcY*width + srcX) * 4
-					sumR += int32(rgba[offset])
-					sumG += int32(rgba[offset+1])
-					sumB += int32(rgba[offset+2])
-				}
+		dstU := u[py*uvStride : py*uvStride+uvStride : py*uvStride+uvStride]
+		dstV := v[py*uvStride : py*uvStride+uvStride : py*uvStride+uvStride]
+		if py > uvRows {
+			copy(dstU, u[uvRows*uvStride:(uvRows+1)*uvStride])
+			copy(dstV, v[uvRows*uvStride:(uvRows+1)*uvStride])
+			continue
+		}
+		y0 := py * 2
+		if y0 > height-1 {
+			y0 = height - 1
+		}
+		y1 := py*2 + 1
+		if y1 > height-1 {
+			y1 = height - 1
+		}
+		row0 := rgba[y0*rowBytes : y0*rowBytes+rowBytes : y0*rowBytes+rowBytes]
+		row1 := rgba[y1*rowBytes : y1*rowBytes+rowBytes : y1*rowBytes+rowBytes]
+
+		// A 2x2 quad is two 64-bit loads. Masking to alternate bytes keeps each
+		// channel in its own 16-bit lane, which holds the sum of four samples
+		// without carrying into its neighbour, so the twelve byte loads and the
+		// per-sample widening collapse into a handful of word operations.
+		const evenBytes = uint64(0x00FF00FF00FF00FF)
+		quads := width / 2
+		offset := 0
+		for px := 0; px < quads; px++ {
+			word0 := binary.LittleEndian.Uint64(row0[offset : offset+8 : offset+8])
+			word1 := binary.LittleEndian.Uint64(row1[offset : offset+8 : offset+8])
+			rb := (word0 & evenBytes) + (word1 & evenBytes)
+			ga := ((word0 >> 8) & evenBytes) + ((word1 >> 8) & evenBytes)
+			sumR := int32((rb & 0xffff) + ((rb >> 32) & 0xffff))
+			sumB := int32(((rb >> 16) & 0xffff) + (rb >> 48))
+			sumG := int32((ga & 0xffff) + ((ga >> 32) & 0xffff))
+			dstU[px] = elossyRgbToU(sumR, sumG, sumB)
+			dstV[px] = elossyRgbToV(sumR, sumG, sumB)
+			offset += 8
+		}
+		if quads < uvStride {
+			// Both an odd image's last chroma column and the padding columns clamp
+			// their whole 2x2 quad onto the last pixel column, so they all take the
+			// same value.
+			last := (width - 1) * 4
+			sumR := 2 * (int32(row0[last]) + int32(row1[last]))
+			sumG := 2 * (int32(row0[last+1]) + int32(row1[last+1]))
+			sumB := 2 * (int32(row0[last+2]) + int32(row1[last+2]))
+			padU := elossyRgbToU(sumR, sumG, sumB)
+			padV := elossyRgbToV(sumR, sumG, sumB)
+			for px := quads; px < uvStride; px++ {
+				dstU[px] = padU
+				dstV[px] = padV
 			}
-			u[py*uvStride+px] = elossyRgbToU(sumR, sumG, sumB)
-			v[py*uvStride+px] = elossyRgbToV(sumR, sumG, sumB)
 		}
 	}
 
