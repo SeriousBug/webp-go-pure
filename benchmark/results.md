@@ -44,11 +44,8 @@ emits it directly.
   quality->quantizer mapping to libwebp's nonlinear curve, fixed a token-partition
   desync, and switched candidate selection to rate-distortion, so our output
   intentionally diverges from the Rust original.
-- **`webp-rust` `lossy-fast` output is corrupt on 3 of 7 images:**
-  abubakar 16.44 dB, martin 9.38 dB, toulouse 6.35 dB, against ~40 dB for the
-  others. Its own decoder and ours agree on those figures to the hundredth of a
-  dB, so the bitstream is bad; the decode is fine. This is the desync 7e5e084
-  fixed on our side.
+- **`webp-rust` `lossy-fast` output is corrupt on 3 of 7 images**, a bug this
+  port found and fixed. See "The webp-rust lossy-fast bug" below.
 - **`webp-rust` `lossy-slow` files are smaller than everyone's, at 1.5-3 dB lower
   quality** (e.g. toulouse 560756 B at 36.23 dB vs our 753810 B at 39.55 dB).
   An earlier capture of these results read that size advantage as a compression
@@ -57,6 +54,71 @@ emits it directly.
   lossless path (Lena 547 ms vs 895 ms) and our `lossy-slow` path (Lena 1422 ms
   vs 2611 ms). The `wasm` engine is the exception in places, where the two are
   closer.
+
+## The webp-rust lossy-fast bug
+
+Porting `webp-rust` to Go and testing the result turned up a bug in the original
+that its own test suite did not catch: at `lossy-fast` (effort 0), it can write
+WebP files that no decoder can read back correctly. The decoded image comes out
+mostly noise.
+
+Three of the seven test images hit it:
+
+| image | webp-rust | ours | libwebp |
+| --- | --- | --- | --- |
+| toulouse | **6.35 dB** | 39.93 dB | 39.84 dB |
+| martin-alargent | **9.38 dB** | 42.37 dB | 42.63 dB |
+| abubakar-mamman | **16.44 dB** | 42.00 dB | 41.96 dB |
+| the other four | 39.7-49.0 dB | 40.9-49.3 dB | 40.9-49.1 dB |
+
+For scale, a normal encode at quality 90 lands near 40 dB.
+
+### What goes wrong
+
+A VP8 frame may omit the coefficient data for a macroblock whose contents all
+quantized to zero, marking it "skipped" instead. That is only legal if the frame
+header turns on per-macroblock skip signaling, which is what tells the decoder to
+expect a skip flag and read no coefficients for those macroblocks.
+
+`webp-rust` decides whether to turn that signaling on from a probability
+threshold (`compute_skip_probability` in `src/encoder/lossy/bitstream.rs` returns
+`None`, disabling signaling, once the computed probability reaches 250). A
+detailed image at effort 0 has very few skippable macroblocks, which pushes the
+probability past that threshold and switches the signaling off. The encoder still
+omits those macroblocks' coefficients, though. The decoder, given no skip flag,
+reads the *next* macroblock's coefficients for each skipped one, and every
+macroblock after the first skip is decoded from the wrong data.
+
+That is why the bug needs an unusual combination to appear: at least one skipped
+macroblock, but too few for the signaling to be enabled. Detailed photos at
+effort 0 are exactly that case, which is why `lossy-slow` (effort 9) is unaffected
+here and why four of the seven images encode fine.
+
+### How we know it is the encoder, not the decoder
+
+Two independently written decoders were pointed at the same `webp-rust` files and
+returned PSNR figures agreeing to the hundredth of a dB: `webp-rust`'s own
+decoder, and this library's (which is checked against libwebp in
+`benchmark/compat`). They agree on the healthy image too, so they are not failing
+in the same place:
+
+```
+toulouse   webp-rust decoder 6.35 dB    our decoder 6.35 dB
+martin     webp-rust decoder 9.38 dB    our decoder 9.38 dB
+Lena       webp-rust decoder 40.09 dB   our decoder 40.09 dB
+```
+
+Two decoders that disagree with each other would point at a decoder bug. Two that
+agree the file is broken point at the file. Reading the encoder source then
+confirms the mechanism above.
+
+### The fix here
+
+This port inherited the same gate and the same bug. Commit 7e5e084 turns skip
+signaling on whenever any macroblock is skipped, rather than consulting a
+threshold, and adds a regression test built on a mostly-detailed image so the
+rare-skip case stays covered. Our `lossy-fast` column above is the fixed
+behaviour. The bug is still present in `webp-rust` v0.2.1.
 
 ## arm64 (Apple M4 Pro)
 
