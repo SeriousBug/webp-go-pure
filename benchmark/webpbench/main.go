@@ -17,7 +17,10 @@
 //
 // It emits one CSV line per (engine, mode, image):
 //
-//	engine,mode,file,width,height,bytes,iters,ms_per_op
+//	engine,mode,file,width,height,bytes,psnr_db,iters,ms_per_op
+//
+// psnr_db scores the encoder's own output against the pixels it was handed, and
+// is "-" for lossless.
 //
 // so results can be merged with the Rust engine's output (see benchmark/run.sh).
 package main
@@ -29,6 +32,7 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -60,7 +64,7 @@ func main() {
 	flag.Parse()
 
 	if *header {
-		fmt.Println("engine,mode,file,width,height,bytes,iters,ms_per_op")
+		fmt.Println("engine,mode,file,width,height,bytes,psnr_db,iters,ms_per_op")
 	}
 
 	paths, err := listImages(*dir)
@@ -99,13 +103,23 @@ func main() {
 		}
 
 		for _, e := range encoders {
-			size, iters, perOp, err := measure(e.fn, budget, *minIters, *maxIters)
+			out, iters, perOp, err := measure(e.fn, budget, *minIters, *maxIters)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s/%s %s: %v\n", e.engine, e.mode, name, err)
 				continue
 			}
-			fmt.Printf("%s,%s,%s,%d,%d,%d,%d,%.3f\n",
-				e.engine, e.mode, name, buf.Width, buf.Height, size, iters, float64(perOp.Microseconds())/1000.0)
+			quality := "-"
+			if e.mode != "lossless" {
+				dB, err := psnrOf(buf.RGBA, out)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%s/%s %s: psnr: %v\n", e.engine, e.mode, name, err)
+					continue
+				}
+				quality = fmt.Sprintf("%.2f", dB)
+			}
+			fmt.Printf("%s,%s,%s,%d,%d,%d,%s,%d,%.3f\n",
+				e.engine, e.mode, name, buf.Width, buf.Height, len(out), quality, iters,
+				float64(perOp.Microseconds())/1000.0)
 		}
 	}
 }
@@ -143,31 +157,56 @@ func wasmEncoder(img *image.NRGBA, opts gwebp.Options) func() ([]byte, error) {
 	}
 }
 
-func measure(fn func() ([]byte, error), budget time.Duration, minIters, maxIters int) (size, iters int, perOp time.Duration, err error) {
+func measure(fn func() ([]byte, error), budget time.Duration, minIters, maxIters int) (out []byte, iters int, perOp time.Duration, err error) {
 	t0 := time.Now()
-	out, err := fn() // warmup / first sample
+	out, err = fn() // warmup / first sample
 	if err != nil {
-		return 0, 0, 0, err
+		return nil, 0, 0, err
 	}
-	size = len(out)
 	// If a single encode already exceeds the budget, report it as one iteration
 	// instead of paying for the warmup plus a full timed loop.
 	if warm := time.Since(t0); warm >= budget {
-		return size, 1, warm, nil
+		return out, 1, warm, nil
 	}
 
 	start := time.Now()
 	for {
 		if _, err = fn(); err != nil {
-			return 0, 0, 0, err
+			return nil, 0, 0, err
 		}
 		iters++
 		elapsed := time.Since(start)
 		if iters >= maxIters || (iters >= minIters && elapsed >= budget) {
 			perOp = elapsed / time.Duration(iters)
-			return size, iters, perOp, nil
+			return out, iters, perOp, nil
 		}
 	}
+}
+
+// psnrOf decodes an encoded WebP and scores it against the source pixels the
+// encoder was given, over RGB only.
+func psnrOf(src []byte, encoded []byte) (float64, error) {
+	dec, err := webp.Decode(encoded)
+	if err != nil {
+		return 0, err
+	}
+	if len(dec.RGBA) != len(src) {
+		return 0, fmt.Errorf("decoded %d bytes, source has %d", len(dec.RGBA), len(src))
+	}
+	var sum float64
+	n := 0
+	for i := range src {
+		if i%4 == 3 {
+			continue
+		}
+		d := float64(src[i]) - float64(dec.RGBA[i])
+		sum += d * d
+		n++
+	}
+	if sum == 0 {
+		return math.Inf(1), nil
+	}
+	return 10 * math.Log10(255*255/(sum/float64(n))), nil
 }
 
 func listImages(dir string) ([]string, error) {
