@@ -51,6 +51,7 @@ func elossyRunCandidatePass(width, height int, source *elossyPlanes, mbWidth, mb
 		modes:          modes,
 		tokenPartition: partition,
 		distortion:     elossyReconstructionSse(source, &reconstructed, width, sseHeight),
+		reconstructed:  reconstructed,
 	}, elossyFinalizeTokenProbabilities(&stats)
 }
 
@@ -114,10 +115,7 @@ func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWid
 		if err != nil {
 			return nil, err
 		}
-		distortion, err := elossyYuvSse(source, width, height, vp8)
-		if err != nil {
-			return nil, err
-		}
+		distortion := elossyFilteredDistortion(source, &candidate.reconstructed, width, height, mbWidth, mbHeight, &filters[i], candidate.modes)
 		replace := !found ||
 			distortion < bestDistortion ||
 			(distortion == bestDistortion && len(vp8) < bestLen)

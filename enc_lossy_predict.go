@@ -804,18 +804,6 @@ func elossyPlaneSseRegion(source []uint8, sourceStride int, decoded []uint8, dec
 	return sse
 }
 
-func elossyYuvSse(source *elossyPlanes, width, height int, vp8 []byte) (uint64, error) {
-	decoded, err := decodeLossyVp8ToYuv(vp8)
-	if err != nil {
-		return 0, encBitstream("internal filter evaluation decode failed")
-	}
-	uvWidth := (width + 1) / 2
-	uvHeight := (height + 1) / 2
-	return elossyPlaneSseRegion(source.y, source.yStride, decoded.Y, decoded.YStride, width, height) +
-		elossyPlaneSseRegion(source.u, source.uvStride, decoded.U, decoded.UVStride, uvWidth, uvHeight) +
-		elossyPlaneSseRegion(source.v, source.uvStride, decoded.V, decoded.UVStride, uvWidth, uvHeight), nil
-}
-
 // elossyLumaTrial holds one luma mode trial's quantized levels and the
 // reconstruction they produce. The mode search computes both for every
 // candidate; keeping the winner's lets token emission reuse them instead of

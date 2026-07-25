@@ -88,6 +88,9 @@ type elossyEncodedLossyCandidate struct {
 	// source, before loop filtering. Candidates are compared on rate *and*
 	// distortion, so a segmentation that only wins on size cannot be chosen.
 	distortion uint64
+	// reconstructed is the unfiltered reconstruction, kept so the filter
+	// search can score levels without decoding the frame back.
+	reconstructed elossyPlanes
 }
 
 type elossyLossySearchProfile struct {

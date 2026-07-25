@@ -299,6 +299,14 @@ func lossyMacroblockFilterInfo(frame *macroBlockDataFrame, macroblock *macroBloc
 		}
 	}
 
+	inner := macroblock.Header.IsI4x4 || (macroblock.NonZeroY|macroblock.NonZeroUV) != 0
+	return lossyFilterInfoForLevel(baseLevel, filter.Sharpness, inner)
+}
+
+// lossyFilterInfoForLevel derives the strengths a macroblock is filtered with
+// from its base level. The encoder scores filter levels through this too, so
+// the two agree by construction rather than by a second implementation.
+func lossyFilterInfoForLevel(baseLevel int32, sharpness uint8, inner bool) (lossyFilterInfo, bool) {
 	level := baseLevel
 	if level < 0 {
 		level = 0
@@ -310,13 +318,13 @@ func lossyMacroblockFilterInfo(frame *macroBlockDataFrame, macroblock *macroBloc
 	}
 
 	ilevel := level
-	if filter.Sharpness > 0 {
-		if filter.Sharpness > 4 {
+	if sharpness > 0 {
+		if sharpness > 4 {
 			ilevel >>= 2
 		} else {
 			ilevel >>= 1
 		}
-		m := 9 - int32(filter.Sharpness)
+		m := 9 - int32(sharpness)
 		if ilevel > m {
 			ilevel = m
 		}
@@ -337,7 +345,7 @@ func lossyMacroblockFilterInfo(frame *macroBlockDataFrame, macroblock *macroBloc
 	return lossyFilterInfo{
 		fLimit:    uint8(2*level + ilevel),
 		fILevel:   uint8(ilevel),
-		fInner:    macroblock.Header.IsI4x4 || (macroblock.NonZeroY|macroblock.NonZeroUV) != 0,
+		fInner:    inner,
 		hevThresh: hevThresh,
 	}, true
 }
@@ -347,14 +355,17 @@ func lossyFilterMacroblock(frame *macroBlockDataFrame, planes *lossyPlanes, mbX,
 	if !ok {
 		return
 	}
+	lossyFilterMacroblockWith(frame.Frame.Filter.filterType, planes, mbX, mbY, &info)
+}
 
+func lossyFilterMacroblockWith(kind filterType, planes *lossyPlanes, mbX, mbY int, info *lossyFilterInfo) {
 	yPos := mbY*16*planes.yStride + mbX*16
 	uvPos := mbY*8*planes.uvStride + mbX*8
 	limit := int32(info.fLimit)
 	inner := int32(info.fILevel)
 	hev := int32(info.hevThresh)
 
-	switch frame.Frame.Filter.filterType {
+	switch kind {
 	case filterOff:
 	case filterSimple:
 		if mbX > 0 {
