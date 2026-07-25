@@ -53,6 +53,11 @@ type elossyRdMultipliers struct {
 	i4   uint32
 	uv   uint32
 	mode uint32
+	// The trellis weighs rate against a transform-domain error rather than the
+	// pixel-domain SSE the mode search uses, so it needs its own multipliers.
+	trellisI16 uint32
+	trellisI4  uint32
+	trellisUv  uint32
 }
 
 type elossyPlanes struct {
@@ -190,10 +195,13 @@ func elossyBuildRdMultipliers(quant *elossyQuantMatrices) elossyRdMultipliers {
 	qI16 := uint32(max(quant.y2[1], 8))
 	qUv := uint32(max(quant.uv[1], 8))
 	return elossyRdMultipliers{
-		i16:  max(3*qI16*qI16, 128),
-		i4:   max(3*qI4*qI4, 128) >> 7,
-		uv:   max(3*qUv*qUv, 128) >> 6,
-		mode: max(qI4*qI4, 128) >> 7,
+		i16:        max(3*qI16*qI16, 128),
+		i4:         max(3*qI4*qI4, 128) >> 7,
+		uv:         max(3*qUv*qUv, 128) >> 6,
+		mode:       max(qI4*qI4, 128) >> 7,
+		trellisI16: max((qI16*qI16)>>2, 1),
+		trellisI4:  max((7*qI4*qI4)>>3, 1),
+		trellisUv:  max((qUv*qUv)<<1, 1),
 	}
 }
 

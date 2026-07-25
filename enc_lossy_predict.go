@@ -739,9 +739,9 @@ func elossyRefineLevelsGreedy(source []uint8, sourceStride, x, y int, prediction
 	return coeffs
 }
 
-func elossyMaybeRefineLevels(enabled bool, source []uint8, sourceStride, x, y int, prediction *[16]uint8, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
+func elossyMaybeRefineLevels(enabled bool, coeffs *[16]int16, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
 	if enabled {
-		return elossyRefineLevelsGreedy(source, sourceStride, x, y, prediction, model, coeffType, ctx, first, dcQuant, acQuant, lambda, levels)
+		return elossyTrellisQuantize(coeffs, model, coeffType, ctx, first, dcQuant, acQuant, lambda, levels)
 	}
 	return elossyDequantizeLevels(levels, dcQuant, acQuant)
 }
@@ -863,9 +863,8 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 			acOnly := coeffs
 			acOnly[0] = 0
 			levels := elossyQuantizeBlock(&acOnly, quant.y1[0], quant.y1[1], 1)
-			predictionBlock := elossyCopyBlock4FromBuffer(prediction[:], 16, subX*4, subY*4)
 			ctx := int(l + (refineTnz & 1))
-			coeffsR := elossyMaybeRefineLevels(profile.refineI16, source.y, source.yStride, x+subX*4, y+subY*4, &predictionBlock, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.i16, &levels)
+			coeffsR := elossyMaybeRefineLevels(profile.refineI16, &acOnly, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.trellisI16, &levels)
 			yLevels[block] = levels
 			yCoeffs[block] = coeffsR
 			hasAc := uint8(0)
@@ -966,7 +965,7 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 				elossyFillLuma4PredictionFrom(&neighbors, mode, predictionBlock[:], 4)
 				coeffs := elossyForwardTransformAt(source.y, source.yStride, blockX, blockY, predictionBlock[:], 4, 0, 0)
 				levels := elossyQuantizeBlock(&coeffs, quant.y1[0], quant.y1[1], 0)
-				dequantized := elossyMaybeRefineLevels(profile.refineI4Search, source.y, source.yStride, blockX, blockY, &predictionBlock, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.i4, &levels)
+				dequantized := elossyMaybeRefineLevels(profile.refineI4Search, &coeffs, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.trellisI4, &levels)
 				candidate := predictionBlock
 				elossyAddTransform(candidate[:], 4, 0, 0, &dequantized)
 				distortion := elossyBlockSse4x4(source.y, source.yStride, blockX, blockY, &candidate)
@@ -1041,10 +1040,9 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 		for subX := 0; subX < 2; subX++ {
 			block := subY*2 + subX
 			coeffsU := elossyForwardTransformAt(source.u, source.uvStride, x+subX*4, y+subY*4, predictionU[:], 8, subX*4, subY*4)
-			predictionBlockU := elossyCopyBlock4FromBuffer(predictionU[:], 8, subX*4, subY*4)
 			levelsU := elossyQuantizeBlock(&coeffsU, quant.uv[0], quant.uv[1], 0)
 			ctx := int(l + (tnzU & 1))
-			coeffsUR := elossyMaybeRefineLevels(profile.refineChroma, source.u, source.uvStride, x+subX*4, y+subY*4, &predictionBlockU, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.uv, &levelsU)
+			coeffsUR := elossyMaybeRefineLevels(profile.refineChroma, &coeffsU, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levelsU)
 			trial.uLevels[block] = levelsU
 			hasCoeffs := uint8(0)
 			if elossyBlockHasNonZero(&levelsU, 0) {
@@ -1066,10 +1064,9 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 		for subX := 0; subX < 2; subX++ {
 			block := subY*2 + subX
 			coeffsV := elossyForwardTransformAt(source.v, source.uvStride, x+subX*4, y+subY*4, predictionV[:], 8, subX*4, subY*4)
-			predictionBlockV := elossyCopyBlock4FromBuffer(predictionV[:], 8, subX*4, subY*4)
 			levelsV := elossyQuantizeBlock(&coeffsV, quant.uv[0], quant.uv[1], 0)
 			ctx := int(l + (tnzV & 1))
-			coeffsVR := elossyMaybeRefineLevels(profile.refineChroma, source.v, source.uvStride, x+subX*4, y+subY*4, &predictionBlockV, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.uv, &levelsV)
+			coeffsVR := elossyMaybeRefineLevels(profile.refineChroma, &coeffsV, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levelsV)
 			trial.vLevels[block] = levelsV
 			hasCoeffs := uint8(0)
 			if elossyBlockHasNonZero(&levelsV, 0) {
