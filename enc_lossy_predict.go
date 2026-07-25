@@ -616,10 +616,10 @@ func elossyQuantizeCoefficient(coeff int16, quant uint16) (int16, int16) {
 	return int16(level), int16(level * q)
 }
 
-// elossyQuantizeBlock returns the quantized levels only. Every caller
+// elossyQuantizeBlockGo returns the quantized levels only. Every caller
 // dequantizes through the refinement step, which produces the reconstruction
 // levels it settles on, so producing them here as well was wasted work.
-func elossyQuantizeBlock(coeffs *[16]int16, dcQuant, acQuant uint16, first int) [16]int16 {
+func elossyQuantizeBlockGo(coeffs *[16]int16, dcQuant, acQuant uint16, first int) [16]int16 {
 	var levels [16]int16
 	for index := first; index < 16; index++ {
 		quant := acQuant
