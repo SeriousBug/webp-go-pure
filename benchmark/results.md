@@ -47,10 +47,16 @@ emits it directly.
   quality** (e.g. toulouse 560756 B at 36.23 dB vs our 753810 B at 39.55 dB).
   An earlier capture of these results read that size advantage as a compression
   win; the PSNR column shows it is over-quantization.
-- **arm64 vs amd64:** the M4 Pro leads on nearly every cell, most visibly on our
-  lossless path (Lena 547 ms vs 895 ms) and our `lossy-slow` path (Lena 1422 ms
-  vs 2611 ms). The `wasm` engine is the exception in places, where the two are
-  closer.
+
+## Charts
+
+![Size and quality against libwebp: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-light.svg#gh-light-mode-only)
+![Size and quality against libwebp: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-dark.svg#gh-dark-mode-only)
+
+![Encode time per image for each engine, one panel per mode and machine, with bars that run off the panel drawn fading out under an arrow](charts/encode-time-light.svg#gh-light-mode-only)
+![Encode time per image for each engine, one panel per mode and machine, with bars that run off the panel drawn fading out under an arrow](charts/encode-time-dark.svg#gh-dark-mode-only)
+
+Regenerate them from the tables below with `benchmark/chart/chart.go`.
 
 ## The webp-rust lossy-fast bug
 
