@@ -864,6 +864,8 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 	backup := elossyCopyBlock16(reconstructed.y, reconstructed.yStride, x, y)
 	var totalScore uint64
 	var subModes [16]uint8
+	var predictions [numBModes][16]uint8
+	var screen elossyModeScreen
 	var localTop [4]uint8
 	copy(localTop[:], topModes)
 	localLeft := *leftModes
@@ -886,12 +888,28 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 			var bestLevels [16]int16
 			bestScore := uint64(0xffffffffffffffff)
 			bestNonZero := uint8(0)
+
+			candidates := elossyAllLuma4Candidates[:]
+			for index, mode := range modes {
+				elossyFillLuma4PredictionFrom(&neighbors, mode, predictions[index][:], 4)
+			}
+			if profile.modeScreenTopK > 0 && profile.modeScreenTopK < numBModes {
+				lambda := elossyModeRateLambda(rd)
+				screen.reset(profile.modeScreenTopK)
+				for index, mode := range modes {
+					tdisto := uint64(elossyTDisto4x4Contiguous(source.y, source.yStride, blockX, blockY, &predictions[index]))
+					rate := elossyIntra4ModeRate(topMode, leftMode, mode)
+					screen.add(uint8(index), elossyRdScore(elossyScaleTDisto(tdisto, quant.y1[1]), rate, lambda))
+				}
+				candidates = screen.selected()
+			}
+
 			// The trials work in a contiguous 4x4 buffer rather than in the
 			// reconstruction plane: only the winner is written back, which
 			// keeps nine of the ten trials off the strided plane entirely.
-			for _, mode := range modes {
-				var predictionBlock [16]uint8
-				elossyFillLuma4PredictionFrom(&neighbors, mode, predictionBlock[:], 4)
+			for _, index := range candidates {
+				mode := modes[index]
+				predictionBlock := predictions[index]
 				coeffs := elossyForwardTransformAt(source.y, source.yStride, blockX, blockY, predictionBlock[:], 4, 0, 0)
 				var levels [16]int16
 				dequantized, coeffRate := elossyQuantizeLevelsRate(profile.refineI4Search, &coeffs, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.trellisI4, &levels)
@@ -1082,10 +1100,24 @@ func elossyChooseMacroblockMode(trials *elossyMbTrials, source *elossyPlanes, re
 		}
 	}
 
+	var lumaScreen, chromaScreen elossyModeScreen
+	lumaCandidates := modes[:]
+	chromaCandidates := modes[:]
+	if profile.modeScreenTopK > 0 && profile.modeScreenTopK < len(modes) {
+		lumaScreen.reset(profile.modeScreenTopK)
+		chromaScreen.reset(profile.modeScreenTopK)
+		for _, mode := range modes {
+			lumaScreen.add(mode, elossyLuma16ProxyScore(source, reconstructed, mbX, mbY, quant, rd, mode))
+			chromaScreen.add(mode, elossyChromaProxyScore(source, reconstructed, mbX, mbY, quant, rd, mode))
+		}
+		lumaCandidates = lumaScreen.selected()
+		chromaCandidates = chromaScreen.selected()
+	}
+
 	keptLuma, spareLuma := &trials.luma[0], &trials.luma[1]
 	bestLuma := uint8(dcPred)
 	bestLumaScore := uint64(0xffffffffffffffff)
-	for _, mode := range modes {
+	for _, mode := range lumaCandidates {
 		score := elossyEvaluateLumaMode(spareLuma, source, reconstructed, mbX, mbY, profile, quant, rd, model, topContext, leftContext, mode)
 		if score < bestLumaScore {
 			bestLuma = mode
@@ -1115,7 +1147,7 @@ func elossyChooseMacroblockMode(trials *elossyMbTrials, source *elossyPlanes, re
 	keptChroma, spareChroma := &trials.chroma[0], &trials.chroma[1]
 	bestChroma := uint8(dcPred)
 	bestChromaScore := uint64(0xffffffffffffffff)
-	for _, mode := range modes {
+	for _, mode := range chromaCandidates {
 		score := elossyEvaluateChromaMode(spareChroma, source, reconstructed, mbX, mbY, profile, quant, rd, model, topContext, leftContext, mode)
 		if score < bestChromaScore {
 			bestChroma = mode

@@ -106,6 +106,10 @@ type elossyLossySearchProfile struct {
 	refineI4Final       bool
 	refineChroma        bool
 	updateProbabilities bool
+	// modeScreenTopK is how many modes survive the Hadamard-domain pre-screen
+	// and get a full transform/quantize/reconstruct trial. Zero disables the
+	// screen and trials every mode.
+	modeScreenTopK int
 }
 
 func elossyDefaultOptions() LossyOptions {
@@ -270,17 +274,20 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 	case 1, 2:
 		return elossyLossySearchProfile{
 			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
 		}
 	case 3, 4:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
 			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
 		}
 	case 5:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
 			refineChroma:        true,
 			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
 		}
 	case 6:
 		return elossyLossySearchProfile{
@@ -289,6 +296,7 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			refineI4Final:       true,
 			refineChroma:        true,
 			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
 		}
 	case 7:
 		return elossyLossySearchProfile{
@@ -298,6 +306,7 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			refineI4Final:       true,
 			refineChroma:        true,
 			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
 		}
 	default:
 		return elossyLossySearchProfile{
@@ -323,6 +332,7 @@ func elossyStatsProfile(profile *elossyLossySearchProfile) elossyLossySearchProf
 	return elossyLossySearchProfile{
 		fastModeSearch: profile.fastModeSearch,
 		allowI4x4:      profile.allowI4x4,
+		modeScreenTopK: profile.modeScreenTopK,
 	}
 }
 
