@@ -22,8 +22,8 @@ encoder was handed, over RGB. Lossless is exact, so it shows `-`. Size without
 quality is not comparable: an encoder can always make a smaller file by
 quantizing harder, so the two columns have to be read together.
 
-Encoder output is identical on both machines — every size in the two tables
-matches — so the `psnr_db` column is shared between them and only the timings
+Encoder output is identical on both machines (every size in the two tables
+matches), so the `psnr_db` column is shared between them and only the timings
 differ. These timings were captured before `webpbench` and `rustbench` emitted
 PSNR, so the column was measured in a separate pass at the same settings and
 matched back row by row against the byte sizes here; re-running `run.sh` now
@@ -31,10 +31,9 @@ emits it directly.
 
 ## Reading these numbers
 
-- **vs libwebp, `lossy-slow`:** we produce slightly *smaller* files (0.84-1.00x)
-  at slightly lower quality (0.3-1.1 dB behind, except steve-29626041 at 2.9 dB).
-  That is a real but modest rate-distortion deficit, and it costs 14-24x the
-  encode time.
+- **vs libwebp, `lossy-slow`:** we produce smaller files (0.84-1.00x) at lower
+  quality (0.3-1.1 dB behind, except steve-29626041 at 2.9 dB). That is a
+  rate-distortion deficit, and it costs 14-24x the encode time.
 - **vs libwebp, `lossy-fast`:** quality matches within ±0.5 dB, but our files are
   10-62% bigger for 1.3-1.6x the time. Effort 0 is where we are furthest behind.
 - **vs libwebp, lossless:** we are 3-9% bigger and 1.2-2.7x slower.
@@ -45,11 +44,11 @@ emits it directly.
   quality->quantizer mapping to libwebp's nonlinear curve, fixed a token-partition
   desync, and switched candidate selection to rate-distortion, so our output
   intentionally diverges from the Rust original.
-- **`webp-rust` `lossy-fast` output is corrupt on 3 of 7 images** —
+- **`webp-rust` `lossy-fast` output is corrupt on 3 of 7 images:**
   abubakar 16.44 dB, martin 9.38 dB, toulouse 6.35 dB, against ~40 dB for the
   others. Its own decoder and ours agree on those figures to the hundredth of a
-  dB, so the bitstream itself is bad, not the decode. This is the desync
-  7e5e084 fixed on our side.
+  dB, so the bitstream is bad; the decode is fine. This is the desync 7e5e084
+  fixed on our side.
 - **`webp-rust` `lossy-slow` files are smaller than everyone's, at 1.5-3 dB lower
   quality** (e.g. toulouse 560756 B at 36.23 dB vs our 753810 B at 39.55 dB).
   An earlier capture of these results read that size advantage as a compression
