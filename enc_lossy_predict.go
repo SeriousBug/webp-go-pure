@@ -678,6 +678,20 @@ func elossyReconstructLuma16FromPrediction(prediction *[256]uint8, acCoeffs *[16
 }
 
 func elossyRefineLevelsGreedy(source []uint8, sourceStride, x, y int, prediction *[16]uint8, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
+	// The refinement only ever lowers a non-zero magnitude, so a block with
+	// nothing to lower has no trial to make and the scoring setup below would
+	// be built only to be thrown away.
+	empty := true
+	for scan := first; scan <= 15; scan++ {
+		if levels[elossyZigzag[scan]] != 0 {
+			empty = false
+			break
+		}
+	}
+	if empty {
+		return elossyDequantizeLevels(levels, dcQuant, acQuant)
+	}
+
 	var prefix elossyRatePrefix
 	prefix.reset(model, coeffType, ctx, first, levels)
 
