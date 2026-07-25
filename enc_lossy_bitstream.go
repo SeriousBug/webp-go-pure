@@ -267,17 +267,25 @@ const elossyMaxTabulatedLevel = 67
 // magnitude under it. The mode search prices every candidate block's
 // coefficients, and walking the token tree bit by bit to do so cost a fifth of
 // the encode; the table collapses that to one lookup per coefficient.
+// elossyLevelTableStride is the span of one (band, ctx) pair's level costs.
+const elossyLevelTableStride = elossyMaxTabulatedLevel + 1
+
 type elossyRateModel struct {
 	probs *elossyCoeffProbTables
-	// level[type][band][ctx][v] is the cost of coding magnitude v, including
-	// the non-zero flag and, for ctx > 0, the preceding "not end of block"
-	// flag. Contexts reached after a zero coefficient carry no such flag,
-	// which is exactly the ctx == 0 case.
-	level [numTypes][numBands][numCtx][elossyMaxTabulatedLevel + 1]uint16
+	// level[type][(band*numCtx+ctx)*stride+v] is the cost of coding magnitude
+	// v, including the non-zero flag, the sign bit, and, for ctx > 0, the
+	// preceding "not end of block" flag. Contexts reached after a zero
+	// coefficient carry no such flag, which is exactly the ctx == 0 case. The
+	// sign is folded in as if positive; negatives add elossySignRateDelta.
+	level [numTypes][numBands * numCtx * elossyLevelTableStride]uint16
 }
+
+// elossySignRateDelta is what a negative coefficient costs over a positive one.
+var elossySignRateDelta = elossyBitCost(true, 128) - elossyBitCost(false, 128)
 
 func elossyBuildRateModel(probabilities *elossyCoeffProbTables) *elossyRateModel {
 	model := &elossyRateModel{probs: probabilities}
+	positiveSign := elossyBitCost(false, 128)
 	for coeffType := 0; coeffType < numTypes; coeffType++ {
 		for band := 0; band < numBands; band++ {
 			for ctx := 0; ctx < numCtx; ctx++ {
@@ -286,9 +294,10 @@ func elossyBuildRateModel(probabilities *elossyCoeffProbTables) *elossyRateModel
 				if ctx > 0 {
 					notLast = elossyBitCost(true, probs[0])
 				}
-				table := &model.level[coeffType][band][ctx]
+				base := (band*numCtx + ctx) * elossyLevelTableStride
+				table := model.level[coeffType][base : base+elossyLevelTableStride]
 				table[0] = uint16(notLast + elossyBitCost(false, probs[1]))
-				nonZero := notLast + elossyBitCost(true, probs[1])
+				nonZero := notLast + elossyBitCost(true, probs[1]) + positiveSign
 				for value := uint32(1); value <= elossyMaxTabulatedLevel; value++ {
 					cost := nonZero + elossyBitCost(value > 1, probs[2])
 					if value > 1 {
@@ -306,7 +315,8 @@ func elossyBuildRateModel(probabilities *elossyCoeffProbTables) *elossyRateModel
 // end of the level tables.
 func elossyUntabulatedLevelRate(model *elossyRateModel, coeffType, band, ctx int, value uint32) uint32 {
 	probs := &model.probs[coeffType][band][ctx]
-	rate := elossyBitCost(true, probs[1]) + elossyBitCost(true, probs[2]) + elossyLargeValueRate(value, probs)
+	rate := elossyBitCost(true, probs[1]) + elossyBitCost(true, probs[2]) +
+		elossyLargeValueRate(value, probs) + elossyBitCost(false, 128)
 	if ctx > 0 {
 		rate += elossyBitCost(true, probs[0])
 	}
@@ -325,29 +335,24 @@ func elossyCoefficientsRate(model *elossyRateModel, coeffType, ctx, first int, l
 		rate = elossyBitCost(true, model.probs[coeffType][band][ctx][0])
 	}
 
-	typeLevels := &model.level[coeffType]
-	negativeCost := elossyBitCost(true, 128)
-	positiveCost := elossyBitCost(false, 128)
+	typeLevels := model.level[coeffType][:]
+	base := (band*numCtx + ctx) * elossyLevelTableStride
 	for scan := first; scan <= last; scan++ {
-		coeff := levels[elossyZigzag[scan]]
-		value := uint32(coeff)
-		if coeff < 0 {
-			value = uint32(-int32(coeff))
-			rate += negativeCost
-		} else if coeff > 0 {
-			rate += positiveCost
-		}
+		coeff := int32(levels[elossyZigzag[scan]])
+		negative := coeff >> 31
+		value := uint32((coeff ^ negative) - negative)
+		rate += uint32(negative&1) * elossySignRateDelta
 		if value <= elossyMaxTabulatedLevel {
-			rate += uint32(typeLevels[band][ctx][value])
+			rate += uint32(typeLevels[base+int(value)])
 		} else {
 			rate += elossyUntabulatedLevelRate(model, coeffType, band, ctx, value)
 		}
-		if value > 1 {
+		ctx = int(value)
+		if ctx > 2 {
 			ctx = 2
-		} else {
-			ctx = int(value)
 		}
 		band = elossyBands[scan+1]
+		base = (band*numCtx + ctx) * elossyLevelTableStride
 	}
 
 	if last < 15 {
