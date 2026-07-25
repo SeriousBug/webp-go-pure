@@ -306,6 +306,10 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 // coefficient probability table. It keeps the mode search that shapes the
 // token distribution and drops the level refinement, which is what makes the
 // full search expensive and barely moves the resulting probabilities.
+// elossyMaxFullSearchCandidates caps how many segmentation candidates get the
+// full rate-distortion search. The rest are eliminated on the cheap pass.
+const elossyMaxFullSearchCandidates = 3
+
 func elossyStatsProfile(profile *elossyLossySearchProfile) elossyLossySearchProfile {
 	return elossyLossySearchProfile{
 		fastModeSearch: profile.fastModeSearch,
