@@ -53,6 +53,11 @@ type elossyRdMultipliers struct {
 	i4   uint32
 	uv   uint32
 	mode uint32
+	// i4Penalty is libwebp's fixed offset (1000*q^2) charged to an i4x4
+	// macroblock before it is compared against the whole-block modes. It stands
+	// in for what the sub-block search's own lambda leaves unpriced: the
+	// sub-blocks are picked with i4, and only the total is re-priced with i16.
+	i4Penalty uint64
 	// The trellis weighs rate against a transform-domain error rather than the
 	// pixel-domain SSE the mode search uses, so it needs its own multipliers.
 	trellisI16 uint32
@@ -216,6 +221,7 @@ func elossyBuildRdMultipliers(quant *elossyQuantMatrices) elossyRdMultipliers {
 		trellisI16: max((qI16*qI16)>>2, 1),
 		trellisI4:  max((7*qI4*qI4)>>3, 1),
 		trellisUv:  max((qUv*qUv)<<1, 1),
+		i4Penalty:  1000 * uint64(qI4) * uint64(qI4),
 	}
 }
 

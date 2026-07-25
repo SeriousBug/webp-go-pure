@@ -899,8 +899,9 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 }
 
 // limit is the score the whole-macroblock modes already achieved. The i4x4
-// score only accumulates, so once the sub-blocks decided so far exceed it the
-// remaining ones cannot change the outcome and the search stops.
+// distortion and rate only accumulate, so their score does too, and once the
+// sub-blocks decided so far exceed the limit the remaining ones cannot change
+// the outcome and the search stops.
 func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, quant *elossyQuantMatrices, rd *elossyRdMultipliers, model *elossyRateModel, topContext *elossyNonZeroContext, leftContext *elossyNonZeroContext, topModes []uint8, leftModes *[4]uint8, limit uint64) (uint64, [16]uint8) {
 	modes := [numBModes]uint8{
 		bDCPred, bTMPred, bVEPred, bHEPred, bRDPred, bVRPred, bLDPred, bVLPred,
@@ -910,7 +911,9 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 	x := mbX * 16
 	y := mbY * 16
 	backup := elossyCopyBlock16(reconstructed.y, reconstructed.yStride, x, y)
-	var totalScore uint64
+	var totalDistortion uint64
+	var totalCoeffRate uint32
+	totalModeRate := elossyBitCost(false, 145)
 	var subModes [16]uint8
 	var predictions [numBModes][16]uint8
 	var residuals [numBModes][16]int16
@@ -939,6 +942,8 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 			rdScreen.reset(profile.refineI4TopK)
 			bestScore := uint64(0xffffffffffffffff)
 			bestNonZero := uint8(0)
+			var bestDistortion uint64
+			var bestCoeffRate, bestModeRate uint32
 
 			candidates := elossyAllLuma4Candidates[:]
 			for index, mode := range modes {
@@ -972,7 +977,8 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 				if rdMode < 1 {
 					rdMode = 1
 				}
-				score := elossyRdScore(distortion, coeffRate, rd.i4) + uint64(elossyIntra4ModeRate(topMode, leftMode, mode))*uint64(rdMode)
+				modeRate := elossyIntra4ModeRate(topMode, leftMode, mode)
+				score := elossyRdScore(distortion, coeffRate, rd.i4) + uint64(modeRate)*uint64(rdMode)
 				if profile.refineI4TopK > 0 {
 					rdScreen.add(index, score)
 				}
@@ -982,6 +988,9 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 					bestLevels = levels
 					bestPrediction = index
 					bestScore = score
+					bestDistortion = distortion
+					bestCoeffRate = coeffRate
+					bestModeRate = modeRate
 					bestNonZero = 0
 					if elossyBlockHasNonZero(&levels, 0) {
 						bestNonZero = 1
@@ -1013,12 +1022,16 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 					if rdMode < 1 {
 						rdMode = 1
 					}
-					score := elossyRdScore(distortion, coeffRate, rd.i4) + uint64(elossyIntra4ModeRate(topMode, leftMode, mode))*uint64(rdMode)
+					modeRate := elossyIntra4ModeRate(topMode, leftMode, mode)
+					score := elossyRdScore(distortion, coeffRate, rd.i4) + uint64(modeRate)*uint64(rdMode)
 					if score < bestScore {
 						bestMode = mode
 						bestRecon = candidate
 						bestLevels = levels
 						bestScore = score
+						bestDistortion = distortion
+						bestCoeffRate = coeffRate
+						bestModeRate = modeRate
 						bestNonZero = 0
 						if elossyBlockHasNonZero(&levels, 0) {
 							bestNonZero = 1
@@ -1031,13 +1044,15 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 
 			subModes[block] = bestMode
 			trial.levels[block] = bestLevels
-			totalScore += bestScore
+			totalDistortion += bestDistortion
+			totalCoeffRate += bestCoeffRate
+			totalModeRate += bestModeRate
 			localTop[subX] = bestMode
 			leftMode = bestMode
 			l = bestNonZero
 			tnz = (tnz >> 1) | (bestNonZero << 7)
 
-			if totalScore >= limit {
+			if elossyIntra4CompareScore(totalDistortion, totalCoeffRate, totalModeRate, rd) >= limit {
 				elossyRestoreBlock16(reconstructed.y, reconstructed.yStride, x, y, &backup)
 				return math.MaxUint64, subModes
 			}
@@ -1053,11 +1068,21 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 	trial.recon = elossyCopyBlock16(reconstructed.y, reconstructed.yStride, x, y)
 
 	elossyRestoreBlock16(reconstructed.y, reconstructed.yStride, x, y, &backup)
+	return elossyIntra4CompareScore(totalDistortion, totalCoeffRate, totalModeRate, rd), subModes
+}
+
+// elossyIntra4CompareScore prices an i4x4 macroblock against the whole-block
+// modes. The sub-block search picks modes with rd.i4, a lambda 128x smaller
+// than the rd.i16 the whole-block score uses, so summing those sub-block scores
+// and comparing the total to an i16 score charges i4x4's rate 128x too cheaply
+// and it wins every macroblock. The comparison re-prices the summed distortion
+// and rate on the i16 score's own terms and adds libwebp's fixed i4x4 penalty.
+func elossyIntra4CompareScore(distortion uint64, coeffRate, modeRate uint32, rd *elossyRdMultipliers) uint64 {
 	rdMode := rd.mode
 	if rdMode < 1 {
 		rdMode = 1
 	}
-	return totalScore + uint64(elossyBitCost(false, 145))*uint64(rdMode), subModes
+	return elossyRdScore(distortion, coeffRate, rd.i16) + uint64(modeRate)*uint64(rdMode) + rd.i4Penalty
 }
 
 func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, quant *elossyQuantMatrices, rd *elossyRdMultipliers, model *elossyRateModel, top *elossyNonZeroContext, left *elossyNonZeroContext, mode uint8) uint64 {
