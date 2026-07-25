@@ -106,6 +106,7 @@ func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWid
 	}
 
 	filters := elossyFilterCandidates(baseQuant)
+	scratch := elossyNewFilterScratch(&candidate.reconstructed, mbWidth, mbHeight)
 	var bestDistortion uint64
 	var bestLen int
 	var bestVp8 []byte
@@ -115,7 +116,7 @@ func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWid
 		if err != nil {
 			return nil, err
 		}
-		distortion := elossyFilteredDistortion(source, &candidate.reconstructed, width, height, mbWidth, mbHeight, &filters[i], candidate.modes)
+		distortion := elossyFilteredDistortion(source, &candidate.reconstructed, &scratch, width, height, mbWidth, mbHeight, &filters[i], candidate.modes)
 		replace := !found ||
 			distortion < bestDistortion ||
 			(distortion == bestDistortion && len(vp8) < bestLen)

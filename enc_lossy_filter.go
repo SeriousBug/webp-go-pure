@@ -29,22 +29,31 @@ func elossyFilterKind(filter *elossyFilterConfig) filterType {
 	return filterComplex
 }
 
-// elossyFilteredPlanes applies the loop filter to a copy of the reconstruction,
-// macroblock by macroblock in the same order a decoder would.
-func elossyFilteredPlanes(reconstructed *elossyPlanes, mbWidth, mbHeight int, filter *elossyFilterConfig, modes []elossyMacroblockMode) lossyPlanes {
-	planes := lossyPlanes{
+// elossyNewFilterScratch is the working copy the filter search filters in
+// place. The search reuses one across levels rather than copying fresh planes
+// per level, which on a large frame is several megabytes each time.
+func elossyNewFilterScratch(reconstructed *elossyPlanes, mbWidth, mbHeight int) lossyPlanes {
+	return lossyPlanes{
 		width:    mbWidth * 16,
 		height:   mbHeight * 16,
 		yStride:  reconstructed.yStride,
 		uvStride: reconstructed.uvStride,
-		y:        append([]byte(nil), reconstructed.y...),
-		u:        append([]byte(nil), reconstructed.u...),
-		v:        append([]byte(nil), reconstructed.v...),
+		y:        make([]byte, len(reconstructed.y)),
+		u:        make([]byte, len(reconstructed.u)),
+		v:        make([]byte, len(reconstructed.v)),
 	}
+}
+
+// elossyFilterInto applies the loop filter to a copy of the reconstruction,
+// macroblock by macroblock in the same order a decoder would.
+func elossyFilterInto(planes *lossyPlanes, reconstructed *elossyPlanes, mbWidth, mbHeight int, filter *elossyFilterConfig, modes []elossyMacroblockMode) {
+	copy(planes.y, reconstructed.y)
+	copy(planes.u, reconstructed.u)
+	copy(planes.v, reconstructed.v)
 
 	kind := elossyFilterKind(filter)
 	if kind == filterOff {
-		return planes
+		return
 	}
 
 	baseLevel := elossyFilterBaseLevel(filter)
@@ -56,15 +65,16 @@ func elossyFilteredPlanes(reconstructed *elossyPlanes, mbWidth, mbHeight int, fi
 			if !ok {
 				continue
 			}
-			lossyFilterMacroblockWith(kind, &planes, mbX, mbY, &info)
+			lossyFilterMacroblockWith(kind, planes, mbX, mbY, &info)
 		}
 	}
-	return planes
 }
 
-// elossyFilteredDistortion scores a filter config against the source.
-func elossyFilteredDistortion(source *elossyPlanes, reconstructed *elossyPlanes, width, height, mbWidth, mbHeight int, filter *elossyFilterConfig, modes []elossyMacroblockMode) uint64 {
-	planes := elossyFilteredPlanes(reconstructed, mbWidth, mbHeight, filter, modes)
+// elossyFilteredDistortion scores a filter config against the source, using
+// scratch as its working copy.
+func elossyFilteredDistortion(source *elossyPlanes, reconstructed *elossyPlanes, scratch *lossyPlanes, width, height, mbWidth, mbHeight int, filter *elossyFilterConfig, modes []elossyMacroblockMode) uint64 {
+	elossyFilterInto(scratch, reconstructed, mbWidth, mbHeight, filter, modes)
+	planes := scratch
 	uvWidth := (width + 1) / 2
 	uvHeight := (height + 1) / 2
 	return elossyPlaneSseRegion(source.y, source.yStride, planes.y, planes.yStride, width, height) +

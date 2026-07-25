@@ -35,7 +35,8 @@ func TestFilteredDistortionMatchesDecodedFrame(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%dx%d level %d: decode: %v", size.width, size.height, filter.level, err)
 			}
-			got := elossyFilteredDistortion(&source, &candidate.reconstructed, size.width, size.height, mbWidth, mbHeight, &filter, candidate.modes)
+			scratch := elossyNewFilterScratch(&candidate.reconstructed, mbWidth, mbHeight)
+			got := elossyFilteredDistortion(&source, &candidate.reconstructed, &scratch, size.width, size.height, mbWidth, mbHeight, &filter, candidate.modes)
 			if got != want {
 				t.Errorf("%dx%d level %d: filtered distortion = %d, decoded = %d",
 					size.width, size.height, filter.level, got, want)

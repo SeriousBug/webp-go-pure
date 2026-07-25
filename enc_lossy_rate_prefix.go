@@ -35,8 +35,15 @@ func (p *elossyRatePrefix) reset(model *elossyRateModel, coeffType, ctx, first i
 		rate = elossyBitCost(true, model.probs[coeffType][band][ctx][0])
 	}
 
+	// Only positions up to the block's end are ever the subject of a trial, and
+	// the refinement only shortens the block, so the prefix stops there.
+	end := p.last
+	if end < first {
+		end = first - 1
+	}
+
 	typeLevels := model.level[coeffType][:]
-	for scan := first; scan < 16; scan++ {
+	for scan := first; scan <= end; scan++ {
 		p.rate[scan] = rate
 		p.ctx[scan] = uint8(ctx)
 		p.band[scan] = uint8(band)
@@ -56,9 +63,9 @@ func (p *elossyRatePrefix) reset(model *elossyRateModel, coeffType, ctx, first i
 		}
 		band = elossyBands[scan+1]
 	}
-	p.rate[16] = rate
-	p.ctx[16] = uint8(ctx)
-	p.band[16] = uint8(band)
+	p.rate[end+1] = rate
+	p.ctx[end+1] = uint8(ctx)
+	p.band[end+1] = uint8(band)
 }
 
 // walk prices the block from scan position start onwards, reusing the cached
