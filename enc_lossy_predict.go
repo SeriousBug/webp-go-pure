@@ -776,6 +776,10 @@ type elossyLumaTrial struct {
 	recon    [256]uint8
 	subModes [16]uint8
 	isI4x4   bool
+	// distortion and nonZero describe the i16 trial only and drive the intra4
+	// entry gate; the i4x4 path leaves them stale.
+	distortion uint64
+	nonZero    bool
 }
 
 // elossyChromaTrial is the chroma counterpart of elossyLumaTrial.
@@ -798,6 +802,7 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 	var yCoeffs [16][16]int16
 	yLevels := &trial.levels
 	var rate uint32
+	nonZero := false
 	refineTnz := top.nz & 0x0f
 	refineLnz := left.nz & 0x0f
 
@@ -818,6 +823,7 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 			hasAc := uint8(0)
 			if elossyBlockHasNonZero(&yLevels[block], 1) {
 				hasAc = 1
+				nonZero = true
 			}
 			l = hasAc
 			refineTnz = (refineTnz >> 1) | (hasAc << 7)
@@ -829,6 +835,9 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 	y2Input := elossyForwardWht(&yDc)
 	trial.y2Levels = elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
 	y2Coeffs := elossyDequantizeLevels(&trial.y2Levels, quant.y2[0], quant.y2[1])
+	if !nonZero && elossyBlockHasNonZero(&trial.y2Levels, 0) {
+		nonZero = true
+	}
 	rate += elossyCoefficientsRate(model, 1, int(top.nzDc+left.nzDc), 0, &trial.y2Levels)
 	y2Dc := elossyInverseWht(&y2Coeffs)
 	for block := 0; block < 16; block++ {
@@ -843,6 +852,8 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 	}
 
 	distortion := elossyBlockSse(source.y, source.yStride, x, y, candidate, 16, 16, 16)
+	trial.distortion = distortion
+	trial.nonZero = nonZero
 	rdMode := rd.mode
 	if rdMode < 1 {
 		rdMode = 1
@@ -1067,6 +1078,23 @@ type elossyMbTrials struct {
 	valid      bool
 }
 
+// elossyIntra4Gated decides whether the i16 result is already good enough that
+// the i4x4 search cannot pay for itself. Two conditions gate it: an i16 trial
+// that quantizes to nothing at all leaves no residual for i4x4 to improve, and
+// a residual whose distortion is already far below the quantizer's own noise
+// floor (q^2/12 per pixel) can only be beaten by a mode that costs more bits
+// than it saves. The threshold is quantizer-proportional so it tracks quality.
+func elossyIntra4Gated(luma *elossyLumaTrial, profile *elossyLossySearchProfile, quant *elossyQuantMatrices) bool {
+	if profile.i4GateStrength == 0 {
+		return false
+	}
+	if !luma.nonZero {
+		return true
+	}
+	q := uint64(quant.y1[1])
+	return luma.distortion*8 <= q*q*uint64(profile.i4GateStrength)
+}
+
 func elossyChooseMacroblockMode(trials *elossyMbTrials, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, quant *elossyQuantMatrices, rd *elossyRdMultipliers, model *elossyRateModel, topContext *elossyNonZeroContext, leftContext *elossyNonZeroContext, topModes []uint8, leftModes *[4]uint8) elossyMacroblockMode {
 	modes := [4]uint8{dcPred, vPred, hPred, tmPred}
 	trials.valid = false
@@ -1127,7 +1155,7 @@ func elossyChooseMacroblockMode(trials *elossyMbTrials, source *elossyPlanes, re
 	}
 
 	var subLuma [16]uint8
-	if profile.allowI4x4 {
+	if profile.allowI4x4 && !elossyIntra4Gated(keptLuma, profile, quant) {
 		i4Score, i4SubLuma := elossyEvaluateLuma4Mode(spareLuma, source, reconstructed, mbX, mbY, profile, quant, rd, model, topContext, leftContext, topModes, leftModes, bestLumaScore)
 		if i4Score < bestLumaScore {
 			bestLuma = bPred
