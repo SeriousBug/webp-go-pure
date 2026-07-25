@@ -635,15 +635,58 @@ type elossyMacroblockCoeffs struct {
 	skip   bool
 }
 
-func elossyEncodeMacroblock(writer *vp8BoolWriter, probabilities *elossyCoeffProbTables, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode elossyMacroblockMode, quant *elossyQuantMatrices, top *elossyNonZeroContext, left *elossyNonZeroContext, stats *elossyCoeffStats) bool {
-	coeffs := elossyAnalyzeMacroblock(probabilities, source, reconstructed, mbX, mbY, profile, mode, quant, top, left)
-	return elossyEmitMacroblockTokens(writer, probabilities, &coeffs, top, left, stats)
+// elossyCommitTrials takes the levels and reconstruction the mode search
+// already produced for the winning modes and installs them, sparing a second
+// transform-quantize-refine pass over the macroblock.
+func elossyCommitTrials(out *elossyMacroblockCoeffs, reconstructed *elossyPlanes, mbX, mbY int, trials *elossyMbTrials) {
+	luma := trials.bestLuma
+	chroma := trials.bestChroma
+
+	elossyRestoreBlock16(reconstructed.y, reconstructed.yStride, mbX*16, mbY*16, &luma.recon)
+	uvX := mbX * 8
+	uvY := mbY * 8
+	for row := 0; row < 8; row++ {
+		dst := (uvY+row)*reconstructed.uvStride + uvX
+		copy(reconstructed.u[dst:dst+8], chroma.uRecon[row*8:row*8+8])
+		copy(reconstructed.v[dst:dst+8], chroma.vRecon[row*8:row*8+8])
+	}
+
+	out.y = luma.levels
+	out.y2 = luma.y2Levels
+	out.u = chroma.uLevels
+	out.v = chroma.vLevels
+	out.isI4x4 = luma.isI4x4
+
+	yAllZero := true
+	first := 0
+	if !luma.isI4x4 {
+		first = 1
+		if elossyBlockHasNonZero(&out.y2, 0) {
+			yAllZero = false
+		}
+	}
+	if yAllZero {
+		for i := range out.y {
+			if elossyBlockHasNonZero(&out.y[i], first) {
+				yAllZero = false
+				break
+			}
+		}
+	}
+	uvAllZero := true
+	for i := range out.u {
+		if elossyBlockHasNonZero(&out.u[i], 0) || elossyBlockHasNonZero(&out.v[i], 0) {
+			uvAllZero = false
+			break
+		}
+	}
+	out.skip = yAllZero && uvAllZero
 }
 
 // elossyAnalyzeMacroblock predicts, transforms, quantizes and refines one
 // macroblock, updating the reconstruction. It reads the neighbouring non-zero
 // contexts but leaves updating them to token emission.
-func elossyAnalyzeMacroblock(probabilities *elossyCoeffProbTables, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode elossyMacroblockMode, quant *elossyQuantMatrices, top *elossyNonZeroContext, left *elossyNonZeroContext) elossyMacroblockCoeffs {
+func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, probabilities *elossyCoeffProbTables, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode elossyMacroblockMode, quant *elossyQuantMatrices, top *elossyNonZeroContext, left *elossyNonZeroContext) {
 	yX := mbX * 16
 	yY := mbY * 16
 	uvX := mbX * 8
@@ -657,7 +700,10 @@ func elossyAnalyzeMacroblock(probabilities *elossyCoeffProbTables, source *eloss
 	elossyPredictBlock(reconstructed.u, reconstructed.uvStride, reconstructed.uvStride, uvX, uvY, mode.chroma, 8)
 	elossyPredictBlock(reconstructed.v, reconstructed.uvStride, reconstructed.uvStride, uvX, uvY, mode.chroma, 8)
 
-	var yLevels [16][16]int16
+	// The level arrays are the caller's output buffer, written in place: they
+	// are half a kilobyte per macroblock and returning them by value dominated
+	// the encode.
+	yLevels := &out.y
 	var yCoeffs [16][16]int16
 	var y2Levels [16]int16
 
@@ -718,7 +764,7 @@ func elossyAnalyzeMacroblock(probabilities *elossyCoeffProbTables, source *eloss
 		}
 	}
 
-	var uLevels [4][16]int16
+	uLevels := &out.u
 	var uCoeffs [4][16]int16
 	for subY := 0; subY < 2; subY++ {
 		for subX := 0; subX < 2; subX++ {
@@ -732,7 +778,7 @@ func elossyAnalyzeMacroblock(probabilities *elossyCoeffProbTables, source *eloss
 		}
 	}
 
-	var vLevels [4][16]int16
+	vLevels := &out.v
 	var vCoeffs [4][16]int16
 	for subY := 0; subY < 2; subY++ {
 		for subX := 0; subX < 2; subX++ {
@@ -802,15 +848,9 @@ func elossyAnalyzeMacroblock(probabilities *elossyCoeffProbTables, source *eloss
 		}
 	}
 
-	coeffs := elossyMacroblockCoeffs{
-		y:      yLevels,
-		y2:     y2Levels,
-		u:      uLevels,
-		v:      vLevels,
-		isI4x4: isI4x4,
-		skip:   skip,
-	}
-	return coeffs
+	out.y2 = y2Levels
+	out.isI4x4 = isI4x4
+	out.skip = skip
 }
 
 // elossyEmitMacroblockTokens writes one macroblock's coefficient tokens and
@@ -947,6 +987,7 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 	topModes := make([]uint8, mbWidth*4)
 	modes := make([]elossyMacroblockMode, 0, mbWidth*mbHeight)
 	coeffs := make([]elossyMacroblockCoeffs, mbWidth*mbHeight)
+	var trials elossyMbTrials
 	var segmentRd [numMbSegments]elossyRdMultipliers
 	for index := 0; index < numMbSegments; index++ {
 		segmentRd[index] = elossyBuildRdMultipliers(&segmentQuants[index])
@@ -961,10 +1002,14 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 			quant := &segmentQuants[segmentID]
 			rd := &segmentRd[segmentID]
 			top := topModes[mbX*4 : mbX*4+4]
-			mode := elossyChooseMacroblockMode(source, &reconstructed, mbX, mbY, profile, quant, rd, probabilities, &topContexts[mbX], &leftContext, top, &leftModes)
+			mode := elossyChooseMacroblockMode(&trials, source, &reconstructed, mbX, mbY, profile, quant, rd, probabilities, &topContexts[mbX], &leftContext, top, &leftModes)
 			mode.segment = uint8(segmentID)
 			elossyUpdateModeCache(&mode, top, &leftModes)
-			coeffs[index] = elossyAnalyzeMacroblock(probabilities, source, &reconstructed, mbX, mbY, profile, mode, quant, &topContexts[mbX], &leftContext)
+			if trials.valid {
+				elossyCommitTrials(&coeffs[index], &reconstructed, mbX, mbY, &trials)
+			} else {
+				elossyAnalyzeMacroblock(&coeffs[index], probabilities, source, &reconstructed, mbX, mbY, profile, mode, quant, &topContexts[mbX], &leftContext)
+			}
 			mode.skip = elossyEmitMacroblockTokens(writer, probabilities, &coeffs[index], &topContexts[mbX], &leftContext, stats)
 			modes = append(modes, mode)
 		}
