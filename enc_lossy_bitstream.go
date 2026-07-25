@@ -1055,7 +1055,7 @@ func elossyEmitMacroblockTokens(writer *vp8BoolWriter, probabilities *elossyCoef
 	return false
 }
 
-func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, probabilities *elossyCoeffProbTables, stats *elossyCoeffStats) ([]byte, elossyPlanes, []elossyMacroblockMode) {
+func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, probabilities *elossyCoeffProbTables, stats *elossyCoeffStats, mbLimit int) ([]byte, elossyPlanes, []elossyMacroblockMode) {
 	writer := newVp8BoolWriter(len(source.y) / 4)
 	reconstructed := elossyEmptyReconstructedPlanes(mbWidth, mbHeight)
 	topContexts := make([]elossyNonZeroContext, mbWidth)
@@ -1069,7 +1069,14 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 		segmentRd[index] = elossyBuildRdMultipliers(&segmentQuants[index])
 	}
 
-	for mbY := 0; mbY < mbHeight; mbY++ {
+	// A limit means the caller only wants the token statistics, so the pass
+	// stops after that many macroblocks and the partition, modes and
+	// reconstruction it returns cover just the prefix.
+	limitRows := mbHeight
+	if mbLimit > 0 && mbLimit < mbWidth*mbHeight {
+		limitRows = (mbLimit + mbWidth - 1) / mbWidth
+	}
+	for mbY := 0; mbY < limitRows; mbY++ {
 		var leftContext elossyNonZeroContext
 		var leftModes [4]uint8
 		for mbX := 0; mbX < mbWidth; mbX++ {

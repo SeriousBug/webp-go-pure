@@ -699,3 +699,21 @@ func elossyBuildSegmentCandidates(source *elossyPlanes, mbWidth, mbHeight int, b
 
 	return candidates
 }
+
+// elossyStatsMacroblockLimit is how many macroblocks the probability-convergence
+// pass looks at. Its output is an aggregate over token counts, so half the frame
+// pins the table down to within a percent of encoded size while halving what is
+// the more expensive of the two search passes. A quarter of the frame is
+// noticeably faster still but costs up to 3% on images whose top differs from
+// the rest.
+func elossyStatsMacroblockLimit(mbCount int) int {
+	const minimum = 512
+	if mbCount <= minimum {
+		return mbCount
+	}
+	limit := mbCount / 2
+	if limit < minimum {
+		limit = minimum
+	}
+	return limit
+}
