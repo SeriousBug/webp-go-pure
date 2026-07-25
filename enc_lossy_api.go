@@ -34,9 +34,9 @@ func elossyBuildCandidateVp8Frame(width, height, mbWidth, mbHeight int, candidat
 // elossyRunCandidatePass searches one candidate under the given probability
 // table and returns the resulting candidate alongside the table the emitted
 // tokens imply.
-func elossyRunCandidatePass(width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, table *elossyCoeffProbTables) (elossyEncodedLossyCandidate, []elossyMacroblockCoeffs, elossyCoeffProbTables) {
+func elossyRunCandidatePass(width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, table *elossyCoeffProbTables) (elossyEncodedLossyCandidate, elossyCoeffProbTables) {
 	var stats elossyCoeffStats
-	partition, reconstructed, modes, coeffs := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, segmentQuants, table, &stats)
+	partition, reconstructed, modes := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, segmentQuants, table, &stats)
 	return elossyEncodedLossyCandidate{
 		baseQuant:      segment.quantizer[0],
 		segment:        *segment,
@@ -44,7 +44,7 @@ func elossyRunCandidatePass(width, height int, source *elossyPlanes, mbWidth, mb
 		modes:          modes,
 		tokenPartition: partition,
 		distortion:     elossyReconstructionSse(source, &reconstructed, width, height),
-	}, coeffs, elossyFinalizeTokenProbabilities(&stats)
+	}, elossyFinalizeTokenProbabilities(&stats)
 }
 
 // elossyEncodeLossyCandidate encodes one lossy candidate and captures its token
@@ -55,7 +55,7 @@ func elossyEncodeLossyCandidate(width, height int, source *elossyPlanes, mbWidth
 	segmentQuants := elossyBuildSegmentQuantizers(segment)
 
 	if !profile.updateProbabilities {
-		candidate, _, _ := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0)
+		candidate, _ := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0)
 		candidate.probabilities = coeffsProba0
 		return candidate, nil
 	}
@@ -63,21 +63,18 @@ func elossyEncodeLossyCandidate(width, height int, source *elossyPlanes, mbWidth
 	// The search scores rates against a probability table, so running it under
 	// the default table and then re-estimating leaves the decisions matched to
 	// a table that is no longer in use. Converge the table with a cheap search
-	// first, spend the real search against it once, then replay the chosen
-	// levels under the table those levels imply.
+	// first, then spend the real search against it once. Re-estimating again
+	// from the final pass and replaying the tokens under that table was worth
+	// under 0.1% in size and is not worth carrying every macroblock's levels.
 	table := elossyCoeffsProba0
 	if searchTable != nil {
 		table = *searchTable
 	} else {
 		priorProfile := elossyStatsProfile(profile)
-		_, _, table = elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, &priorProfile, segment, &segmentQuants, &elossyCoeffsProba0)
+		_, table = elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, &priorProfile, segment, &segmentQuants, &elossyCoeffsProba0)
 	}
 
-	candidate, coeffs, emitted := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, profile, segment, &segmentQuants, &table)
-	if emitted != table {
-		candidate.tokenPartition = elossyReemitTokenPartition(mbWidth, mbHeight, len(candidate.tokenPartition), coeffs, &emitted)
-		candidate.probabilities = emitted
-	}
+	candidate, _ := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, profile, segment, &segmentQuants, &table)
 	return candidate, nil
 }
 
@@ -159,7 +156,7 @@ func elossyShortlistCandidates(width, height int, source *elossyPlanes, mbWidth,
 	scored := make([]ranked, 0, len(candidates))
 	for i := range candidates {
 		segmentQuants := elossyBuildSegmentQuantizers(&candidates[i])
-		candidate, _, table := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, &statsProfile, &candidates[i], &segmentQuants, &elossyCoeffsProba0)
+		candidate, table := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, &statsProfile, &candidates[i], &segmentQuants, &elossyCoeffsProba0)
 		frame, err := elossyBuildCandidateVp8Frame(width, height, mbWidth, mbHeight, &candidate, filter)
 		if err != nil {
 			return nil, nil, err

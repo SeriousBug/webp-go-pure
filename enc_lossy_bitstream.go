@@ -980,13 +980,13 @@ func elossyEmitMacroblockTokens(writer *vp8BoolWriter, probabilities *elossyCoef
 	return false
 }
 
-func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, probabilities *elossyCoeffProbTables, stats *elossyCoeffStats) ([]byte, elossyPlanes, []elossyMacroblockMode, []elossyMacroblockCoeffs) {
+func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, probabilities *elossyCoeffProbTables, stats *elossyCoeffStats) ([]byte, elossyPlanes, []elossyMacroblockMode) {
 	writer := newVp8BoolWriter(len(source.y) / 4)
 	reconstructed := elossyEmptyReconstructedPlanes(mbWidth, mbHeight)
 	topContexts := make([]elossyNonZeroContext, mbWidth)
 	topModes := make([]uint8, mbWidth*4)
 	modes := make([]elossyMacroblockMode, 0, mbWidth*mbHeight)
-	coeffs := make([]elossyMacroblockCoeffs, mbWidth*mbHeight)
+	var coeffs elossyMacroblockCoeffs
 	var trials elossyMbTrials
 	var segmentRd [numMbSegments]elossyRdMultipliers
 	for index := 0; index < numMbSegments; index++ {
@@ -1006,32 +1006,15 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 			mode.segment = uint8(segmentID)
 			elossyUpdateModeCache(&mode, top, &leftModes)
 			if trials.valid {
-				elossyCommitTrials(&coeffs[index], &reconstructed, mbX, mbY, &trials)
+				elossyCommitTrials(&coeffs, &reconstructed, mbX, mbY, &trials)
 			} else {
-				elossyAnalyzeMacroblock(&coeffs[index], probabilities, source, &reconstructed, mbX, mbY, profile, mode, quant, &topContexts[mbX], &leftContext)
+				elossyAnalyzeMacroblock(&coeffs, probabilities, source, &reconstructed, mbX, mbY, profile, mode, quant, &topContexts[mbX], &leftContext)
 			}
-			mode.skip = elossyEmitMacroblockTokens(writer, probabilities, &coeffs[index], &topContexts[mbX], &leftContext, stats)
+			mode.skip = elossyEmitMacroblockTokens(writer, probabilities, &coeffs, &topContexts[mbX], &leftContext, stats)
 			modes = append(modes, mode)
 		}
 	}
 
-	return writer.finish(), reconstructed, modes, coeffs
+	return writer.finish(), reconstructed, modes
 }
 
-// elossyReemitTokenPartition rewrites a token partition under a re-estimated
-// probability table. The levels already chosen are replayed as-is, so this
-// costs one arithmetic-coding pass instead of a second mode and level search.
-// The non-zero contexts are a function of those levels, so they rebuild
-// identically to the pass that produced them.
-func elossyReemitTokenPartition(mbWidth, mbHeight, sizeHint int, coeffs []elossyMacroblockCoeffs, probabilities *elossyCoeffProbTables) []byte {
-	writer := newVp8BoolWriter(sizeHint)
-	topContexts := make([]elossyNonZeroContext, mbWidth)
-	for mbY := 0; mbY < mbHeight; mbY++ {
-		var leftContext elossyNonZeroContext
-		for mbX := 0; mbX < mbWidth; mbX++ {
-			index := mbY*mbWidth + mbX
-			elossyEmitMacroblockTokens(writer, probabilities, &coeffs[index], &topContexts[mbX], &leftContext, nil)
-		}
-	}
-	return writer.finish()
-}
