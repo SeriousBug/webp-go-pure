@@ -56,3 +56,29 @@ func BenchmarkQuantizeBlock(b *testing.B) {
 }
 
 var sink [16]int16
+
+func TestZigzagLastMatchesGo(t *testing.T) {
+	rng := rand.New(rand.NewSource(2))
+	var levels [16]int16
+	for _, first := range []int{0, 1} {
+		for trial := 0; trial < 20000; trial++ {
+			for index := range levels {
+				switch {
+				case trial%3 == 0:
+					levels[index] = int16(rng.Intn(65536) - 32768)
+				case rng.Intn(4) == 0:
+					levels[index] = int16(rng.Intn(9) - 4)
+				default:
+					levels[index] = 0
+				}
+			}
+			var gotBuf, wantBuf [16]int16
+			got := elossyZigzagLast(&levels, &gotBuf, first)
+			want := elossyZigzagLastGo(&levels, &wantBuf, first)
+			if got != want || gotBuf != wantBuf {
+				t.Fatalf("first=%d levels=%v:\n got %d %v\nwant %d %v",
+					first, levels, got, gotBuf, want, wantBuf)
+			}
+		}
+	}
+}

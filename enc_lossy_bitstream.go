@@ -123,13 +123,20 @@ func elossyCoeffProbs(probabilities *elossyCoeffProbTables, coeffType, coeffInde
 	return &probabilities[coeffType][elossyBands[coeffIndex]][ctx]
 }
 
-func elossyLastNonZero(levels *[16]int16, first int) int {
-	for scan := 15; scan >= first; scan-- {
-		if levels[elossyZigzag[scan]] != 0 {
-			return scan
+// elossyZigzagLastGo reorders the levels into zigzag scan order and returns the
+// index of the last non-zero one, or first-1 if there is none. Every consumer
+// of the levels walks them in scan order, so the permutation is done once
+// rather than as a per-coefficient indirection.
+func elossyZigzagLastGo(levels, zigzagged *[16]int16, first int) int {
+	last := first - 1
+	for scan := 0; scan < 16; scan++ {
+		level := levels[elossyZigzag[scan]]
+		zigzagged[scan] = level
+		if level != 0 && scan >= first {
+			last = scan
 		}
 	}
-	return first - 1
+	return last
 }
 
 func elossyWriteLargeValue(writer *vp8BoolWriter, value uint32, probs *[11]uint8) {
@@ -324,7 +331,8 @@ func elossyUntabulatedLevelRate(model *elossyRateModel, coeffType, band, ctx int
 }
 
 func elossyCoefficientsRate(model *elossyRateModel, coeffType, ctx, first int, levels *[16]int16) uint32 {
-	last := elossyLastNonZero(levels, first)
+	var zigzagged [16]int16
+	last := elossyZigzagLast(levels, &zigzagged, first)
 	band := elossyBands[first]
 	if last < first {
 		return elossyBitCost(false, model.probs[coeffType][band][ctx][0])
@@ -338,7 +346,7 @@ func elossyCoefficientsRate(model *elossyRateModel, coeffType, ctx, first int, l
 	typeLevels := model.level[coeffType][:]
 	base := (band*numCtx + ctx) * elossyLevelTableStride
 	for scan := first; scan <= last; scan++ {
-		coeff := int32(levels[elossyZigzag[scan]])
+		coeff := int32(zigzagged[scan])
 		negative := coeff >> 31
 		value := uint32((coeff ^ negative) - negative)
 		rate += uint32(negative&1) * elossySignRateDelta
@@ -362,7 +370,8 @@ func elossyCoefficientsRate(model *elossyRateModel, coeffType, ctx, first int, l
 }
 
 func elossyEncodeCoefficients(writer *vp8BoolWriter, probabilities *elossyCoeffProbTables, coeffType, ctx, first int, levels *[16]int16) bool {
-	last := elossyLastNonZero(levels, first)
+	var zigzagged [16]int16
+	last := elossyZigzagLast(levels, &zigzagged, first)
 	scan := first
 	probs := elossyCoeffProbs(probabilities, coeffType, scan, ctx)
 	if !writer.putBit(last >= scan, probs[0]) {
@@ -370,7 +379,7 @@ func elossyEncodeCoefficients(writer *vp8BoolWriter, probabilities *elossyCoeffP
 	}
 
 	for scan < 16 {
-		coeff := levels[elossyZigzag[scan]]
+		coeff := zigzagged[scan]
 		writer.putBit(coeff != 0, probs[1])
 		scan++
 		if coeff == 0 {
@@ -449,7 +458,8 @@ func elossyRecordLargeValue(stats *[numProbas]uint32, value uint32) {
 }
 
 func elossyRecordCoefficientsStats(stats *elossyCoeffStats, coeffType, ctx, first int, levels *[16]int16) bool {
-	last := elossyLastNonZero(levels, first)
+	var zigzagged [16]int16
+	last := elossyZigzagLast(levels, &zigzagged, first)
 	scan := first
 	currentCtx := ctx
 	elossyRecordStat(last >= scan, &stats[coeffType][elossyBands[scan]][currentCtx][0])
@@ -458,7 +468,7 @@ func elossyRecordCoefficientsStats(stats *elossyCoeffStats, coeffType, ctx, firs
 	}
 
 	for scan < 16 {
-		coeff := levels[elossyZigzag[scan]]
+		coeff := zigzagged[scan]
 		band := elossyBands[scan]
 		elossyRecordStat(coeff != 0, &stats[coeffType][band][currentCtx][1])
 		scan++
