@@ -21,7 +21,8 @@ func TestFilteredDistortionMatchesDecodedFrame(t *testing.T) {
 		source := elossyRgbaToYuv420(size.width, size.height, rgba, mbWidth, mbHeight)
 
 		segment := elossyDisabledSegmentConfig(mbWidth*mbHeight, elossyClippedQuantizer(baseQuant))
-		candidate, err := elossyEncodeLossyCandidate(size.width, size.height, &source, mbWidth, mbHeight, &profile, &segment, nil)
+		scratch := elossyNewEncodeScratch(mbWidth, mbHeight, len(source.y)/4)
+		candidate, err := elossyEncodeLossyCandidate(scratch, size.width, size.height, &source, mbWidth, mbHeight, &profile, &segment, nil)
 		if err != nil {
 			t.Fatalf("%dx%d: encode candidate: %v", size.width, size.height, err)
 		}

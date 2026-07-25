@@ -291,7 +291,13 @@ type elossyRateModel struct {
 var elossySignRateDelta = elossyBitCost(true, 128) - elossyBitCost(false, 128)
 
 func elossyBuildRateModel(probabilities *elossyCoeffProbTables) *elossyRateModel {
-	model := &elossyRateModel{probs: probabilities}
+	model := &elossyRateModel{}
+	elossyFillRateModel(model, probabilities)
+	return model
+}
+
+func elossyFillRateModel(model *elossyRateModel, probabilities *elossyCoeffProbTables) {
+	model.probs = probabilities
 	positiveSign := elossyBitCost(false, 128)
 	for coeffType := 0; coeffType < numTypes; coeffType++ {
 		for band := 0; band < numBands; band++ {
@@ -315,7 +321,6 @@ func elossyBuildRateModel(probabilities *elossyCoeffProbTables) *elossyRateModel
 			}
 		}
 	}
-	return model
 }
 
 // elossyUntabulatedLevelRate prices a coefficient whose magnitude is past the
@@ -1142,25 +1147,103 @@ func elossyEmitMacroblockTokens(writer *vp8BoolWriter, probabilities *elossyCoef
 	return false
 }
 
-func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, probabilities *elossyCoeffProbTables, stats *elossyCoeffStats, mbLimit int) ([]byte, elossyPlanes, []elossyMacroblockMode) {
-	writer := newVp8BoolWriter(len(source.y) / 4)
-	reconstructed := elossyEmptyReconstructedPlanes(mbWidth, mbHeight)
-	topContexts := make([]elossyNonZeroContext, mbWidth)
-	topModes := make([]uint8, mbWidth*4)
-	modes := make([]elossyMacroblockMode, 0, mbWidth*mbHeight)
+// elossyPassBuffers is the storage one encode pass fills and its candidate
+// keeps: the reconstruction, the macroblock modes and the token partition.
+// They outlive the pass, so they come from a pool and go back once the
+// candidate holding them is dropped.
+type elossyPassBuffers struct {
+	reconstructed elossyPlanes
+	modes         []elossyMacroblockMode
+	partition     []byte
+}
+
+// elossyEncodeScratch owns everything an encode pass needs that no pass
+// outlives, so the ranking, statistics and final passes of one encode allocate
+// it between them once rather than each.
+type elossyEncodeScratch struct {
+	mbWidth      int
+	mbHeight     int
+	partitionCap int
+	free         []*elossyPassBuffers
+	topContexts  []elossyNonZeroContext
+	topModes     []uint8
+	model        *elossyRateModel
+}
+
+func elossyNewEncodeScratch(mbWidth, mbHeight, partitionCap int) *elossyEncodeScratch {
+	return &elossyEncodeScratch{
+		mbWidth:      mbWidth,
+		mbHeight:     mbHeight,
+		partitionCap: partitionCap,
+		topContexts:  make([]elossyNonZeroContext, mbWidth),
+		topModes:     make([]uint8, mbWidth*4),
+		model:        &elossyRateModel{},
+	}
+}
+
+// acquire hands out pass buffers in the state a freshly allocated set would be
+// in: a zeroed reconstruction, since prediction at the frame edges reads the
+// plane before anything has written it.
+func (s *elossyEncodeScratch) acquire() *elossyPassBuffers {
+	if last := len(s.free) - 1; last >= 0 {
+		buffers := s.free[last]
+		s.free = s.free[:last]
+		clear(buffers.reconstructed.y)
+		clear(buffers.reconstructed.u)
+		clear(buffers.reconstructed.v)
+		buffers.modes = buffers.modes[:0]
+		buffers.partition = buffers.partition[:0]
+		return buffers
+	}
+	return &elossyPassBuffers{
+		reconstructed: elossyEmptyReconstructedPlanes(s.mbWidth, s.mbHeight),
+		modes:         make([]elossyMacroblockMode, 0, s.mbWidth*s.mbHeight),
+		partition:     make([]byte, 0, s.partitionCap),
+	}
+}
+
+func (s *elossyEncodeScratch) release(buffers *elossyPassBuffers) {
+	if buffers != nil {
+		s.free = append(s.free, buffers)
+	}
+}
+
+func elossyEncodeTokenPartition(scratch *elossyEncodeScratch, buffers *elossyPassBuffers, source *elossyPlanes, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, probabilities *elossyCoeffProbTables, stats *elossyCoeffStats, coverage elossyPassCoverage) {
+	mbWidth, mbHeight := scratch.mbWidth, scratch.mbHeight
+	var writer vp8BoolWriter
+	writer.reset(buffers.partition)
+	reconstructed := &buffers.reconstructed
+	topContexts := scratch.topContexts
+	topModes := scratch.topModes
+	clear(topContexts)
+	clear(topModes)
+	modes := buffers.modes
 	var coeffs elossyMacroblockCoeffs
-	model := elossyBuildRateModel(probabilities)
+	model := scratch.model
+	elossyFillRateModel(model, probabilities)
 	var trials elossyMbTrials
 	var segmentRd [numMbSegments]elossyRdMultipliers
 	for index := 0; index < numMbSegments; index++ {
 		segmentRd[index] = elossyBuildRdMultipliers(&segmentQuants[index])
 	}
 
-	// A limit means the caller only wants the token statistics, so the pass
-	// stops after that many macroblocks and the partition, modes and
-	// reconstruction it returns cover just the prefix.
-	limitRows := elossyLimitedRows(mbWidth, mbHeight, mbLimit)
+	// A pass that does not cover the frame is one whose caller wants only what
+	// the tokens say, so the partition, modes and reconstruction it returns
+	// cover just the rows it encoded.
+	limitRows := elossyLimitedRows(mbWidth, mbHeight, coverage.mbLimit)
+	if coverage.sampled() {
+		// A sampled pass predicts from rows it never encodes, so it starts from
+		// the source rather than a blank plane: the skipped rows reconstruct to
+		// something close to it, while blank neighbours would inflate every
+		// sampled row's residual.
+		copy(reconstructed.y, source.y)
+		copy(reconstructed.u, source.u)
+		copy(reconstructed.v, source.v)
+	}
 	for mbY := 0; mbY < limitRows; mbY++ {
+		if coverage.sampled() && mbY%coverage.rowStride >= coverage.rowBand {
+			continue
+		}
 		var leftContext elossyNonZeroContext
 		var leftModes [4]uint8
 		for mbX := 0; mbX < mbWidth; mbX++ {
@@ -1169,14 +1252,15 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 			quant := &segmentQuants[segmentID]
 			rd := &segmentRd[segmentID]
 			top := topModes[mbX*4 : mbX*4+4]
-			mode := elossyChooseMacroblockMode(&trials, source, &reconstructed, mbX, mbY, profile, quant, rd, model, &topContexts[mbX], &leftContext, top, &leftModes)
+			mode := elossyChooseMacroblockMode(&trials, source, reconstructed, mbX, mbY, profile, quant, rd, model, &topContexts[mbX], &leftContext, top, &leftModes)
 			mode.segment = uint8(segmentID)
 			elossyUpdateModeCache(&mode, top, &leftModes)
-			elossyFinalizeMacroblock(&coeffs, model, source, &reconstructed, mbX, mbY, profile, &mode, quant, rd, &topContexts[mbX], &leftContext, &trials)
-			mode.skip = elossyEmitMacroblockTokens(writer, probabilities, &coeffs, &topContexts[mbX], &leftContext, stats)
+			elossyFinalizeMacroblock(&coeffs, model, source, reconstructed, mbX, mbY, profile, &mode, quant, rd, &topContexts[mbX], &leftContext, &trials)
+			mode.skip = elossyEmitMacroblockTokens(&writer, probabilities, &coeffs, &topContexts[mbX], &leftContext, stats)
 			modes = append(modes, mode)
 		}
 	}
 
-	return writer.finish(), reconstructed, modes
+	buffers.partition = writer.finish()
+	buffers.modes = modes
 }

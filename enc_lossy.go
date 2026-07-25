@@ -101,6 +101,9 @@ type elossyEncodedLossyCandidate struct {
 	// reconstructed is the unfiltered reconstruction, kept so the filter
 	// search can score levels without decoding the frame back.
 	reconstructed elossyPlanes
+	// buffers is the pooled storage backing modes, tokenPartition and
+	// reconstructed. Releasing a candidate returns it for the next pass.
+	buffers *elossyPassBuffers
 }
 
 // The refine* flags select trellis quantization for the mode the search
@@ -759,22 +762,60 @@ func elossyBuildSegmentCandidates(source *elossyPlanes, mbWidth, mbHeight int, b
 	return candidates
 }
 
-// elossyStatsMacroblockLimit is how many macroblocks the probability-convergence
-// pass looks at. Its output is an aggregate over token counts, so half the frame
-// pins the table down to within a percent of encoded size while halving what is
-// the more expensive of the two search passes. A quarter of the frame is
-// noticeably faster still but costs up to 3% on images whose top differs from
-// the rest.
-func elossyStatsMacroblockLimit(mbCount int) int {
-	const minimum = 512
-	if mbCount <= minimum {
-		return mbCount
+// elossyPassCoverage selects which macroblock rows an encode pass covers: a
+// prefix of the frame, or a band of rows out of every stride of them.
+type elossyPassCoverage struct {
+	// mbLimit caps how many macroblocks the pass encodes, rounded up to whole
+	// rows. Zero covers the frame.
+	mbLimit int
+	// rowBand and rowStride encode rowBand rows out of every rowStride. Equal
+	// values cover every row.
+	rowBand   int
+	rowStride int
+}
+
+func (c elossyPassCoverage) sampled() bool {
+	return c.rowBand < c.rowStride
+}
+
+func elossyFullCoverage() elossyPassCoverage {
+	return elossyPassCoverage{rowBand: 1, rowStride: 1}
+}
+
+func elossyPrefixCoverage(mbLimit int) elossyPassCoverage {
+	return elossyPassCoverage{mbLimit: mbLimit, rowBand: 1, rowStride: 1}
+}
+
+// elossyStatsCoverage is how the probability-convergence pass samples the
+// frame: every fourth macroblock row rather than a prefix of half of them. The
+// table it produces is an aggregate over token counts, so what it needs is a
+// sample of the whole frame, not a contiguous piece of it, and a quarter of the
+// rows spread down the frame prices a frame better than half of them taken from
+// the top.
+//
+// The pass fills the rows it skips with the source, which the sampled rows
+// then predict from. Sampling more sparsely than this is what costs: at one row
+// in eight the lower efforts, where nothing downstream re-prices what the table
+// mis-costs, give up over 1% of size. Sampling in deeper bands at the same row
+// count is worse still, so what the table wants is spread, not locality.
+//
+// The sample is not thinned below ~256 macroblocks, under which the counts are
+// too sparse to estimate the tail of the level distribution.
+func elossyStatsCoverage(mbWidth, mbHeight int) elossyPassCoverage {
+	const minimumMacroblocks = 256
+	const maximumStride = 4
+	rows := (minimumMacroblocks + mbWidth - 1) / mbWidth
+	if rows < 1 {
+		rows = 1
 	}
-	limit := mbCount / 2
-	if limit < minimum {
-		limit = minimum
+	stride := mbHeight / rows
+	if stride > maximumStride {
+		stride = maximumStride
 	}
-	return limit
+	if stride <= 1 {
+		return elossyFullCoverage()
+	}
+	return elossyPassCoverage{rowBand: 1, rowStride: stride}
 }
 
 // elossyLimitedRows is how many macroblock rows a pass covers under mbLimit.

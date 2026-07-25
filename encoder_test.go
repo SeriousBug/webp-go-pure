@@ -406,8 +406,9 @@ func TestEncodeLossySelectsCandidateOnRateDistortionNotSize(t *testing.T) {
 	smallest, rdBest := -1, -1
 	var smallestSize, rdBestSize int
 	var rdBestCost uint64
+	scratch := elossyNewEncodeScratch(mbWidth, mbHeight, len(planes.y)/4)
 	for i := range candidates {
-		candidate, err := elossyEncodeLossyCandidate(width, height, &planes, mbWidth, mbHeight, &profile, &candidates[i], nil)
+		candidate, err := elossyEncodeLossyCandidate(scratch, width, height, &planes, mbWidth, mbHeight, &profile, &candidates[i], nil)
 		if err != nil {
 			t.Fatal(err)
 		}
