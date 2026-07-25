@@ -3,6 +3,9 @@ package webp
 import (
 	"bytes"
 	"errors"
+	"image/png"
+	"math"
+	"os"
 	"testing"
 )
 
@@ -13,6 +16,39 @@ func sampleRGBA() (int, int, []byte) {
 		0xff, 0x22, 0x44, 0x66, 0x00, 0x80, 0x20, 0xc0, 0xfe,
 	}
 	return width, height, rgba
+}
+
+// lossyPhotoCropRGBA crops a square from a sample photo. Photographic
+// macroblock activity is what makes the segmentation candidates diverge;
+// synthetic gradients and noise do not reproduce it.
+func lossyPhotoCropRGBA(t *testing.T, side int) Image {
+	t.Helper()
+	file, err := os.Open("testdata/photos/Lena_512.png")
+	if err != nil {
+		t.Skipf("sample photo unavailable: %v", err)
+	}
+	defer file.Close()
+	decoded, err := png.Decode(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounds := decoded.Bounds()
+	if bounds.Dx() < side || bounds.Dy() < side {
+		t.Fatalf("sample photo %dx%d smaller than requested crop %d", bounds.Dx(), bounds.Dy(), side)
+	}
+	rgba := make([]byte, side*side*4)
+	offset := 0
+	for y := 0; y < side; y++ {
+		for x := 0; x < side; x++ {
+			r, g, b, _ := decoded.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			rgba[offset] = byte(r >> 8)
+			rgba[offset+1] = byte(g >> 8)
+			rgba[offset+2] = byte(b >> 8)
+			rgba[offset+3] = 0xff
+			offset += 4
+		}
+	}
+	return Image{Width: side, Height: side, RGBA: rgba}
 }
 
 func lossySampleRGBA() (int, int, []byte) {
@@ -300,6 +336,113 @@ func TestEncodeLossyRgbaToVp8MarksFlatMacroblocksAsSkip(t *testing.T) {
 	if !anySkip {
 		t.Fatal("expected at least one skipped macroblock")
 	}
+}
+
+// TestEncodeLossyRareSkipsRoundTrip guards against a token-partition desync:
+// when only a few macroblocks are skippable, skip signaling must still be
+// enabled, otherwise the encoder omits those macroblocks' coefficient tokens
+// without the decoder expecting it. Uses a mostly-detailed image (rare skips)
+// at high effort and checks the decoded result matches the encoder.
+func TestEncodeLossyRareSkipsRoundTrip(t *testing.T) {
+	width, height := 256, 256
+	rgba := make([]byte, width*height*4)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			o := (y*width + x) * 4
+			// One flat (skippable) macroblock at (0,0); high-frequency detail
+			// everywhere else so almost every macroblock is non-skip.
+			var v byte = 0x80
+			if x >= 16 || y >= 16 {
+				v = byte((x*7 ^ y*13) & 0xff)
+			}
+			rgba[o] = v
+			rgba[o+1] = v
+			rgba[o+2] = v
+			rgba[o+3] = 0xff
+		}
+	}
+	enc, err := EncodeLossy(&Image{Width: width, Height: height, RGBA: rgba}, &LossyOptions{Quality: 90, Effort: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := Decode(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mse float64
+	n := 0
+	for i := 0; i < len(rgba); i++ {
+		if i%4 == 3 {
+			continue
+		}
+		d := float64(rgba[i]) - float64(dec.RGBA[i])
+		mse += d * d
+		n++
+	}
+	mse /= float64(n)
+	psnr := 99.0
+	if mse > 0 {
+		psnr = 10 * math.Log10(255*255/mse)
+	}
+	if psnr < 30 {
+		t.Fatalf("decoded PSNR too low (%.2f): token partition likely desynced", psnr)
+	}
+}
+
+// Segmentation candidates trade rate against distortion, so ranking them on
+// encoded size alone just picks whichever one quantizes hardest. The encoder
+// must emit the rate-distortion best candidate, not the smallest.
+func TestEncodeLossySelectsCandidateOnRateDistortionNotSize(t *testing.T) {
+	src := lossyPhotoCropRGBA(t, 256)
+	width, height := src.Width, src.Height
+	mbWidth := (width + 15) >> 4
+	mbHeight := (height + 15) >> 4
+	baseQuant := elossyBaseQuantizerFromQuality(90)
+	profile := elossySearchProfile(9)
+	planes := elossyRgbaToYuv420(width, height, src.RGBA, mbWidth, mbHeight)
+	candidates := elossyBuildSegmentCandidates(&planes, mbWidth, mbHeight, baseQuant, 9)
+	heuristic := elossyHeuristicFilter(baseQuant)
+
+	smallest, rdBest := -1, -1
+	var smallestSize, rdBestSize int
+	var rdBestCost uint64
+	for i := range candidates {
+		candidate, err := elossyEncodeLossyCandidate(width, height, &planes, mbWidth, mbHeight, &profile, &candidates[i], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frame, err := elossyBuildCandidateVp8Frame(width, height, mbWidth, mbHeight, &candidate, &heuristic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cost := elossyFrameRdCost(candidate.distortion, len(frame), baseQuant); rdBest < 0 || cost < rdBestCost {
+			rdBest, rdBestCost, rdBestSize = i, cost, len(frame)
+		}
+		if smallest < 0 || len(frame) < smallestSize {
+			smallest, smallestSize = i, len(frame)
+		}
+	}
+	if smallest == rdBest {
+		t.Fatalf("fixture is not discriminating: smallest and rate-distortion best are both candidate %d", smallest)
+	}
+
+	encoded, err := EncodeLossy(&src, &LossyOptions{Quality: 90, Effort: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The emitted frame goes through the filter search, which shifts its size by
+	// a few bytes; candidates here are thousands of bytes apart.
+	if distance(len(encoded), rdBestSize) >= distance(len(encoded), smallestSize) {
+		t.Fatalf("encoder emitted %d bytes, matching the smallest candidate (%d) rather than the rate-distortion best (%d)",
+			len(encoded), smallestSize, rdBestSize)
+	}
+}
+
+func distance(a, b int) int {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
 
 func TestEncodeLossyImageToWebpAcceptsOpaqueImageBuffer(t *testing.T) {

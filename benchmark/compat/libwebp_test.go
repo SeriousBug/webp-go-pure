@@ -75,6 +75,49 @@ func TestLibwebpDecodesOurLossyOutput(t *testing.T) {
 	assertMeanAbsDiffSmall(t, dst.Pix, src, w, h, 16, 80)
 }
 
+// Every effort level takes a different path through the encoder: level 0 skips
+// probability re-estimation entirely, levels 1 and up converge a coefficient
+// probability table and replay the chosen levels under it, and level 9 adds an
+// exhaustive segmentation search. A bitstream defect in any of those is
+// invisible to our own decoder if the encoder and decoder share the mistaken
+// assumption, so each is checked against the reference decoder.
+func TestLibwebpDecodesOurLossyOutputAtEveryEffort(t *testing.T) {
+	const w, h = 160, 144
+	src := makeGradientRGBA(w, h)
+	// Detail in part of the frame keeps macroblocks from all being skippable,
+	// which is what makes the skip and token paths interesting.
+	for y := 0; y < h; y++ {
+		for x := w / 2; x < w; x++ {
+			o := (y*w + x) * 4
+			v := byte((x*31 ^ y*17) & 0xff)
+			src[o], src[o+1], src[o+2] = v, v, v
+		}
+	}
+
+	for effort := uint8(0); effort <= 9; effort++ {
+		encoded, err := webp.EncodeLossy(&webp.Image{Width: w, Height: h, RGBA: src},
+			&webp.LossyOptions{Quality: 90, Effort: effort})
+		if err != nil {
+			t.Fatalf("effort %d: %v", effort, err)
+		}
+		reference := libwebpDecodeToRGBA(t, encoded)
+		ours, err := webp.Decode(encoded)
+		if err != nil {
+			t.Fatalf("effort %d: %v", effort, err)
+		}
+		if reference.Rect.Dx() != w || reference.Rect.Dy() != h {
+			t.Fatalf("effort %d: dims %dx%d", effort, reference.Rect.Dx(), reference.Rect.Dy())
+		}
+		for i := 0; i < w*h*4; i++ {
+			if reference.Pix[i] != ours.RGBA[i] {
+				t.Fatalf("effort %d: byte %d decodes as %d in libwebp but %d here",
+					effort, i, reference.Pix[i], ours.RGBA[i])
+			}
+		}
+		assertMeanAbsDiffSmall(t, reference.Pix, src, w, h, 16, 80)
+	}
+}
+
 // Direction 2: libwebp encoder -> our decoder.
 
 func TestOurDecoderReadsLibwebpLosslessOutput(t *testing.T) {

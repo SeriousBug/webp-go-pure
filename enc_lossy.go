@@ -1,6 +1,9 @@
 package webp
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 const (
 	elossyMaxWebpDimension    = 1 << 14
@@ -81,6 +84,10 @@ type elossyEncodedLossyCandidate struct {
 	probabilities  elossyCoeffProbTables
 	modes          []elossyMacroblockMode
 	tokenPartition []byte
+	// distortion is the SSE of the encoder's own reconstruction against the
+	// source, before loop filtering. Candidates are compared on rate *and*
+	// distortion, so a segmentation that only wins on size cannot be chosen.
+	distortion uint64
 }
 
 type elossyLossySearchProfile struct {
@@ -130,8 +137,23 @@ func elossyValidateOptions(options *LossyOptions) error {
 	return nil
 }
 
+// elossyBaseQuantizerFromQuality maps a 0..=100 quality to a VP8 base
+// quantizer index. It mirrors libwebp's nonlinear quality->compression curve
+// (QualityToCompression in quant_enc.c): file size scales roughly with the
+// cube of the quantizer, so the mapping cube-roots a linearized quality before
+// inverting to a 0..=127 index. A prior linear map over-quantized the top of
+// the range (q90 landed at index 13 vs libwebp's ~9).
 func elossyBaseQuantizerFromQuality(quality uint8) int32 {
-	return (((100 - int32(quality)) * 127) + 50) / 100
+	c := float64(quality) / 100.0
+	var linearC float64
+	if c < 0.75 {
+		linearC = c * (2.0 / 3.0)
+	} else {
+		linearC = 2.0*c - 1.0
+	}
+	compression := math.Cbrt(linearC)
+	q := int32(127.0 * (1.0 - compression))
+	return elossyClampI32(q, 0, 127)
 }
 
 func elossyClampI32(value, lo, hi int32) int32 {
@@ -171,6 +193,19 @@ func elossyBuildRdMultipliers(quant *elossyQuantMatrices) elossyRdMultipliers {
 		uv:   max(3*qUv*qUv, 128) >> 6,
 		mode: max(qI4*qI4, 128) >> 7,
 	}
+}
+
+// elossyFrameRdCost scores a whole candidate frame as distortion plus rate
+// weighted by lambda, so a segmentation cannot win on size alone.
+//
+// Lambda uses the same 3*q^2/128 form as the block-level intra4 multiplier,
+// keeping the frame trade-off consistent with the decisions the block search
+// already made. It is evaluated unshifted here because the block multiplier's
+// >>7 truncates to uselessly coarse values at high quality.
+func elossyFrameRdCost(distortion uint64, size int, baseQuant int32) uint64 {
+	quant := elossyBuildQuantMatrices(int32(elossyClippedQuantizer(baseQuant)))
+	q := uint64(max(quant.y1[1], 8))
+	return distortion*128 + uint64(size)*8*max(3*q*q, 128)
 }
 
 func elossyClippedQuantizer(value int32) uint8 {
@@ -264,6 +299,21 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			refineY2:            true,
 			updateProbabilities: true,
 		}
+	}
+}
+
+// elossyStatsProfile is the reduced search used only to converge the
+// coefficient probability table. It keeps the mode search that shapes the
+// token distribution and drops the level refinement, which is what makes the
+// full search expensive and barely moves the resulting probabilities.
+// elossyMaxFullSearchCandidates caps how many segmentation candidates get the
+// full rate-distortion search. The rest are eliminated on the cheap pass.
+const elossyMaxFullSearchCandidates = 3
+
+func elossyStatsProfile(profile *elossyLossySearchProfile) elossyLossySearchProfile {
+	return elossyLossySearchProfile{
+		fastModeSearch: profile.fastModeSearch,
+		allowI4x4:      profile.allowI4x4,
 	}
 }
 
@@ -648,4 +698,22 @@ func elossyBuildSegmentCandidates(source *elossyPlanes, mbWidth, mbHeight int, b
 	}
 
 	return candidates
+}
+
+// elossyStatsMacroblockLimit is how many macroblocks the probability-convergence
+// pass looks at. Its output is an aggregate over token counts, so half the frame
+// pins the table down to within a percent of encoded size while halving what is
+// the more expensive of the two search passes. A quarter of the frame is
+// noticeably faster still but costs up to 3% on images whose top differs from
+// the rest.
+func elossyStatsMacroblockLimit(mbCount int) int {
+	const minimum = 512
+	if mbCount <= minimum {
+		return mbCount
+	}
+	limit := mbCount / 2
+	if limit < minimum {
+		limit = minimum
+	}
+	return limit
 }

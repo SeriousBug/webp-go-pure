@@ -23,6 +23,7 @@ func main() {
 	img := flag.String("img", "testdata/photos/Lena_512.png", "source image")
 	mode := flag.String("mode", "lossy-slow", "lossless|lossy-fast|lossy-slow")
 	n := flag.Int("n", 1, "iterations")
+	effort := flag.Int("effort", -1, "override lossy effort")
 	cpu := flag.String("cpu", "", "CPU profile output path")
 	mem := flag.String("mem", "", "heap profile output path")
 	flag.Parse()
@@ -30,14 +31,25 @@ func main() {
 	buf, err := load(*img)
 	must(err)
 
+	eff := func(dflt int) uint8 {
+		if *effort >= 0 {
+			return uint8(*effort)
+		}
+		return uint8(dflt)
+	}
+
 	var fn func() ([]byte, error)
 	switch *mode {
 	case "lossless":
-		fn = func() ([]byte, error) { return webp.EncodeLossless(&buf, &webp.LosslessOptions{Effort: 6}) }
+		fn = func() ([]byte, error) { return webp.EncodeLossless(&buf, &webp.LosslessOptions{Effort: eff(6)}) }
 	case "lossy-fast":
-		fn = func() ([]byte, error) { return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: 90, Effort: 0}) }
+		fn = func() ([]byte, error) {
+			return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: 90, Effort: eff(0)})
+		}
 	case "lossy-slow":
-		fn = func() ([]byte, error) { return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: 90, Effort: 9}) }
+		fn = func() ([]byte, error) {
+			return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: 90, Effort: eff(9)})
+		}
 	default:
 		fmt.Fprintln(os.Stderr, "bad mode")
 		os.Exit(1)
