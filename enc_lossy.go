@@ -288,8 +288,12 @@ func elossyHeuristicFilter(baseQuant int32) elossyFilterConfig {
 func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 	switch optimizationLevel {
 	case 0:
+		// The converged coefficient table is worth 20%-38% of the file here,
+		// far more than anything the mode search itself can reach at this
+		// effort, and the sampled prior pass costs a quarter of one encode.
 		return elossyLossySearchProfile{
-			fastModeSearch: true,
+			fastModeSearch:      true,
+			updateProbabilities: true,
 		}
 	case 1, 2:
 		return elossyLossySearchProfile{

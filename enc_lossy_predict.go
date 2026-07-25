@@ -1339,25 +1339,6 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 	return elossyRdScore(distortionU+distortionV, rate, rd.uv) + uint64(elossyUvModeRate(mode))*uint64(rdMode)
 }
 
-func elossyFastLumaPredictorScore(source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, mode uint8) uint64 {
-	x := mbX * 16
-	y := mbY * 16
-	var prediction [16 * 16]uint8
-	elossyFillPredictionBlock(reconstructed.y, reconstructed.yStride, reconstructed.yStride, x, y, mode, prediction[:], 16, 16)
-	return elossyBlockSse(source.y, source.yStride, x, y, prediction[:], 16, 16, 16)
-}
-
-func elossyFastChromaPredictorScore(source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, mode uint8) uint64 {
-	x := mbX * 8
-	y := mbY * 8
-	var predictionU [8 * 8]uint8
-	var predictionV [8 * 8]uint8
-	elossyFillPredictionBlock(reconstructed.u, reconstructed.uvStride, reconstructed.uvStride, x, y, mode, predictionU[:], 8, 8)
-	elossyFillPredictionBlock(reconstructed.v, reconstructed.uvStride, reconstructed.uvStride, x, y, mode, predictionV[:], 8, 8)
-	return elossyBlockSse(source.u, source.uvStride, x, y, predictionU[:], 8, 8, 8) +
-		elossyBlockSse(source.v, source.uvStride, x, y, predictionV[:], 8, 8, 8)
-}
-
 // elossyMbTrials is the mode search's scratch space. Each of luma and chroma
 // gets two buffers so the winning trial can be kept by swapping pointers
 // instead of copying, and bestLuma/bestChroma point at the survivors once the
@@ -1394,11 +1375,13 @@ func elossyChooseMacroblockMode(trials *elossyMbTrials, source *elossyPlanes, re
 	modes := [4]uint8{dcPred, vPred, hPred, tmPred}
 	trials.valid = false
 
+	// The fast search ranks modes on the same proxy the higher efforts screen
+	// with, but takes its winner as final instead of trialing the survivors.
 	if profile.fastModeSearch {
 		bestLuma := uint8(dcPred)
 		bestLumaScore := uint64(0xffffffffffffffff)
 		for _, mode := range modes {
-			score := elossyFastLumaPredictorScore(source, reconstructed, mbX, mbY, mode)
+			score := elossyLuma16ProxyScore(source, reconstructed, mbX, mbY, quant, rd, mode)
 			if score < bestLumaScore {
 				bestLuma = mode
 				bestLumaScore = score
@@ -1408,7 +1391,7 @@ func elossyChooseMacroblockMode(trials *elossyMbTrials, source *elossyPlanes, re
 		bestChroma := uint8(dcPred)
 		bestChromaScore := uint64(0xffffffffffffffff)
 		for _, mode := range modes {
-			score := elossyFastChromaPredictorScore(source, reconstructed, mbX, mbY, mode)
+			score := elossyChromaProxyScore(source, reconstructed, mbX, mbY, quant, rd, mode)
 			if score < bestChromaScore {
 				bestChroma = mode
 				bestChromaScore = score
