@@ -41,10 +41,6 @@ emits it directly.
 - **`libwebp` and `wasm` are the same encoder.** Their lossy output is
   byte-identical (verified by hash), so their sizes and PSNR match exactly;
   `wasm` is the cgo-free option and runs ~2-6x slower than native `libwebp`.
-- **We no longer match `webp-rust` bit-for-bit.** Commit 7e5e084 changed the
-  quality->quantizer mapping to libwebp's nonlinear curve, fixed a token-partition
-  desync, and switched candidate selection to rate-distortion, so our output
-  intentionally diverges from the Rust original.
 - **`webp-rust` `lossy-fast` output is corrupt on 3 of 7 images**, a bug this
   port found and fixed. See "The webp-rust lossy-fast bug" below.
 - **`webp-rust` `lossy-slow` files are smaller than everyone's, at 1.5-3 dB lower
