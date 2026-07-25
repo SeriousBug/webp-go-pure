@@ -137,48 +137,6 @@ func (p *elossyRatePrefix) reset(model *elossyRateModel, coeffType, ctx, first i
 	p.resetTail()
 }
 
-// walk prices the block from scan position start onwards, reusing the cached
-// prefix for everything below it.
-func (p *elossyRatePrefix) walk(changed, last int) uint32 {
-	model := p.model
-	coeffType := p.coeffType
-	if last < p.first {
-		band := elossyBands[p.first]
-		return elossyBitCost(false, model.probs[coeffType][band][p.entryCtx][0])
-	}
-
-	start := changed
-	if start > last {
-		start = last + 1
-	}
-	rate := p.rate[start]
-	ctx := int(p.ctx[start])
-	band := int(p.band[start])
-
-	typeLevels := model.level[coeffType][:]
-	for scan := start; scan <= last; scan++ {
-		coeff := int32(p.zigzagged[scan])
-		negative := coeff >> 31
-		value := uint32((coeff ^ negative) - negative)
-		rate += uint32(negative&1) * elossySignRateDelta
-		if value <= elossyMaxTabulatedLevel {
-			rate += uint32(typeLevels[(band*numCtx+ctx)*elossyLevelTableStride+int(value)])
-		} else {
-			rate += elossyUntabulatedLevelRate(model, coeffType, band, ctx, value)
-		}
-		ctx = int(value)
-		if ctx > 2 {
-			ctx = 2
-		}
-		band = elossyBands[scan+1]
-	}
-
-	if last < 15 {
-		rate += elossyBitCost(false, model.probs[coeffType][band][ctx][0])
-	}
-	return rate
-}
-
 // lastWith reports where the block ends once position scan holds value. The
 // refinement only ever moves magnitudes toward zero, so the end can recede but
 // never extend.
@@ -253,6 +211,16 @@ func (p *elossyRatePrefix) commit(scan int, value int16) {
 	}
 }
 
+// rate0 prices the block as reset left it. The prefix pass already accumulated
+// the running rate through the block's end, so this is a lookup.
 func (p *elossyRatePrefix) rate0() uint32 {
-	return p.walk(p.first, p.last)
+	if p.last < p.first {
+		band := elossyBands[p.first]
+		return elossyBitCost(false, p.model.probs[p.coeffType][band][p.entryCtx][0])
+	}
+	rate := p.rate[p.last+1]
+	if p.last < 15 {
+		rate += elossyBitCost(false, p.model.probs[p.coeffType][int(p.band[p.last+1])][int(p.ctx[p.last+1])][0])
+	}
+	return rate
 }
