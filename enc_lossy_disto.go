@@ -71,7 +71,7 @@ func elossyTDistoVerticalPass(tmp *[16]int32) uint32 {
 
 // elossyTDisto4x4Contiguous is elossyTDisto4x4 for a prediction that already
 // sits in a packed 4x4 block, which is how the 4x4 mode search holds them.
-func elossyTDisto4x4Contiguous(src []uint8, srcStride, srcX, srcY int, pred *[16]uint8) uint32 {
+func elossyTDisto4x4ContiguousGo(src []uint8, srcStride, srcX, srcY int, pred *[16]uint8) uint32 {
 	var tmp [16]int32
 	offset := srcY*srcStride + srcX
 	for row := 0; row < 4; row++ {
@@ -95,8 +95,16 @@ func elossyTDisto4x4Contiguous(src []uint8, srcStride, srcX, srcY int, pred *[16
 	return elossyTDistoVerticalPass(&tmp)
 }
 
-func elossyTDisto4x4(src []uint8, srcStride, srcX, srcY int, pred []uint8, predStride, predX, predY int) uint32 {
-	return elossyTDisto4x4Go(src, srcStride, srcX, srcY, pred, predStride, predX, predY)
+// elossyTDistoBlocksGo scores a cols x rows grid of 4x4 blocks against a
+// prediction of the same shape, one call for the whole macroblock.
+func elossyTDistoBlocksGo(src []uint8, srcStride, srcX, srcY int, pred []uint8, predStride, cols, rows int) uint64 {
+	var total uint64
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			total += uint64(elossyTDisto4x4Go(src, srcStride, srcX+col*4, srcY+row*4, pred, predStride, col*4, row*4))
+		}
+	}
+	return total
 }
 
 func elossyAbsI32(value int32) int32 {
@@ -158,12 +166,7 @@ func elossyLuma16ProxyScore(source *elossyPlanes, reconstructed *elossyPlanes, m
 	y := mbY * 16
 	var prediction [16 * 16]uint8
 	elossyFillPredictionBlock(reconstructed.y, reconstructed.yStride, reconstructed.yStride, x, y, mode, prediction[:], 16, 16)
-	var distortion uint64
-	for subY := 0; subY < 4; subY++ {
-		for subX := 0; subX < 4; subX++ {
-			distortion += uint64(elossyTDisto4x4(source.y, source.yStride, x+subX*4, y+subY*4, prediction[:], 16, subX*4, subY*4))
-		}
-	}
+	distortion := elossyTDistoBlocks(source.y, source.yStride, x, y, prediction[:], 16, 4, 4)
 	return elossyRdScore(elossyScaleTDisto(distortion, quant.y1[1]), elossyI16ModeRate(mode), elossyModeRateLambda(rd))
 }
 
@@ -176,13 +179,8 @@ func elossyChromaProxyScore(source *elossyPlanes, reconstructed *elossyPlanes, m
 	var predictionV [8 * 8]uint8
 	elossyFillPredictionBlock(reconstructed.u, reconstructed.uvStride, reconstructed.uvStride, x, y, mode, predictionU[:], 8, 8)
 	elossyFillPredictionBlock(reconstructed.v, reconstructed.uvStride, reconstructed.uvStride, x, y, mode, predictionV[:], 8, 8)
-	var distortion uint64
-	for subY := 0; subY < 2; subY++ {
-		for subX := 0; subX < 2; subX++ {
-			distortion += uint64(elossyTDisto4x4(source.u, source.uvStride, x+subX*4, y+subY*4, predictionU[:], 8, subX*4, subY*4))
-			distortion += uint64(elossyTDisto4x4(source.v, source.uvStride, x+subX*4, y+subY*4, predictionV[:], 8, subX*4, subY*4))
-		}
-	}
+	distortion := elossyTDistoBlocks(source.u, source.uvStride, x, y, predictionU[:], 8, 2, 2) +
+		elossyTDistoBlocks(source.v, source.uvStride, x, y, predictionV[:], 8, 2, 2)
 	return elossyRdScore(elossyScaleTDisto(distortion, quant.uv[1]), elossyUvModeRate(mode), elossyModeRateLambda(rd))
 }
 

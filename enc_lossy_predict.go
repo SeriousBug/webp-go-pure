@@ -953,7 +953,7 @@ func elossyBlockSseGo(source []uint8, sourceStride, x, y int, reconstructed []ui
 	return sse
 }
 
-func elossyPlaneSseRegion(source []uint8, sourceStride int, decoded []uint8, decodedStride, width, height int) uint64 {
+func elossyPlaneSseRegionGo(source []uint8, sourceStride int, decoded []uint8, decodedStride, width, height int) uint64 {
 	var sse uint64
 	for row := 0; row < height; row++ {
 		srcOffset := row * sourceStride
