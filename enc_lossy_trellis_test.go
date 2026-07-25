@@ -113,7 +113,10 @@ func TestTrellisQuantizeMatchesBruteForce(t *testing.T) {
 		}
 
 		var levels [16]int16
-		elossyTrellisQuantize(&coeffs, model, coeffType, ctx0, first, dcQuant, acQuant, lambda, &levels)
+		_, rate := elossyTrellisQuantize(&coeffs, model, coeffType, ctx0, first, dcQuant, acQuant, lambda, &levels)
+		if wantRate := elossyCoefficientsRate(model, coeffType, ctx0, first, &levels); rate != wantRate {
+			t.Fatalf("trial %d: rate %d, want %d for levels %v", trial, rate, wantRate, levels)
+		}
 		want := trellisBruteForce(&coeffs, model, coeffType, ctx0, first, dcQuant, acQuant, lambda)
 		if levels != want {
 			t.Fatalf("trial %d: dc=%d ac=%d first=%d ctx0=%d lambda=%d\ncoeffs %v\ngot    %v\nwant   %v",

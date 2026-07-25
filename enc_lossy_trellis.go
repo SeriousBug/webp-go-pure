@@ -31,15 +31,15 @@ func elossyTrellisScore(lambda uint32, rate uint32, distortion int64) int64 {
 
 // elossyTrellisQuantize quantizes coeffs into levels, choosing each level to
 // minimize the block's rate-distortion score rather than rounding it
-// independently. It returns the dequantized coefficients, both arrays in
-// natural (non-zigzag) order.
+// independently. It returns the dequantized coefficients, in natural
+// (non-zigzag) order like levels, and what coding those levels costs.
 //
 // A coefficient quantizes to some level under round-half rounding; each
 // position offers that level and the one below it, which is what truncating the
 // same coefficient would have produced. The truncated level is always
 // reachable, so the node holding it is never dead and needs no liveness check;
 // only the rounded-up node can fall out of the search.
-func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType, ctx0, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
+func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType, ctx0, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) ([16]int16, uint32) {
 	var dequantized [16]int16
 
 	// A coefficient at or below half a step rounds to zero, so the positions
@@ -54,9 +54,10 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 			break
 		}
 	}
+	skipRate := elossyBitCost(false, model.probs[coeffType][elossyBands[first]][ctx0][0])
 	if last < first {
 		elossyClearLevels(levels, first)
-		return dequantized
+		return dequantized, skipRate
 	}
 	// One position past the last that can hold a level is enough: a longer
 	// block is priced but can never win.
@@ -78,8 +79,9 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 	lastProba := typeProbs[firstBand][ctx0][0]
 
 	// Coding nothing at all is the score every path has to beat.
-	bestScore := elossyTrellisScore(lambda, elossyBitCost(false, lastProba), 0)
+	bestScore := elossyTrellisScore(lambda, skipRate, 0)
 	bestPosition, bestNode, bestPrev := -1, 0, 0
+	bestRate := skipRate
 
 	var entryRate uint32
 	if ctx0 == 0 {
@@ -92,6 +94,9 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 	// the running best score, and where the level costs it hands forward live.
 	prevScore0, prevScore1 := entryScore, entryScore
 	prevBase0, prevBase1 := entryBase, entryBase
+	// The rate alone along each node's best path, which the mode search needs
+	// to weigh the block against a different distortion than the trellis used.
+	prevRate0, prevRate1 := entryRate, entryRate
 
 	for scan := first; scan <= last; scan++ {
 		index := elossyZigzag[scan]
@@ -121,15 +126,19 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 
 		var score0, score1 int64
 		var base0, base1 int32
+		var rate0, rate1 uint32
 
 		// The truncated level.
 		{
 			level := truncated
-			score := prevScore0 + elossyTrellisScore(lambda, elossyTrellisLevelRate(typeLevels, model, coeffType, prevBase0, level), 0)
+			levelRate := elossyTrellisLevelRate(typeLevels, model, coeffType, prevBase0, level)
+			score := prevScore0 + elossyTrellisScore(lambda, levelRate, 0)
+			rate := prevRate0 + levelRate
 			from := 0
 			if prev1Live {
-				if alt := prevScore1 + elossyTrellisScore(lambda, elossyTrellisLevelRate(typeLevels, model, coeffType, prevBase1, level), 0); alt < score {
-					score, from = alt, 1
+				altRate := elossyTrellisLevelRate(typeLevels, model, coeffType, prevBase1, level)
+				if alt := prevScore1 + elossyTrellisScore(lambda, altRate, 0); alt < score {
+					score, rate, from = alt, prevRate1+altRate, 1
 				}
 			}
 			residual := coeff - level*quant
@@ -137,7 +146,7 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 			if from != 0 {
 				paths |= 1 << uint(scan*2)
 			}
-			score0 = score
+			score0, rate0 = score, rate
 
 			ctx := level
 			if ctx > 2 {
@@ -152,6 +161,7 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 				}
 				if total := score + elossyTrellisScore(lambda, endRate, 0); total < bestScore {
 					bestScore, bestPosition, bestNode, bestPrev = total, scan, 0, from
+					bestRate = rate + endRate
 				}
 			}
 		}
@@ -159,11 +169,14 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 		// The rounded-up level, when rounding reaches one.
 		if truncated < rounded {
 			level := truncated + 1
-			score := prevScore0 + elossyTrellisScore(lambda, elossyTrellisLevelRate(typeLevels, model, coeffType, prevBase0, level), 0)
+			levelRate := elossyTrellisLevelRate(typeLevels, model, coeffType, prevBase0, level)
+			score := prevScore0 + elossyTrellisScore(lambda, levelRate, 0)
+			rate := prevRate0 + levelRate
 			from := 0
 			if prev1Live {
-				if alt := prevScore1 + elossyTrellisScore(lambda, elossyTrellisLevelRate(typeLevels, model, coeffType, prevBase1, level), 0); alt < score {
-					score, from = alt, 1
+				altRate := elossyTrellisLevelRate(typeLevels, model, coeffType, prevBase1, level)
+				if alt := prevScore1 + elossyTrellisScore(lambda, altRate, 0); alt < score {
+					score, rate, from = alt, prevRate1+altRate, 1
 				}
 			}
 			residual := coeff - level*quant
@@ -171,7 +184,7 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 			if from != 0 {
 				paths |= 1 << uint(scan*2+1)
 			}
-			score1 = score
+			score1, rate1 = score, rate
 
 			ctx := level
 			if ctx > 2 {
@@ -186,6 +199,7 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 			}
 			if total := score + elossyTrellisScore(lambda, endRate, 0); total < bestScore {
 				bestScore, bestPosition, bestNode, bestPrev = total, scan, 1, from
+				bestRate = rate + endRate
 			}
 		} else {
 			score1 = elossyTrellisMaxCost
@@ -193,11 +207,12 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 
 		prevScore0, prevScore1 = score0, score1
 		prevBase0, prevBase1 = base0, base1
+		prevRate0, prevRate1 = rate0, rate1
 	}
 
 	elossyClearLevels(levels, first)
 	if bestPosition < 0 {
-		return dequantized
+		return dequantized, skipRate
 	}
 
 	// The best predecessor of the terminal node is the one found while scoring
@@ -225,14 +240,18 @@ func elossyTrellisQuantize(coeffs *[16]int16, model *elossyRateModel, coeffType,
 			level = elossyTrellisMaxLevel
 		}
 		level += int32(node)
-		if negative {
+		if negative && level != 0 {
 			level = -level
+			// The level costs price every sign as if it were positive, as
+			// libwebp's trellis does; the emitted rate has to charge the
+			// difference so it matches what the block actually costs.
+			bestRate += elossySignRateDelta
 		}
 		levels[index] = int16(level)
 		dequantized[index] = int16(level * quant)
 		node = int(paths>>uint(scan*2+node)) & 1
 	}
-	return dequantized
+	return dequantized, bestRate
 }
 
 // elossyClearLevels zeroes every level the trellis is responsible for. Blocks

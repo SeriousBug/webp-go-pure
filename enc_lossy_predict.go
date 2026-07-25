@@ -617,9 +617,9 @@ func elossyQuantizeCoefficient(coeff int16, quant uint16) (int16, int16) {
 	return int16(level), int16(level * q)
 }
 
-// elossyQuantizeBlockGo returns the quantized levels only. Every caller
-// dequantizes through the refinement step, which produces the reconstruction
-// levels it settles on, so producing them here as well was wasted work.
+// elossyQuantizeBlockGo returns the quantized levels only. Callers dequantize
+// separately, since the levels the trellis settles on are not the ones plain
+// rounding produces.
 func elossyQuantizeBlockGo(coeffs *[16]int16, dcQuant, acQuant uint16, first int) [16]int16 {
 	var levels [16]int16
 	for index := first; index < 16; index++ {
@@ -642,12 +642,6 @@ func elossyDequantizeLevels(levels *[16]int16, dcQuant, acQuant uint16) [16]int1
 		dequantized[index] = int16(int32(levels[index]) * quant)
 	}
 	return dequantized
-}
-
-func elossyReconstructFromPrediction(prediction *[16]uint8, coeffs *[16]int16) [16]uint8 {
-	block := *prediction
-	elossyAddTransform(block[:], 4, 0, 0, coeffs)
-	return block
 }
 
 func elossyBlockSse4x4Go(source []uint8, stride, x, y int, candidate *[16]uint8) uint64 {
@@ -677,73 +671,26 @@ func elossyReconstructLuma16FromPrediction(prediction *[256]uint8, acCoeffs *[16
 	return candidate, y2Dc
 }
 
-func elossyRefineLevelsGreedy(source []uint8, sourceStride, x, y int, prediction *[16]uint8, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
-	// The refinement only ever lowers a non-zero magnitude, so a block with
-	// nothing to lower has no trial to make and the scoring setup below would
-	// be built only to be thrown away.
-	empty := true
-	for scan := first; scan <= 15; scan++ {
-		if levels[elossyZigzag[scan]] != 0 {
-			empty = false
-			break
-		}
+// elossyQuantizeLevels turns raw transform coefficients into levels, through
+// the trellis when the profile asks for it and by plain rounding otherwise, and
+// returns the dequantized coefficients to reconstruct from.
+func elossyQuantizeLevels(trellis bool, coeffs *[16]int16, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
+	if trellis {
+		dequantized, _ := elossyTrellisQuantize(coeffs, model, coeffType, ctx, first, dcQuant, acQuant, lambda, levels)
+		return dequantized
 	}
-	if empty {
-		return elossyDequantizeLevels(levels, dcQuant, acQuant)
-	}
-
-	var prefix elossyRatePrefix
-	prefix.reset(model, coeffType, ctx, first, levels)
-
-	coeffs := elossyDequantizeLevels(levels, dcQuant, acQuant)
-	candidate := elossyReconstructFromPrediction(prediction, &coeffs)
-	bestScore := elossyRdScore(
-		elossyBlockSse4x4(source, sourceStride, x, y, &candidate),
-		prefix.rate0(),
-		lambda,
-	)
-
-	for scan := 15; scan >= first; scan-- {
-		index := elossyZigzag[scan]
-		quant := int32(acQuant)
-		if index == 0 {
-			quant = int32(dcQuant)
-		}
-		for levels[index] != 0 {
-			current := levels[index]
-			var next int16
-			if current > 0 {
-				next = current - 1
-			} else {
-				next = current + 1
-			}
-			trialCoeffs := coeffs
-			trialCoeffs[index] = int16(int32(next) * quant)
-			trialCandidate := elossyReconstructFromPrediction(prediction, &trialCoeffs)
-			trialScore := elossyRdScore(
-				elossyBlockSse4x4(source, sourceStride, x, y, &trialCandidate),
-				prefix.rateWith(scan, next),
-				lambda,
-			)
-			if trialScore <= bestScore {
-				levels[index] = next
-				prefix.commit(scan, next)
-				coeffs = trialCoeffs
-				bestScore = trialScore
-			} else {
-				break
-			}
-		}
-	}
-
-	return coeffs
+	*levels = elossyQuantizeBlock(coeffs, dcQuant, acQuant, first)
+	return elossyDequantizeLevels(levels, dcQuant, acQuant)
 }
 
-func elossyMaybeRefineLevels(enabled bool, coeffs *[16]int16, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
-	if enabled {
+// elossyQuantizeLevelsRate also reports what coding the levels costs, which the
+// mode search needs and the trellis has already worked out along the way.
+func elossyQuantizeLevelsRate(trellis bool, coeffs *[16]int16, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) ([16]int16, uint32) {
+	if trellis {
 		return elossyTrellisQuantize(coeffs, model, coeffType, ctx, first, dcQuant, acQuant, lambda, levels)
 	}
-	return elossyDequantizeLevels(levels, dcQuant, acQuant)
+	*levels = elossyQuantizeBlock(coeffs, dcQuant, acQuant, first)
+	return elossyDequantizeLevels(levels, dcQuant, acQuant), elossyCoefficientsRate(model, coeffType, ctx, first, levels)
 }
 
 // rd_score computes a rate-distortion score for the current candidate.
@@ -862,9 +809,10 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 			yDc[block] = coeffs[0]
 			acOnly := coeffs
 			acOnly[0] = 0
-			levels := elossyQuantizeBlock(&acOnly, quant.y1[0], quant.y1[1], 1)
 			ctx := int(l + (refineTnz & 1))
-			coeffsR := elossyMaybeRefineLevels(profile.refineI16, &acOnly, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.trellisI16, &levels)
+			var levels [16]int16
+			coeffsR, blockRate := elossyQuantizeLevelsRate(profile.refineI16, &acOnly, model, 0, ctx, 1, quant.y1[0], quant.y1[1], rd.trellisI16, &levels)
+			rate += blockRate
 			yLevels[block] = levels
 			yCoeffs[block] = coeffsR
 			hasAc := uint8(0)
@@ -885,25 +833,6 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 	y2Dc := elossyInverseWht(&y2Coeffs)
 	for block := 0; block < 16; block++ {
 		yCoeffs[block][0] = y2Dc[block]
-	}
-
-	tnz := top.nz & 0x0f
-	lnz := left.nz & 0x0f
-	for subY := 0; subY < 4; subY++ {
-		l := lnz & 1
-		for subX := 0; subX < 4; subX++ {
-			block := subY*4 + subX
-			ctx := int(l + (tnz & 1))
-			rate += elossyCoefficientsRate(model, 0, ctx, 1, &yLevels[block])
-			hasAc := uint8(0)
-			if elossyBlockHasNonZero(&yLevels[block], 1) {
-				hasAc = 1
-			}
-			l = hasAc
-			tnz = (tnz >> 1) | (hasAc << 7)
-		}
-		tnz >>= 4
-		lnz = (lnz >> 1) | (l << 7)
 	}
 
 	for subY := 0; subY < 4; subY++ {
@@ -964,12 +893,11 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 				var predictionBlock [16]uint8
 				elossyFillLuma4PredictionFrom(&neighbors, mode, predictionBlock[:], 4)
 				coeffs := elossyForwardTransformAt(source.y, source.yStride, blockX, blockY, predictionBlock[:], 4, 0, 0)
-				levels := elossyQuantizeBlock(&coeffs, quant.y1[0], quant.y1[1], 0)
-				dequantized := elossyMaybeRefineLevels(profile.refineI4Search, &coeffs, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.trellisI4, &levels)
+				var levels [16]int16
+				dequantized, coeffRate := elossyQuantizeLevelsRate(profile.refineI4Search, &coeffs, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.trellisI4, &levels)
 				candidate := predictionBlock
 				elossyAddTransform(candidate[:], 4, 0, 0, &dequantized)
 				distortion := elossyBlockSse4x4(source.y, source.yStride, blockX, blockY, &candidate)
-				coeffRate := elossyCoefficientsRate(model, 3, ctx, 0, &levels)
 				rdMode := rd.mode
 				if rdMode < 1 {
 					rdMode = 1
@@ -1040,15 +968,15 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 		for subX := 0; subX < 2; subX++ {
 			block := subY*2 + subX
 			coeffsU := elossyForwardTransformAt(source.u, source.uvStride, x+subX*4, y+subY*4, predictionU[:], 8, subX*4, subY*4)
-			levelsU := elossyQuantizeBlock(&coeffsU, quant.uv[0], quant.uv[1], 0)
 			ctx := int(l + (tnzU & 1))
-			coeffsUR := elossyMaybeRefineLevels(profile.refineChroma, &coeffsU, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levelsU)
+			var levelsU [16]int16
+			coeffsUR, blockRate := elossyQuantizeLevelsRate(profile.refineChroma, &coeffsU, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levelsU)
 			trial.uLevels[block] = levelsU
 			hasCoeffs := uint8(0)
 			if elossyBlockHasNonZero(&levelsU, 0) {
 				hasCoeffs = 1
 			}
-			rate += elossyCoefficientsRate(model, 2, ctx, 0, &levelsU)
+			rate += blockRate
 			l = hasCoeffs
 			tnzU = (tnzU >> 1) | (hasCoeffs << 3)
 			elossyAddTransform(candidateU, 8, subX*4, subY*4, &coeffsUR)
@@ -1064,15 +992,15 @@ func elossyEvaluateChromaMode(trial *elossyChromaTrial, source *elossyPlanes, re
 		for subX := 0; subX < 2; subX++ {
 			block := subY*2 + subX
 			coeffsV := elossyForwardTransformAt(source.v, source.uvStride, x+subX*4, y+subY*4, predictionV[:], 8, subX*4, subY*4)
-			levelsV := elossyQuantizeBlock(&coeffsV, quant.uv[0], quant.uv[1], 0)
 			ctx := int(l + (tnzV & 1))
-			coeffsVR := elossyMaybeRefineLevels(profile.refineChroma, &coeffsV, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levelsV)
+			var levelsV [16]int16
+			coeffsVR, blockRate := elossyQuantizeLevelsRate(profile.refineChroma, &coeffsV, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levelsV)
 			trial.vLevels[block] = levelsV
 			hasCoeffs := uint8(0)
 			if elossyBlockHasNonZero(&levelsV, 0) {
 				hasCoeffs = 1
 			}
-			rate += elossyCoefficientsRate(model, 2, ctx, 0, &levelsV)
+			rate += blockRate
 			l = hasCoeffs
 			tnzV = (tnzV >> 1) | (hasCoeffs << 3)
 			elossyAddTransform(candidateV, 8, subX*4, subY*4, &coeffsVR)
