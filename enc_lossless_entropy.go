@@ -1205,11 +1205,55 @@ func elosslessEstimateCacheCandidateCost(width int, tokens []elosslessToken, col
 	if err != nil {
 		return 0, err
 	}
-	group, err := elosslessBuildGroupCodes(&histograms)
+	return elosslessHistogramSetCost(&histograms)
+}
+
+func elosslessHistogramSetCost(histograms *elosslessHistogramSet) (int, error) {
+	group, err := elosslessBuildGroupCodes(histograms)
 	if err != nil {
 		return 0, err
 	}
-	return elosslessHistogramCost(&histograms, &group), nil
+	return elosslessHistogramCost(histograms, &group), nil
+}
+
+// elosslessCachedTokenHistograms builds the histograms that applying a color
+// cache of colorCacheBits to tokens would produce, without materializing the
+// rewritten token stream. Ranking cache-bit candidates only needs the
+// histograms, and the token slices are large enough that allocating one per
+// candidate dominates the search.
+func elosslessCachedTokenHistograms(argb []uint32, tokens []elosslessToken, width, colorCacheBits int) (elosslessHistogramSet, error) {
+	histograms := elosslessNewHistograms(colorCacheBits)
+	cache, err := elosslessColorCacheNew(colorCacheBits)
+	if err != nil {
+		return histograms, err
+	}
+
+	pixelIndex := 0
+	for _, token := range tokens {
+		switch token.kind {
+		case elosslessTokLiteral:
+			pixel := token.argb
+			if key, ok := cache.lookup(pixel); ok {
+				token = elosslessToken{kind: elosslessTokCache, key: key}
+			} else {
+				cache.insert(pixel)
+			}
+			pixelIndex++
+		case elosslessTokCache:
+			pixelIndex++
+		case elosslessTokCopy:
+			for _, pixel := range argb[pixelIndex : pixelIndex+token.length] {
+				cache.insert(pixel)
+			}
+			pixelIndex += token.length
+		}
+		if err := elosslessAddTokenToHistograms(&histograms, width, token); err != nil {
+			return histograms, err
+		}
+	}
+
+	elosslessNormalizeHistograms(&histograms)
+	return histograms, nil
 }
 
 func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTokens []elosslessToken, profile *elosslessLosslessSearchProfile) (int, error) {
@@ -1227,15 +1271,19 @@ func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTok
 	}
 	cheapCandidates = append(cheapCandidates, cacheCandidate{cost0, 0})
 	for cacheBits := 1; cacheBits <= maxCacheBits; cacheBits++ {
-		tokens, err := elosslessApplyColorCacheToTokens(argb, baseTokens, cacheBits)
+		histograms, err := elosslessCachedTokenHistograms(argb, baseTokens, width, cacheBits)
 		if err != nil {
 			return 0, err
 		}
-		cost, err := elosslessEstimateCacheCandidateCost(width, tokens, cacheBits)
+		cost, err := elosslessHistogramSetCost(&histograms)
 		if err != nil {
 			return 0, err
 		}
 		cheapCandidates = append(cheapCandidates, cacheCandidate{cost, cacheBits})
+	}
+	cheapCosts := make(map[int]int, len(cheapCandidates))
+	for _, c := range cheapCandidates {
+		cheapCosts[c.bits] = c.cost
 	}
 
 	sort.SliceStable(cheapCandidates, func(i, j int) bool {
@@ -1266,18 +1314,9 @@ func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTok
 	bestCacheBits := 0
 	bestSize := elosslessIntMax
 	for _, cacheBits := range shortlist {
-		var cheapCost int
-		if cacheBits == 0 {
+		cheapCost, ok := cheapCosts[cacheBits]
+		if !ok {
 			cheapCost, err = elosslessEstimateCacheCandidateCost(width, baseTokens, 0)
-			if err != nil {
-				return 0, err
-			}
-		} else {
-			tokens, err := elosslessApplyColorCacheToTokens(argb, baseTokens, cacheBits)
-			if err != nil {
-				return 0, err
-			}
-			cheapCost, err = elosslessEstimateCacheCandidateCost(width, tokens, cacheBits)
 			if err != nil {
 				return 0, err
 			}
