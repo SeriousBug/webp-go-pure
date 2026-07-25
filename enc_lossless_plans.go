@@ -23,13 +23,7 @@ func elosslessColorTransformDelta(transform int8, color uint8) int32 {
 	return (int32(transform) * int32(int8(color))) >> 5
 }
 
-func elosslessEstimateTransformCoefficient(pairs [][2]int32) int8 {
-	numerator := int64(0)
-	denominator := int64(0)
-	for _, p := range pairs {
-		numerator += int64(p[0]) * int64(p[1])
-		denominator += int64(p[1]) * int64(p[1])
-	}
+func elosslessTransformCoefficientFromSums(numerator, denominator int64) int8 {
 	if denominator == 0 {
 		return 0
 	}
@@ -40,6 +34,30 @@ func elosslessEstimateTransformCoefficient(pairs [][2]int32) int8 {
 		coefficient = 127
 	}
 	return int8(coefficient)
+}
+
+// elosslessGreenCrossSums accumulates the green-to-red and green-to-blue dot
+// products for one pixel.
+func elosslessGreenCrossSums(pixel uint32, redGreen, blueGreen, greenSq *int64) {
+	red := int64(int8(byte((pixel >> 16) & 0xff)))
+	green := int64(int8(byte((pixel >> 8) & 0xff)))
+	blue := int64(int8(byte(pixel & 0xff)))
+	*redGreen += red * green
+	*blueGreen += blue * green
+	*greenSq += green * green
+}
+
+// elosslessRedBlueCrossSums accumulates the red-to-blue dot products for one
+// pixel, against the blue channel already adjusted by greenToBlue.
+func elosslessRedBlueCrossSums(pixel uint32, greenToBlue int8, blueRed, redSq *int64) {
+	red := uint8((pixel >> 16) & 0xff)
+	green := uint8((pixel >> 8) & 0xff)
+	blue := uint8(pixel & 0xff)
+	transformedBlue := uint8((int32(blue) - elosslessColorTransformDelta(greenToBlue, green)) & 0xff)
+	tb := int64(int8(transformedBlue))
+	r := int64(int8(red))
+	*blueRed += tb * r
+	*redSq += r * r
 }
 
 func elosslessEstimateCrossColorTransformRegion(width, height int, argb []uint32, tileX, tileY, bits int) elosslessCrossColorTransform {
@@ -53,36 +71,25 @@ func elosslessEstimateCrossColorTransformRegion(width, height int, argb []uint32
 	if height < endY {
 		endY = height
 	}
-	capacity := (endX - startX) * (endY - startY)
-
-	redPairs := make([][2]int32, 0, capacity)
-	blueGreenPairs := make([][2]int32, 0, capacity)
+	var redGreen, blueGreen, greenSq int64
 	for y := startY; y < endY; y++ {
+		row := argb[y*width:]
 		for x := startX; x < endX; x++ {
-			pixel := argb[y*width+x]
-			red := int32(int8(byte((pixel >> 16) & 0xff)))
-			green := int32(int8(byte((pixel >> 8) & 0xff)))
-			blue := int32(int8(byte(pixel & 0xff)))
-			redPairs = append(redPairs, [2]int32{red, green})
-			blueGreenPairs = append(blueGreenPairs, [2]int32{blue, green})
+			elosslessGreenCrossSums(row[x], &redGreen, &blueGreen, &greenSq)
 		}
 	}
 
-	greenToRed := elosslessEstimateTransformCoefficient(redPairs)
-	greenToBlue := elosslessEstimateTransformCoefficient(blueGreenPairs)
+	greenToRed := elosslessTransformCoefficientFromSums(redGreen, greenSq)
+	greenToBlue := elosslessTransformCoefficientFromSums(blueGreen, greenSq)
 
-	blueRedPairs := make([][2]int32, 0, capacity)
+	var blueRed, redSq int64
 	for y := startY; y < endY; y++ {
+		row := argb[y*width:]
 		for x := startX; x < endX; x++ {
-			pixel := argb[y*width+x]
-			red := uint8((pixel >> 16) & 0xff)
-			green := uint8((pixel >> 8) & 0xff)
-			blue := uint8(pixel & 0xff)
-			transformedBlue := uint8((int32(blue) - elosslessColorTransformDelta(greenToBlue, green)) & 0xff)
-			blueRedPairs = append(blueRedPairs, [2]int32{int32(int8(transformedBlue)), int32(int8(red))})
+			elosslessRedBlueCrossSums(row[x], greenToBlue, &blueRed, &redSq)
 		}
 	}
-	redToBlue := elosslessEstimateTransformCoefficient(blueRedPairs)
+	redToBlue := elosslessTransformCoefficientFromSums(blueRed, redSq)
 
 	return elosslessCrossColorTransform{
 		greenToRed:  greenToRed,
@@ -92,28 +99,19 @@ func elosslessEstimateCrossColorTransformRegion(width, height int, argb []uint32
 }
 
 func elosslessEstimateCrossColorTransform(argb []uint32) elosslessCrossColorTransform {
-	redPairs := make([][2]int32, 0, len(argb))
-	blueGreenPairs := make([][2]int32, 0, len(argb))
+	var redGreen, blueGreen, greenSq int64
 	for _, pixel := range argb {
-		red := int32(int8(byte((pixel >> 16) & 0xff)))
-		green := int32(int8(byte((pixel >> 8) & 0xff)))
-		blue := int32(int8(byte(pixel & 0xff)))
-		redPairs = append(redPairs, [2]int32{red, green})
-		blueGreenPairs = append(blueGreenPairs, [2]int32{blue, green})
+		elosslessGreenCrossSums(pixel, &redGreen, &blueGreen, &greenSq)
 	}
 
-	greenToRed := elosslessEstimateTransformCoefficient(redPairs)
-	greenToBlue := elosslessEstimateTransformCoefficient(blueGreenPairs)
+	greenToRed := elosslessTransformCoefficientFromSums(redGreen, greenSq)
+	greenToBlue := elosslessTransformCoefficientFromSums(blueGreen, greenSq)
 
-	blueRedPairs := make([][2]int32, 0, len(argb))
+	var blueRed, redSq int64
 	for _, pixel := range argb {
-		red := uint8((pixel >> 16) & 0xff)
-		green := uint8((pixel >> 8) & 0xff)
-		blue := uint8(pixel & 0xff)
-		transformedBlue := uint8((int32(blue) - elosslessColorTransformDelta(greenToBlue, green)) & 0xff)
-		blueRedPairs = append(blueRedPairs, [2]int32{int32(int8(transformedBlue)), int32(int8(red))})
+		elosslessRedBlueCrossSums(pixel, greenToBlue, &blueRed, &redSq)
 	}
-	redToBlue := elosslessEstimateTransformCoefficient(blueRedPairs)
+	redToBlue := elosslessTransformCoefficientFromSums(blueRed, redSq)
 
 	return elosslessCrossColorTransform{
 		greenToRed:  greenToRed,
