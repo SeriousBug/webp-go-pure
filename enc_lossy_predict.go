@@ -157,10 +157,33 @@ func elossyFillPredictionBlock(plane []uint8, stride, planeWidth, x, y int, mode
 	}
 }
 
+// elossyLuma4Neighbors are the samples a 4x4 sub-block predicts from. They are
+// all outside the sub-block, so they survive every mode trial and the search
+// gathers them once instead of ten times.
+type elossyLuma4Neighbors struct {
+	topLeft uint8
+	top     [8]uint8
+	left    [4]uint8
+}
+
+func elossyGatherLuma4Neighbors(plane []uint8, stride, planeWidth, x, y int) elossyLuma4Neighbors {
+	neighbors := elossyLuma4Neighbors{
+		topLeft: elossyTopLeftSample(plane, stride, x, y),
+		top:     elossyTopSamplesLuma4(plane, stride, planeWidth, x, y),
+	}
+	copy(neighbors.left[:], elossyLeftSamples(plane, stride, x, y, 4))
+	return neighbors
+}
+
 func elossyFillLuma4PredictionBlock(plane []uint8, stride, planeWidth, x, y int, mode uint8, out []uint8, outStride int) {
-	x0 := elossyTopLeftSample(plane, stride, x, y)
-	top := elossyTopSamplesLuma4(plane, stride, planeWidth, x, y)
-	left := elossyLeftSamples(plane, stride, x, y, 4)
+	neighbors := elossyGatherLuma4Neighbors(plane, stride, planeWidth, x, y)
+	elossyFillLuma4PredictionFrom(&neighbors, mode, out, outStride)
+}
+
+func elossyFillLuma4PredictionFrom(neighbors *elossyLuma4Neighbors, mode uint8, out []uint8, outStride int) {
+	x0 := neighbors.topLeft
+	top := &neighbors.top
+	left := &neighbors.left
 
 	a := top[0]
 	b := top[1]
@@ -328,8 +351,13 @@ func elossyPredictBlock(plane []uint8, stride, planeWidth, x, y int, mode uint8,
 }
 
 func elossyPredictLuma4Block(plane []uint8, stride, planeWidth, x, y int, mode uint8) {
+	neighbors := elossyGatherLuma4Neighbors(plane, stride, planeWidth, x, y)
+	elossyPredictLuma4BlockFrom(plane, stride, x, y, &neighbors, mode)
+}
+
+func elossyPredictLuma4BlockFrom(plane []uint8, stride, x, y int, neighbors *elossyLuma4Neighbors, mode uint8) {
 	var block [16]uint8
-	elossyFillLuma4PredictionBlock(plane, stride, planeWidth, x, y, mode, block[:], 4)
+	elossyFillLuma4PredictionFrom(neighbors, mode, block[:], 4)
 	for row := 0; row < 4; row++ {
 		src := row * 4
 		dst := (y+row)*stride + x
@@ -964,23 +992,26 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 			blockX := x + subX*4
 			blockY := y + subY*4
 			topMode := localTop[subX]
-			original := elossyCopyBlock4(reconstructed.y, reconstructed.yStride, blockX, blockY)
+			neighbors := elossyGatherLuma4Neighbors(reconstructed.y, reconstructed.yStride, reconstructed.yStride, blockX, blockY)
 			ctx := int(l + (tnz & 1))
 
 			bestMode := uint8(bDCPred)
-			var bestCoeffs [16]int16
+			var bestRecon [16]uint8
 			var bestLevels [16]int16
 			bestScore := uint64(0xffffffffffffffff)
 			bestNonZero := uint8(0)
+			// The trials work in a contiguous 4x4 buffer rather than in the
+			// reconstruction plane: only the winner is written back, which
+			// keeps nine of the ten trials off the strided plane entirely.
 			for _, mode := range modes {
-				elossyRestoreBlock4(reconstructed.y, reconstructed.yStride, blockX, blockY, &original)
-				elossyPredictLuma4Block(reconstructed.y, reconstructed.yStride, reconstructed.yStride, blockX, blockY, mode)
-				coeffs := elossyForwardTransform(source.y, source.yStride, reconstructed.y, reconstructed.yStride, blockX, blockY)
-				predictionBlock := elossyCopyBlock4(reconstructed.y, reconstructed.yStride, blockX, blockY)
+				var predictionBlock [16]uint8
+				elossyFillLuma4PredictionFrom(&neighbors, mode, predictionBlock[:], 4)
+				coeffs := elossyForwardTransformAt(source.y, source.yStride, blockX, blockY, predictionBlock[:], 4, 0, 0)
 				levels, _ := elossyQuantizeBlock(&coeffs, quant.y1[0], quant.y1[1], 0)
 				dequantized := elossyMaybeRefineLevels(profile.refineI4Search, source.y, source.yStride, blockX, blockY, &predictionBlock, model, 3, ctx, 0, quant.y1[0], quant.y1[1], rd.i4, &levels)
-				elossyAddTransform(reconstructed.y, reconstructed.yStride, blockX, blockY, &dequantized)
-				distortion := elossyBlockSse(source.y, source.yStride, blockX, blockY, reconstructed.y[blockY*reconstructed.yStride+blockX:], reconstructed.yStride, 4, 4)
+				candidate := predictionBlock
+				elossyAddTransform(candidate[:], 4, 0, 0, &dequantized)
+				distortion := elossyBlockSse4x4(source.y, source.yStride, blockX, blockY, &candidate)
 				coeffRate := elossyCoefficientsRate(model, 3, ctx, 0, &levels)
 				rdMode := rd.mode
 				if rdMode < 1 {
@@ -989,7 +1020,7 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 				score := elossyRdScore(distortion, coeffRate, rd.i4) + uint64(elossyIntra4ModeRate(topMode, leftMode, mode))*uint64(rdMode)
 				if score < bestScore {
 					bestMode = mode
-					bestCoeffs = dequantized
+					bestRecon = candidate
 					bestLevels = levels
 					bestScore = score
 					bestNonZero = 0
@@ -999,9 +1030,7 @@ func elossyEvaluateLuma4Mode(trial *elossyLumaTrial, source *elossyPlanes, recon
 				}
 			}
 
-			elossyRestoreBlock4(reconstructed.y, reconstructed.yStride, blockX, blockY, &original)
-			elossyPredictLuma4Block(reconstructed.y, reconstructed.yStride, reconstructed.yStride, blockX, blockY, bestMode)
-			elossyAddTransform(reconstructed.y, reconstructed.yStride, blockX, blockY, &bestCoeffs)
+			elossyRestoreBlock4(reconstructed.y, reconstructed.yStride, blockX, blockY, &bestRecon)
 
 			subModes[block] = bestMode
 			trial.levels[block] = bestLevels
