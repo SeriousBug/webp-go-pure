@@ -839,9 +839,8 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel
 		}
 
 		y2Input := elossyForwardWht(&yDc)
-		predictionBlock := elossyCopyBlock16(reconstructed.y, reconstructed.yStride, yX, yY)
 		levels := elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
-		y2Coeffs := elossyMaybeRefineY2Levels(profile, source.y, source.yStride, yX, yY, &predictionBlock, &yCoeffs, model, int(top.nzDc+left.nzDc), quant.y2[0], quant.y2[1], rd.i16, &levels)
+		y2Coeffs := elossyDequantizeLevels(&levels, quant.y2[0], quant.y2[1])
 		y2Levels = levels
 		y2Dc := elossyInverseWht(&y2Coeffs)
 		for block := 0; block < 16; block++ {
@@ -1082,10 +1081,7 @@ func elossyEncodeTokenPartition(source *elossyPlanes, mbWidth, mbHeight int, pro
 	// A limit means the caller only wants the token statistics, so the pass
 	// stops after that many macroblocks and the partition, modes and
 	// reconstruction it returns cover just the prefix.
-	limitRows := mbHeight
-	if mbLimit > 0 && mbLimit < mbWidth*mbHeight {
-		limitRows = (mbLimit + mbWidth - 1) / mbWidth
-	}
+	limitRows := elossyLimitedRows(mbWidth, mbHeight, mbLimit)
 	for mbY := 0; mbY < limitRows; mbY++ {
 		var leftContext elossyNonZeroContext
 		var leftModes [4]uint8
