@@ -677,16 +677,23 @@ func elossyReconstructLuma16FromPrediction(prediction *[256]uint8, acCoeffs *[16
 }
 
 func elossyRefineLevelsGreedy(source []uint8, sourceStride, x, y int, prediction *[16]uint8, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
+	var prefix elossyRatePrefix
+	prefix.reset(model, coeffType, ctx, first, levels)
+
 	coeffs := elossyDequantizeLevels(levels, dcQuant, acQuant)
 	candidate := elossyReconstructFromPrediction(prediction, &coeffs)
 	bestScore := elossyRdScore(
 		elossyBlockSse4x4(source, sourceStride, x, y, &candidate),
-		elossyCoefficientsRate(model, coeffType, ctx, first, levels),
+		prefix.rate0(),
 		lambda,
 	)
 
 	for scan := 15; scan >= first; scan-- {
 		index := elossyZigzag[scan]
+		quant := int32(acQuant)
+		if index == 0 {
+			quant = int32(dcQuant)
+		}
 		for levels[index] != 0 {
 			current := levels[index]
 			var next int16
@@ -695,17 +702,17 @@ func elossyRefineLevelsGreedy(source []uint8, sourceStride, x, y int, prediction
 			} else {
 				next = current + 1
 			}
-			trialLevels := *levels
-			trialLevels[index] = next
-			trialCoeffs := elossyDequantizeLevels(&trialLevels, dcQuant, acQuant)
+			trialCoeffs := coeffs
+			trialCoeffs[index] = int16(int32(next) * quant)
 			trialCandidate := elossyReconstructFromPrediction(prediction, &trialCoeffs)
 			trialScore := elossyRdScore(
 				elossyBlockSse4x4(source, sourceStride, x, y, &trialCandidate),
-				elossyCoefficientsRate(model, coeffType, ctx, first, &trialLevels),
+				prefix.rateWith(scan, next),
 				lambda,
 			)
 			if trialScore <= bestScore {
-				*levels = trialLevels
+				levels[index] = next
+				prefix.commit(scan, next)
 				coeffs = trialCoeffs
 				bestScore = trialScore
 			} else {
@@ -714,62 +721,12 @@ func elossyRefineLevelsGreedy(source []uint8, sourceStride, x, y int, prediction
 		}
 	}
 
-	return coeffs
-}
-
-func elossyRefineY2LevelsGreedy(source []uint8, sourceStride, x, y int, prediction *[256]uint8, acCoeffs *[16][16]int16, model *elossyRateModel, ctx int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
-	coeffs := elossyDequantizeLevels(levels, dcQuant, acQuant)
-	candidate, _ := elossyReconstructLuma16FromPrediction(prediction, acCoeffs, &coeffs)
-	bestScore := elossyRdScore(
-		elossyBlockSse(source, sourceStride, x, y, candidate[:], 16, 16, 16),
-		elossyCoefficientsRate(model, 1, ctx, 0, levels),
-		lambda,
-	)
-
-	for scan := 15; scan >= 0; scan-- {
-		index := elossyZigzag[scan]
-		for levels[index] != 0 {
-			current := levels[index]
-			var next int16
-			if current > 0 {
-				next = current - 1
-			} else {
-				next = current + 1
-			}
-			trialLevels := *levels
-			trialLevels[index] = next
-			trialCoeffs := elossyDequantizeLevels(&trialLevels, dcQuant, acQuant)
-			trialCandidate, _ := elossyReconstructLuma16FromPrediction(prediction, acCoeffs, &trialCoeffs)
-			trialScore := elossyRdScore(
-				elossyBlockSse(source, sourceStride, x, y, trialCandidate[:], 16, 16, 16),
-				elossyCoefficientsRate(model, 1, ctx, 0, &trialLevels),
-				lambda,
-			)
-			if trialScore <= bestScore {
-				*levels = trialLevels
-				coeffs = trialCoeffs
-				candidate = trialCandidate
-				bestScore = trialScore
-			} else {
-				break
-			}
-		}
-	}
-
-	_ = candidate
 	return coeffs
 }
 
 func elossyMaybeRefineLevels(enabled bool, source []uint8, sourceStride, x, y int, prediction *[16]uint8, model *elossyRateModel, coeffType, ctx, first int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
 	if enabled {
 		return elossyRefineLevelsGreedy(source, sourceStride, x, y, prediction, model, coeffType, ctx, first, dcQuant, acQuant, lambda, levels)
-	}
-	return elossyDequantizeLevels(levels, dcQuant, acQuant)
-}
-
-func elossyMaybeRefineY2Levels(profile *elossyLossySearchProfile, source []uint8, sourceStride, x, y int, prediction *[256]uint8, acCoeffs *[16][16]int16, model *elossyRateModel, ctx int, dcQuant, acQuant uint16, lambda uint32, levels *[16]int16) [16]int16 {
-	if profile.refineY2 {
-		return elossyRefineY2LevelsGreedy(source, sourceStride, x, y, prediction, acCoeffs, model, ctx, dcQuant, acQuant, lambda, levels)
 	}
 	return elossyDequantizeLevels(levels, dcQuant, acQuant)
 }
@@ -920,10 +877,8 @@ func elossyEvaluateLumaMode(trial *elossyLumaTrial, source *elossyPlanes, recons
 	}
 
 	y2Input := elossyForwardWht(&yDc)
-	var prediction16 [256]uint8
-	copy(prediction16[:], prediction[:])
 	trial.y2Levels = elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
-	y2Coeffs := elossyMaybeRefineY2Levels(profile, source.y, source.yStride, x, y, &prediction16, &yCoeffs, model, int(top.nzDc+left.nzDc), quant.y2[0], quant.y2[1], rd.i16, &trial.y2Levels)
+	y2Coeffs := elossyDequantizeLevels(&trial.y2Levels, quant.y2[0], quant.y2[1])
 	rate += elossyCoefficientsRate(model, 1, int(top.nzDc+left.nzDc), 0, &trial.y2Levels)
 	y2Dc := elossyInverseWht(&y2Coeffs)
 	for block := 0; block < 16; block++ {

@@ -97,7 +97,6 @@ type elossyLossySearchProfile struct {
 	refineI4Search      bool
 	refineI4Final       bool
 	refineChroma        bool
-	refineY2            bool
 	updateProbabilities bool
 }
 
@@ -296,7 +295,6 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			refineI4Search:      true,
 			refineI4Final:       true,
 			refineChroma:        true,
-			refineY2:            true,
 			updateProbabilities: true,
 		}
 	}

@@ -839,9 +839,8 @@ func elossyAnalyzeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateModel
 		}
 
 		y2Input := elossyForwardWht(&yDc)
-		predictionBlock := elossyCopyBlock16(reconstructed.y, reconstructed.yStride, yX, yY)
 		levels := elossyQuantizeBlock(&y2Input, quant.y2[0], quant.y2[1], 0)
-		y2Coeffs := elossyMaybeRefineY2Levels(profile, source.y, source.yStride, yX, yY, &predictionBlock, &yCoeffs, model, int(top.nzDc+left.nzDc), quant.y2[0], quant.y2[1], rd.i16, &levels)
+		y2Coeffs := elossyDequantizeLevels(&levels, quant.y2[0], quant.y2[1])
 		y2Levels = levels
 		y2Dc := elossyInverseWht(&y2Coeffs)
 		for block := 0; block < 16; block++ {
