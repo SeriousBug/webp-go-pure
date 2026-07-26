@@ -1,4 +1,4 @@
-# webp-go
+# webp-go-pure
 
 Pure Go WebP decoder and encoder. No cgo, no external dependencies.
 
@@ -21,11 +21,11 @@ present in webp-rust v0.2.1, described in
 ## Performance
 
 If you can use cgo, use libwebp itself. It is the C reference implementation,
-and it encodes faster than we do at slightly better quality per byte.
+and it encodes faster than webp-go-pure at slightly better quality per byte.
 
 Without cgo, the option is libwebp compiled to WebAssembly and run through
 wazero, such as [gen2brain/webp](https://github.com/gen2brain/webp). Running it
-that way costs both time and memory, and we come out ahead of it:
+that way costs both time and memory, and webp-go-pure comes out ahead of it:
 
 - **Lossy:** 1.1-3.4x faster, at 1.7-3.8x lower peak memory.
 - **Lossless:** roughly even on time (0.9-2.3x), at 1.2-1.8x lower peak memory.
