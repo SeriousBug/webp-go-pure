@@ -20,15 +20,15 @@ present in webp-rust v0.2.1, described in
 
 ## Performance
 
-Against libwebp compiled to WebAssembly, the usual way to get WebP into Go
-without cgo, we encode faster and hold less memory:
+If you can use cgo, use libwebp itself. It is the C reference implementation,
+and it encodes faster than we do at slightly better quality per byte.
+
+Without cgo, the option is libwebp compiled to WebAssembly and run through
+wazero, as [gen2brain/webp](https://github.com/gen2brain/webp) does. Running it
+that way costs both time and memory, and we come out ahead of it:
 
 - **Lossy:** 1.1-3.4x faster, at 1.7-3.8x lower peak memory.
 - **Lossless:** roughly even on time (0.9-2.3x), at 1.2-1.8x lower peak memory.
-
-Native `libwebp` through cgo is still the fastest encoder here: our lossy
-encodes take 1.1-2.7x its time, for files 0.94-1.21x the size at within 0.8 dB
-of its PSNR. We do hold less memory than it does, 0.66-0.95x its peak.
 
 ![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-light.svg#gh-light-mode-only)
 ![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-dark.svg#gh-dark-mode-only)
@@ -68,9 +68,8 @@ out, err := webp.EncodeLossless(&img, &webp.LosslessOptions{EXIF: exifBytes})
 ```
 
 Animated WebP goes through `DecodeAnimation`, which returns composited RGBA
-frames. `Decode` rejects animated input with a `*webp.DecoderError` whose `Kind`
-is `webp.DecErrUnsupported`, but branch on `Features` rather than on that error,
-since it does not distinguish animation from other unsupported input:
+frames. `Decode` does not accept it, so check `Features` first to pick the entry
+point:
 
 ```go
 features, err := webp.Features(data)
