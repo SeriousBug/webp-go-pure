@@ -621,8 +621,8 @@ func elosslessEstimateTokenStreamCostBytes(width int, argb []uint32, options elo
 	extraBits := 0
 	for _, token := range tokens {
 		if token.kind == elosslessTokCopy {
-			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
-			extraBits += elosslessPrefixExtraBitCount(token.length) + elosslessPrefixExtraBitCount(planeCode)
+			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
+			extraBits += elosslessPrefixExtraBitCount(int(token.length)) + elosslessPrefixExtraBitCount(planeCode)
 		}
 	}
 	totalBits := elosslessHistogramCost(&histograms, &group) + extraBits + len(tokens)
@@ -781,11 +781,12 @@ func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *el
 			return nil, err
 		}
 		if bestCacheBits > 0 {
-			cachedTokens, err := elosslessApplyColorCacheToTokens(plan.predicted, baseTokens, bestCacheBits)
-			if err != nil {
+			// baseTokens is dead past this point, so rewrite it in place rather
+			// than allocating a second stream of one token per pixel.
+			if err := elosslessApplyColorCacheToTokens(baseTokens, plan.predicted, baseTokens, bestCacheBits); err != nil {
 				return nil, err
 			}
-			withCache, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, cachedTokens, bestCacheBits, profile.entropySearchLevel)
+			withCache, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, bestCacheBits, profile.entropySearchLevel)
 			if err != nil {
 				return nil, err
 			}

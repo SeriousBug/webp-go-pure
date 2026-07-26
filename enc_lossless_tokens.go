@@ -472,7 +472,7 @@ func elosslessBuildTokensGreedy(width int, argb []uint32, options elosslessToken
 		if bestMatch.set {
 			distance := bestMatch.distance
 			length := bestMatch.length
-			tokens = append(tokens, elosslessToken{kind: elosslessTokCopy, distance: distance, length: length})
+			tokens = append(tokens, elosslessToken{kind: elosslessTokCopy, distance: int32(distance), length: uint16(length)})
 			if cache != nil {
 				for _, pixel := range argb[index : index+length] {
 					cache.insert(pixel)
@@ -483,7 +483,7 @@ func elosslessBuildTokensGreedy(width int, argb []uint32, options elosslessToken
 			}
 			index += length
 		} else if cacheHit {
-			tokens = append(tokens, elosslessToken{kind: elosslessTokCache, key: cacheKey})
+			tokens = append(tokens, elosslessToken{kind: elosslessTokCache, key: uint16(cacheKey)})
 			if cache != nil {
 				cache.insert(argb[index])
 			}
@@ -871,10 +871,10 @@ func elosslessBuildTokensWithTraceback(width int, argb []uint32, options elossle
 			tokens = append(tokens, elosslessToken{kind: elosslessTokLiteral, argb: argb[cursor-1]})
 			cursor = previous[cursor]
 		case elosslessStepCache:
-			tokens = append(tokens, elosslessToken{kind: elosslessTokCache, key: st.key})
+			tokens = append(tokens, elosslessToken{kind: elosslessTokCache, key: uint16(st.key)})
 			cursor = previous[cursor]
 		case elosslessStepCopy:
-			tokens = append(tokens, elosslessToken{kind: elosslessTokCopy, distance: st.distance, length: st.length})
+			tokens = append(tokens, elosslessToken{kind: elosslessTokCopy, distance: int32(st.distance), length: uint16(st.length)})
 			start := cursor - st.length
 			if start < 0 {
 				start = 0

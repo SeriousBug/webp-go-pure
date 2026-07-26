@@ -247,15 +247,15 @@ func elosslessAddTokenToHistograms(histograms *elosslessHistogramSet, width int,
 		histograms[2][argb&0xff]++
 		histograms[3][(argb>>24)&0xff]++
 	case elosslessTokCache:
-		histograms[0][elosslessNumLiteralCodes+elosslessNumLengthCodes+token.key]++
+		histograms[0][elosslessNumLiteralCodes+elosslessNumLengthCodes+int(token.key)]++
 	case elosslessTokCopy:
-		lengthPrefix, err := elosslessPrefixEncode(token.length)
+		lengthPrefix, err := elosslessPrefixEncode(int(token.length))
 		if err != nil {
 			return err
 		}
 		histograms[0][elosslessNumLiteralCodes+lengthPrefix.symbol]++
 
-		planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+		planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
 		distPrefix, err := elosslessPrefixEncode(planeCode)
 		if err != nil {
 			return err
@@ -721,44 +721,51 @@ func elosslessMetaHuffmanAssignmentCost(nonEmptyTiles [][2]int, tileSparse []elo
 	return total
 }
 
-func elosslessApplyColorCacheToTokens(argb []uint32, tokens []elosslessToken, colorCacheBits int) ([]elosslessToken, error) {
+// elosslessApplyColorCacheToTokens rewrites a token stream so that literals
+// already held in the color cache become cache references. The mapping is one
+// output token per input token, so dst may alias tokens for an in-place rewrite;
+// it must otherwise have the same length. Callers pass a reused scratch buffer
+// because the stream is one token per pixel.
+func elosslessApplyColorCacheToTokens(dst []elosslessToken, argb []uint32, tokens []elosslessToken, colorCacheBits int) error {
+	if len(dst) != len(tokens) {
+		return encInvalidParam("color cache token buffer length mismatch")
+	}
 	if colorCacheBits == 0 {
-		out := make([]elosslessToken, len(tokens))
-		copy(out, tokens)
-		return out, nil
+		copy(dst, tokens)
+		return nil
 	}
 
 	cache, err := elosslessColorCacheNew(colorCacheBits)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	cachedTokens := make([]elosslessToken, 0, len(tokens))
 	pixelIndex := 0
 
-	for _, token := range tokens {
+	for i, token := range tokens {
 		switch token.kind {
 		case elosslessTokLiteral:
 			pixel := token.argb
 			if key, ok := cache.lookup(pixel); ok {
-				cachedTokens = append(cachedTokens, elosslessToken{kind: elosslessTokCache, key: key})
+				dst[i] = elosslessToken{kind: elosslessTokCache, key: uint16(key)}
 			} else {
-				cachedTokens = append(cachedTokens, elosslessToken{kind: elosslessTokLiteral, argb: pixel})
+				dst[i] = elosslessToken{kind: elosslessTokLiteral, argb: pixel}
 				cache.insert(pixel)
 			}
 			pixelIndex++
 		case elosslessTokCache:
-			cachedTokens = append(cachedTokens, elosslessToken{kind: elosslessTokCache, key: token.key})
+			dst[i] = elosslessToken{kind: elosslessTokCache, key: token.key}
 			pixelIndex++
 		case elosslessTokCopy:
-			cachedTokens = append(cachedTokens, elosslessToken{kind: elosslessTokCopy, distance: token.distance, length: token.length})
-			for _, pixel := range argb[pixelIndex : pixelIndex+token.length] {
+			length := int(token.length)
+			dst[i] = elosslessToken{kind: elosslessTokCopy, distance: token.distance, length: token.length}
+			for _, pixel := range argb[pixelIndex : pixelIndex+length] {
 				cache.insert(pixel)
 			}
-			pixelIndex += token.length
+			pixelIndex += length
 		}
 	}
 
-	return cachedTokens, nil
+	return nil
 }
 
 func elosslessBuildMetaHuffmanPlan(width, height int, tokens []elosslessToken, colorCacheBits, huffmanBits, maxGroups int) (*elosslessMetaHuffmanPlan, error) {
@@ -882,11 +889,11 @@ func elosslessWriteTokensWithMeta(bw *bitWriter, tokens []elosslessToken, width 
 				return err
 			}
 		case elosslessTokCache:
-			if err := group.green.writeSymbol(bw, elosslessNumLiteralCodes+elosslessNumLengthCodes+token.key); err != nil {
+			if err := group.green.writeSymbol(bw, elosslessNumLiteralCodes+elosslessNumLengthCodes+int(token.key)); err != nil {
 				return err
 			}
 		case elosslessTokCopy:
-			lengthPrefix, err := elosslessPrefixEncode(token.length)
+			lengthPrefix, err := elosslessPrefixEncode(int(token.length))
 			if err != nil {
 				return err
 			}
@@ -899,7 +906,7 @@ func elosslessWriteTokensWithMeta(bw *bitWriter, tokens []elosslessToken, width 
 				}
 			}
 
-			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
 			distPrefix, err := elosslessPrefixEncode(planeCode)
 			if err != nil {
 				return err
@@ -941,11 +948,11 @@ func elosslessWriteTokens(bw *bitWriter, tokens []elosslessToken, width int, gre
 				return err
 			}
 		case elosslessTokCache:
-			if err := greenCodes.writeSymbol(bw, elosslessNumLiteralCodes+elosslessNumLengthCodes+token.key); err != nil {
+			if err := greenCodes.writeSymbol(bw, elosslessNumLiteralCodes+elosslessNumLengthCodes+int(token.key)); err != nil {
 				return err
 			}
 		case elosslessTokCopy:
-			lengthPrefix, err := elosslessPrefixEncode(token.length)
+			lengthPrefix, err := elosslessPrefixEncode(int(token.length))
 			if err != nil {
 				return err
 			}
@@ -958,7 +965,7 @@ func elosslessWriteTokens(bw *bitWriter, tokens []elosslessToken, width int, gre
 				}
 			}
 
-			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
 			distPrefix, err := elosslessPrefixEncode(planeCode)
 			if err != nil {
 				return err
@@ -1015,14 +1022,14 @@ func elosslessCountSingleGroupTokenBits(tokens []elosslessToken, width int, grou
 			bits += group.blue.symbolDepth(int(argb & 0xff))
 			bits += group.alpha.symbolDepth(int((argb >> 24) & 0xff))
 		case elosslessTokCache:
-			bits += group.green.symbolDepth(elosslessNumLiteralCodes + elosslessNumLengthCodes + token.key)
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes + elosslessNumLengthCodes + int(token.key))
 		case elosslessTokCopy:
-			lengthPrefix, err := elosslessPrefixEncode(token.length)
+			lengthPrefix, err := elosslessPrefixEncode(int(token.length))
 			if err != nil {
 				return 0, err
 			}
 			bits += group.green.symbolDepth(elosslessNumLiteralCodes+lengthPrefix.symbol) + lengthPrefix.extraBits
-			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
 			distPrefix, err := elosslessPrefixEncode(planeCode)
 			if err != nil {
 				return 0, err
@@ -1088,14 +1095,14 @@ func elosslessCountMetaTokenBits(tokens []elosslessToken, width int, plan *eloss
 			bits += group.blue.symbolDepth(int(argb & 0xff))
 			bits += group.alpha.symbolDepth(int((argb >> 24) & 0xff))
 		case elosslessTokCache:
-			bits += group.green.symbolDepth(elosslessNumLiteralCodes + elosslessNumLengthCodes + token.key)
+			bits += group.green.symbolDepth(elosslessNumLiteralCodes + elosslessNumLengthCodes + int(token.key))
 		case elosslessTokCopy:
-			lengthPrefix, err := elosslessPrefixEncode(token.length)
+			lengthPrefix, err := elosslessPrefixEncode(int(token.length))
 			if err != nil {
 				return 0, err
 			}
 			bits += group.green.symbolDepth(elosslessNumLiteralCodes+lengthPrefix.symbol) + lengthPrefix.extraBits
-			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
+			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
 			distPrefix, err := elosslessPrefixEncode(planeCode)
 			if err != nil {
 				return 0, err
@@ -1234,7 +1241,7 @@ func elosslessCachedTokenHistograms(argb []uint32, tokens []elosslessToken, widt
 		case elosslessTokLiteral:
 			pixel := token.argb
 			if key, ok := cache.lookup(pixel); ok {
-				token = elosslessToken{kind: elosslessTokCache, key: key}
+				token = elosslessToken{kind: elosslessTokCache, key: uint16(key)}
 			} else {
 				cache.insert(pixel)
 			}
@@ -1242,10 +1249,10 @@ func elosslessCachedTokenHistograms(argb []uint32, tokens []elosslessToken, widt
 		case elosslessTokCache:
 			pixelIndex++
 		case elosslessTokCopy:
-			for _, pixel := range argb[pixelIndex : pixelIndex+token.length] {
+			for _, pixel := range argb[pixelIndex : pixelIndex+int(token.length)] {
 				cache.insert(pixel)
 			}
-			pixelIndex += token.length
+			pixelIndex += int(token.length)
 		}
 		if err := elosslessAddTokenToHistograms(&histograms, width, token); err != nil {
 			return histograms, err
@@ -1313,6 +1320,7 @@ func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTok
 
 	bestCacheBits := 0
 	bestSize := elosslessIntMax
+	var scratch []elosslessToken
 	for _, cacheBits := range shortlist {
 		cheapCost, ok := cheapCosts[cacheBits]
 		if !ok {
@@ -1331,11 +1339,13 @@ func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTok
 				return 0, err
 			}
 		} else {
-			tokens, err := elosslessApplyColorCacheToTokens(argb, baseTokens, cacheBits)
-			if err != nil {
+			if scratch == nil {
+				scratch = make([]elosslessToken, len(baseTokens))
+			}
+			if err := elosslessApplyColorCacheToTokens(scratch, argb, baseTokens, cacheBits); err != nil {
 				return 0, err
 			}
-			size, err = elosslessEstimateImageStreamSize(width, height, tokens, cacheBits, false, 0)
+			size, err = elosslessEstimateImageStreamSize(width, height, scratch, cacheBits, false, 0)
 			if err != nil {
 				return 0, err
 			}
