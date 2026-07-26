@@ -13,10 +13,7 @@ This started as a Go port of [webp-rust](https://github.com/mith-mmk/webp-rust)
 by MITH@mmk, and the container handling and decoders still follow it. The
 encoders have since diverged: parts are ported from
 [libwebp](https://chromium.googlesource.com/webm/libwebp/), the C reference
-implementation, and the rest is our own work, down to hand-written arm64 NEON
-and amd64 SSE assembly. The port also found and fixed a bitstream bug still
-present in webp-rust v0.2.1, described in
-[benchmark/results.md](benchmark/results.md).
+implementation, and the rest is our own work including arm64 NEON and amd64 SSE assembly.
 
 ## Performance
 
