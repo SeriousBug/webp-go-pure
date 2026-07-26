@@ -31,9 +31,9 @@ Each machine also has a peak-RSS table. Those measurements run one encode per
 process and report that process's own `ru_maxrss`, so the figure is what an
 application pays to encode one image: source bitmap, language runtime and
 encoder together. `mib_per_mp` divides it by the image's megapixels so images of
-different sizes are comparable; a 1080p frame is 2.1 MP, a 4K frame 8.3 MP, and
-a 12 MP phone photo is 12 MP, so multiply that column by those to size a
-workload.
+different sizes are comparable; a 1080p frame is 2.1 MP, a 4K frame roughly
+10 MP, and a phone photo about 12 MP, so multiply that column by those to size
+a workload.
 
 ## Reading these numbers
 

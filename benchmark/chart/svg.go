@@ -231,7 +231,7 @@ func peakMemory(sets []dataset, th theme) string {
 	return barPanels(sets, th, barSpec{
 		title:    "Peak memory",
 		subtitle: "Geometric mean of each engine's peak RSS in MiB per megapixel of source image, at quality 90. Each panel has its own scale.",
-		footnote: "One encode per process: source bitmap, runtime and encoder together, which is what an application pays. A 1080p frame is 2.1 MP and a 4K frame 8.3 MP, so multiply through to size a workload. wasm carries a WebAssembly runtime and its own linear memory, which is why it costs more than the same encoder as C.",
+		footnote: "One encode per process: source bitmap, runtime and encoder together, which is what an application pays. A 1080p frame is 2.1 MP and a 4K frame roughly 10 MP, so multiply through to size a workload. wasm carries a WebAssembly runtime and its own linear memory, which is why it costs more than the same encoder as C.",
 		value:    func(r row) float64 { return r.mibPerMP },
 		format:   func(v float64) string { return fmt.Sprintf("%.0f", v) },
 	})
