@@ -12,10 +12,17 @@ type vp8BoolWriter struct {
 }
 
 func newVp8BoolWriter(expectedSize int) *vp8BoolWriter {
-	return &vp8BoolWriter{
+	writer := &vp8BoolWriter{}
+	writer.reset(make([]byte, 0, expectedSize))
+	return writer
+}
+
+// reset restarts the writer on the given buffer, whose capacity it reuses.
+func (w *vp8BoolWriter) reset(buffer []byte) {
+	*w = vp8BoolWriter{
 		rng:    255 - 1,
 		nbBits: -8,
-		bytes:  make([]byte, 0, expectedSize),
+		bytes:  buffer[:0],
 	}
 }
 

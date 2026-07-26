@@ -62,12 +62,15 @@ const (
 	elosslessTokCopy
 )
 
+// Field types are sized to the VP8L limits rather than to int: the token stream
+// is allocated at one token per pixel, so every byte here costs 4 MB per
+// megapixel of source.
 type elosslessToken struct {
-	kind     int
 	argb     uint32
-	key      int
-	distance int
-	length   int
+	distance int32
+	length   uint16
+	key      uint16
+	kind     uint8
 }
 
 type elosslessPrefixCode struct {
@@ -338,7 +341,7 @@ func elosslessCloneHistogramSet(src *elosslessHistogramSet) elosslessHistogramSe
 
 func elosslessTokenLen(token elosslessToken) int {
 	if token.kind == elosslessTokCopy {
-		return token.length
+		return int(token.length)
 	}
 	return 1
 }

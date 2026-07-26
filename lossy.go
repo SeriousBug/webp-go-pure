@@ -359,6 +359,14 @@ func lossyFilterMacroblock(frame *macroBlockDataFrame, planes *lossyPlanes, mbX,
 }
 
 func lossyFilterMacroblockWith(kind filterType, planes *lossyPlanes, mbX, mbY int, info *lossyFilterInfo) {
+	lossyFilterMacroblockEdges(kind, planes, mbX, mbY, info, mbY > 0)
+}
+
+// lossyFilterMacroblockEdges filters one macroblock, with filterTop saying
+// whether the edge against the row above is filtered. A caller that filters
+// only a band of rows passes false for the band's first row, whose neighbour
+// above it does not hold.
+func lossyFilterMacroblockEdges(kind filterType, planes *lossyPlanes, mbX, mbY int, info *lossyFilterInfo, filterTop bool) {
 	yPos := mbY*16*planes.yStride + mbX*16
 	uvPos := mbY*8*planes.uvStride + mbX*8
 	limit := int32(info.fLimit)
@@ -374,7 +382,7 @@ func lossyFilterMacroblockWith(kind filterType, planes *lossyPlanes, mbX, mbY in
 		if info.fInner {
 			lossySimpleHFilter16i(planes.y, yPos, planes.yStride, limit)
 		}
-		if mbY > 0 {
+		if filterTop {
 			lossySimpleVFilter16(planes.y, yPos, planes.yStride, limit+4)
 		}
 		if info.fInner {
@@ -389,7 +397,7 @@ func lossyFilterMacroblockWith(kind filterType, planes *lossyPlanes, mbX, mbY in
 			lossyHFilter16i(planes.y, yPos, planes.yStride, limit, inner, hev)
 			lossyHFilter8i(planes.u, planes.v, uvPos, planes.uvStride, limit, inner, hev)
 		}
-		if mbY > 0 {
+		if filterTop {
 			lossyVFilter16(planes.y, yPos, planes.yStride, limit+4, inner, hev)
 			lossyVFilter8(planes.u, planes.v, uvPos, planes.uvStride, limit+4, inner, hev)
 		}

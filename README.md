@@ -1,21 +1,40 @@
-# webp-go
+# webp-go-pure
 
 Pure Go WebP decoder and encoder. No cgo, no external dependencies.
 
     go get github.com/SeriousBug/webp-go-pure
 
-This is a Go port of [webp-rust](https://github.com/mith-mmk/webp-rust) by
-MITH@mmk. It is essentially a fork of that project, translated to Go. The
-original Rust implementation and its design are the work of the upstream author;
-this port keeps the same codec behavior while presenting an idiomatic Go API.
+Decodes lossy `VP8` and lossless `VP8L` still images, decodes animated WebP into
+a composited RGBA frame sequence, and encodes still images as lossy or lossless
+from RGBA. Alpha comes through `ALPH` chunks on lossy still images and on lossy
+animation frames. All pixel data in and out of the library is packed 8-bit RGBA.
 
-## Status
+This started as a Go port of [webp-rust](https://github.com/mith-mmk/webp-rust)
+by MITH@mmk, and the container handling and decoders still follow it. The
+encoders have since diverged: parts are ported from
+[libwebp](https://chromium.googlesource.com/webm/libwebp/), the C reference
+implementation, and the rest is our own work, down to hand-written arm64 NEON
+and amd64 SSE assembly. The port also found and fixed a bitstream bug still
+present in webp-rust v0.2.1, described in
+[benchmark/results.md](benchmark/results.md).
 
-- Still image decode: `VP8` lossy, `VP8L` lossless
-- Still image encode: lossy `VP8` and lossless `VP8L` from RGBA
-- Alpha: `ALPH` for lossy still images and lossy animation frames
-- Animation: compositing to RGBA frame sequence
-- Library output: RGBA only
+## Performance
+
+If you can use cgo, use libwebp itself. It is the C reference implementation,
+and it encodes faster than webp-go-pure at slightly better quality per byte.
+
+Without cgo, the option is libwebp compiled to WebAssembly and run through
+wazero, such as [gen2brain/webp](https://github.com/gen2brain/webp). Running it
+that way costs both time and memory, and webp-go-pure comes out ahead of it:
+
+- **Lossy:** 1.1-3.4x faster, at 1.7-3.8x lower peak memory.
+- **Lossless:** roughly even on time (0.9-2.3x), at 1.2-1.8x lower peak memory.
+
+![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-light.svg#gh-light-mode-only)
+![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-dark.svg#gh-dark-mode-only)
+
+Full tables, PSNR and peak-memory figures, the test corpus and the method are in
+[benchmark/results.md](benchmark/results.md).
 
 ## Library API
 
@@ -48,15 +67,22 @@ To embed raw EXIF metadata, set it on the options:
 out, err := webp.EncodeLossless(&img, &webp.LosslessOptions{EXIF: exifBytes})
 ```
 
-Animated WebP is not accepted by `Decode`. For animation, use the animation
-decode entry point:
+Animated WebP goes through `DecodeAnimation`, which returns composited RGBA
+frames. `Decode` does not accept it, so check `Features` first to pick the entry
+point:
 
 ```go
-anim, err := webp.DecodeAnimation(data)
-fmt.Println(len(anim.Frames))
+features, err := webp.Features(data)
+if err != nil {
+    return err
+}
+if features.HasAnimation {
+    anim, err := webp.DecodeAnimation(data)
+    if err != nil {
+        return err
+    }
+    fmt.Println(len(anim.Frames))
+    return nil
+}
+img, err := webp.Decode(data)
 ```
-
-## License
-
-MIT. See `LICENSE`. Original work (C) MITH@mmk 2026; Go port (C) Kaan
-Barmore-Genc 2026.

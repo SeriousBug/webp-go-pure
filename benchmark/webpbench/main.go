@@ -23,6 +23,16 @@
 // is "-" for lossless.
 //
 // so results can be merged with the Rust engine's output (see benchmark/run.sh).
+//
+// With -mem it runs the memory pass instead, emitting:
+//
+//	engine,mode,file,width,height,megapixels,peak_rss_mib,mib_per_mp
+//
+// Peak RSS is process-wide, which is the only figure comparable across a pure-Go
+// encoder, a cgo one that allocates in C, and wazero's WASM linear memory. Each
+// measurement therefore gets its own subprocess (this binary, re-executed with
+// -mem-one) that decodes the source image, encodes it once, and reports its own
+// ru_maxrss: what an application pays to encode that image with that engine.
 package main
 
 import (
@@ -34,8 +44,10 @@ import (
 	_ "image/png"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	webp "github.com/SeriousBug/webp-go-pure"
@@ -55,22 +67,68 @@ const (
 	libwebpLL    = 6 // lossless preset level
 )
 
+type encoderCase struct {
+	engine, mode string
+	fn           func() ([]byte, error)
+}
+
+func encoderCases(buf *webp.Image) []encoderCase {
+	nrgba := &image.NRGBA{Pix: buf.RGBA, Stride: buf.Width * 4, Rect: image.Rect(0, 0, buf.Width, buf.Height)}
+	return []encoderCase{
+		{"ours", "lossless", func() ([]byte, error) { return webp.EncodeLossless(buf, &webp.LosslessOptions{Effort: oursLLOpt}) }},
+		{"ours", "lossy-fast", func() ([]byte, error) {
+			return webp.EncodeLossy(buf, &webp.LossyOptions{Quality: lossyQuality, Effort: oursFastOpt})
+		}},
+		{"ours", "lossy-slow", func() ([]byte, error) {
+			return webp.EncodeLossy(buf, &webp.LossyOptions{Quality: lossyQuality, Effort: oursSlowOpt})
+		}},
+		{"libwebp", "lossless", libwebpEncoder(nrgba, true, 0, libwebpLL)},
+		{"libwebp", "lossy-fast", libwebpEncoder(nrgba, false, lossyQuality, libwebpFast)},
+		{"libwebp", "lossy-slow", libwebpEncoder(nrgba, false, lossyQuality, libwebpSlow)},
+		{"wasm", "lossless", wasmEncoder(nrgba, gwebp.Options{Lossless: true, Method: libwebpSlow})},
+		{"wasm", "lossy-fast", wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: libwebpFast})},
+		{"wasm", "lossy-slow", wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: libwebpSlow})},
+	}
+}
+
 func main() {
 	dir := flag.String("dir", "testdata/photos", "directory of source images (jpg/png)")
 	budgetMs := flag.Int("budget-ms", 2000, "per-measurement time budget in ms")
 	minIters := flag.Int("min-iters", 1, "minimum iterations per measurement")
 	maxIters := flag.Int("max-iters", 500, "maximum iterations per measurement")
 	header := flag.Bool("header", false, "print CSV header line")
+	mem := flag.Bool("mem", false, "run the peak-RSS pass instead of the timing pass")
+	memOne := flag.String("mem-one", "", "internal: measure peak RSS of one `engine/mode` on -mem-file and exit")
+	memFile := flag.String("mem-file", "", "internal: source image for -mem-one")
 	flag.Parse()
 
-	if *header {
-		fmt.Println("engine,mode,file,width,height,bytes,psnr_db,iters,ms_per_op")
+	if *memOne != "" {
+		if err := measureRSS(*memOne, *memFile); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	paths, err := listImages(*dir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
+	}
+
+	if *mem {
+		if *header {
+			fmt.Println("engine,mode,file,width,height,megapixels,peak_rss_mib,mib_per_mp")
+		}
+		if err := memPass(paths); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *header {
+		fmt.Println("engine,mode,file,width,height,bytes,psnr_db,iters,ms_per_op")
 	}
 	budget := time.Duration(*budgetMs) * time.Millisecond
 
@@ -81,28 +139,8 @@ func main() {
 			continue
 		}
 		name := filepath.Base(p)
-		nrgba := &image.NRGBA{Pix: buf.RGBA, Stride: buf.Width * 4, Rect: image.Rect(0, 0, buf.Width, buf.Height)}
 
-		encoders := []struct {
-			engine, mode string
-			fn           func() ([]byte, error)
-		}{
-			{"ours", "lossless", func() ([]byte, error) { return webp.EncodeLossless(&buf, &webp.LosslessOptions{Effort: oursLLOpt}) }},
-			{"ours", "lossy-fast", func() ([]byte, error) {
-				return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: lossyQuality, Effort: oursFastOpt})
-			}},
-			{"ours", "lossy-slow", func() ([]byte, error) {
-				return webp.EncodeLossy(&buf, &webp.LossyOptions{Quality: lossyQuality, Effort: oursSlowOpt})
-			}},
-			{"libwebp", "lossless", libwebpEncoder(nrgba, true, 0, libwebpLL)},
-			{"libwebp", "lossy-fast", libwebpEncoder(nrgba, false, lossyQuality, libwebpFast)},
-			{"libwebp", "lossy-slow", libwebpEncoder(nrgba, false, lossyQuality, libwebpSlow)},
-			{"wasm", "lossless", wasmEncoder(nrgba, gwebp.Options{Lossless: true, Method: libwebpSlow})},
-			{"wasm", "lossy-fast", wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: libwebpFast})},
-			{"wasm", "lossy-slow", wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: libwebpSlow})},
-		}
-
-		for _, e := range encoders {
+		for _, e := range encoderCases(&buf) {
 			out, iters, perOp, err := measure(e.fn, budget, *minIters, *maxIters)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s/%s %s: %v\n", e.engine, e.mode, name, err)
@@ -122,6 +160,61 @@ func main() {
 				float64(perOp.Microseconds())/1000.0)
 		}
 	}
+}
+
+// memPass re-executes this binary once per (image, engine, mode) and forwards
+// each child's CSV line. A fresh process per measurement keeps one engine's peak
+// from being credited to another, and keeps wazero's runtime out of the figures
+// for engines that never instantiate it.
+func memPass(paths []string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	var probe webp.Image
+	for _, p := range paths {
+		for _, e := range encoderCases(&probe) {
+			cmd := exec.Command(self, "-mem-one", e.engine+"/"+e.mode, "-mem-file", p)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "%s/%s %s: %v\n", e.engine, e.mode, filepath.Base(p), err)
+			}
+		}
+	}
+	return nil
+}
+
+// measureRSS runs a single encode and reports this process's peak RSS: the
+// source bitmap and the runtime are included, since an application encoding an
+// image pays for those too.
+func measureRSS(engineMode, path string) error {
+	engine, mode, ok := strings.Cut(engineMode, "/")
+	if !ok {
+		return fmt.Errorf("bad -mem-one %q, want engine/mode", engineMode)
+	}
+	buf, err := loadImageBuffer(path)
+	if err != nil {
+		return err
+	}
+	for _, e := range encoderCases(&buf) {
+		if e.engine != engine || e.mode != mode {
+			continue
+		}
+		if _, err := e.fn(); err != nil {
+			return err
+		}
+		rss, err := maxRSSBytes()
+		if err != nil {
+			return err
+		}
+		mib := float64(rss) / (1 << 20)
+		mp := float64(buf.Width*buf.Height) / 1e6
+		fmt.Printf("%s,%s,%s,%d,%d,%.2f,%.1f,%.1f\n",
+			engine, mode, filepath.Base(path), buf.Width, buf.Height, mp, mib, mib/mp)
+		return nil
+	}
+	return fmt.Errorf("no such engine/mode %q", engineMode)
 }
 
 func libwebpEncoder(img *image.NRGBA, lossless bool, quality float32, method int) func() ([]byte, error) {

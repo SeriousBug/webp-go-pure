@@ -35,8 +35,7 @@ func encodeLosslessRgbaToVp8lWithOptions(width, height int, rgba []byte, options
 			haveProfileBest = true
 		}
 
-		plans := elosslessCollectTransformPlans(width, height, argb, subtractGreen, &profile)
-		rankedPlans, err := elosslessShortlistTransformPlans(width, plans, &profile)
+		rankedPlans, err := elosslessShortlistTransformPlans(width, height, argb, subtractGreen, &profile)
 		if err != nil {
 			return nil, err
 		}
@@ -47,7 +46,9 @@ func encodeLosslessRgbaToVp8lWithOptions(width, height int, rgba []byte, options
 				break
 			}
 
+			elosslessRematerializePlan(width, height, argb, subtractGreen, &plan)
 			encoded, err := elosslessEncodeTransformPlanToVp8l(width, height, rgba, &plan, &profile)
+			plan.predicted = nil
 			if err != nil {
 				return nil, err
 			}

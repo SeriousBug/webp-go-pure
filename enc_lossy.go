@@ -1,6 +1,7 @@
 package webp
 
 import (
+	"encoding/binary"
 	"math"
 	"sort"
 )
@@ -53,6 +54,16 @@ type elossyRdMultipliers struct {
 	i4   uint32
 	uv   uint32
 	mode uint32
+	// i4Penalty is libwebp's fixed offset (1000*q^2) charged to an i4x4
+	// macroblock before it is compared against the whole-block modes. It stands
+	// in for what the sub-block search's own lambda leaves unpriced: the
+	// sub-blocks are picked with i4, and only the total is re-priced with i16.
+	i4Penalty uint64
+	// The trellis weighs rate against a transform-domain error rather than the
+	// pixel-domain SSE the mode search uses, so it needs its own multipliers.
+	trellisI16 uint32
+	trellisI4  uint32
+	trellisUv  uint32
 }
 
 type elossyPlanes struct {
@@ -91,16 +102,33 @@ type elossyEncodedLossyCandidate struct {
 	// reconstructed is the unfiltered reconstruction, kept so the filter
 	// search can score levels without decoding the frame back.
 	reconstructed elossyPlanes
+	// buffers is the pooled storage backing modes, tokenPartition and
+	// reconstructed. Releasing a candidate returns it for the next pass.
+	buffers *elossyPassBuffers
 }
 
+// The refine* flags select trellis quantization for the mode the search
+// settles on. Every trial is quantized plainly and only the winner, or the
+// handful of candidates refineI4TopK names, goes through the trellis, which is
+// what libwebp does below its top method.
 type elossyLossySearchProfile struct {
-	fastModeSearch      bool
-	allowI4x4           bool
-	refineI16           bool
-	refineI4Search      bool
-	refineI4Final       bool
+	fastModeSearch bool
+	allowI4x4      bool
+	refineI16      bool
+	refineI4       bool
+	// refineI4TopK is how many of the plain-quantized 4x4 candidates are
+	// re-scored through the trellis. Zero refines only the plain winner.
+	refineI4TopK        int
 	refineChroma        bool
 	updateProbabilities bool
+	// modeScreenTopK is how many modes survive the Hadamard-domain pre-screen
+	// and get a full transform/quantize/reconstruct trial. Zero disables the
+	// screen and trials every mode.
+	modeScreenTopK int
+	// i4GateStrength scales the intra4 entry gate: a macroblock skips the i4x4
+	// search when its i16 distortion is at or below strength/8 * q^2. Zero
+	// disables the gate, including its all-levels-zero fast path.
+	i4GateStrength uint32
 }
 
 func elossyDefaultOptions() LossyOptions {
@@ -190,10 +218,14 @@ func elossyBuildRdMultipliers(quant *elossyQuantMatrices) elossyRdMultipliers {
 	qI16 := uint32(max(quant.y2[1], 8))
 	qUv := uint32(max(quant.uv[1], 8))
 	return elossyRdMultipliers{
-		i16:  max(3*qI16*qI16, 128),
-		i4:   max(3*qI4*qI4, 128) >> 7,
-		uv:   max(3*qUv*qUv, 128) >> 6,
-		mode: max(qI4*qI4, 128) >> 7,
+		i16:        max(3*qI16*qI16, 128),
+		i4:         max(3*qI4*qI4, 128) >> 7,
+		uv:         max(3*qUv*qUv, 128) >> 6,
+		mode:       max(qI4*qI4, 128) >> 7,
+		trellisI16: max((qI16*qI16)>>2, 1),
+		trellisI4:  max((7*qI4*qI4)>>3, 1),
+		trellisUv:  max((qUv*qUv)<<1, 1),
+		i4Penalty:  1000 * uint64(qI4) * uint64(qI4),
 	}
 }
 
@@ -256,52 +288,84 @@ func elossyHeuristicFilter(baseQuant int32) elossyFilterConfig {
 func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 	switch optimizationLevel {
 	case 0:
+		// The converged coefficient table is worth 20%-38% of the file here,
+		// far more than anything the mode search itself can reach at this
+		// effort, and the sampled prior pass costs a quarter of one encode.
 		return elossyLossySearchProfile{
-			fastModeSearch: true,
+			fastModeSearch:      true,
+			updateProbabilities: true,
 		}
 	case 1, 2:
 		return elossyLossySearchProfile{
 			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
 		}
 	case 3, 4:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
 			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
+			i4GateStrength:      elossyIntra4GateStrength,
 		}
 	case 5:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
 			refineChroma:        true,
 			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
+			i4GateStrength:      elossyIntra4GateStrength,
 		}
-	case 6:
+	case 6, 7:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
 			refineI16:           true,
-			refineI4Final:       true,
+			refineI4:            true,
 			refineChroma:        true,
 			updateProbabilities: true,
-		}
-	case 7:
-		return elossyLossySearchProfile{
-			allowI4x4:           true,
-			refineI16:           true,
-			refineI4Search:      true,
-			refineI4Final:       true,
-			refineChroma:        true,
-			updateProbabilities: true,
+			modeScreenTopK:      elossyModeScreenTopK,
+			i4GateStrength:      elossyIntra4GateStrength,
 		}
 	default:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
 			refineI16:           true,
-			refineI4Search:      true,
-			refineI4Final:       true,
+			refineI4:            true,
+			refineI4TopK:        elossyRefineI4TopK,
 			refineChroma:        true,
 			updateProbabilities: true,
+			modeScreenTopK:      elossyTopEffortModeScreenTopK,
+			i4GateStrength:      elossyIntra4GateStrengthTopEffort,
 		}
 	}
 }
+
+// elossyIntra4GateStrength and elossyIntra4GateStrengthTopEffort are the
+// intra4 entry gate's thresholds in eighths of q^2 of macroblock distortion.
+// A macroblock's i16 distortion tops out near 8*q^2 (the quantizer's own noise
+// floor over 256 pixels), so 8/8 of q^2 gates the flattest eighth of that
+// range. Measured on photo and portrait sources this cuts the i4x4 search on
+// 25%-90% of macroblocks depending on content while leaving PSNR within
+// 0.05 dB at a 2%-16% smaller file. Higher strengths (16 and up) start losing
+// PSNR faster than they save bits. The top efforts use half the threshold to
+// stay closer to an exhaustive search.
+const (
+	elossyIntra4GateStrength          = 8
+	elossyIntra4GateStrengthTopEffort = 4
+)
+
+// elossyTopEffortModeScreenTopK is how wide the top effort's Hadamard
+// pre-screen is. The effort used to trial all ten 4x4 modes. Trials are cheaper
+// now that they quantize plainly, but they are no longer the final word either,
+// so spending them on five modes and refining the best of those lands the same
+// file size for two thirds of the search.
+const elossyTopEffortModeScreenTopK = 5
+
+// elossyRefineI4TopK is how many of the plain-quantized 4x4 candidates the top
+// effort re-scores through the trellis. Plain quantization prices the modes
+// closely but not identically, and re-scoring the best three recovers the file
+// size that scoring only the plain winner gives up, at a fraction of what
+// running the trellis on every candidate costs.
+const elossyRefineI4TopK = 3
 
 // elossyMaxFullSearchCandidates caps how many segmentation candidates get the
 // full rate-distortion search. The rest are eliminated by the ranking pass.
@@ -315,6 +379,8 @@ func elossyStatsProfile(profile *elossyLossySearchProfile) elossyLossySearchProf
 	return elossyLossySearchProfile{
 		fastModeSearch: profile.fastModeSearch,
 		allowI4x4:      profile.allowI4x4,
+		modeScreenTopK: profile.modeScreenTopK,
+		i4GateStrength: profile.i4GateStrength,
 	}
 }
 
@@ -403,42 +469,88 @@ func elossyRgbaToYuv420(width, height int, rgba []byte, mbWidth, mbHeight int) e
 	u := make([]uint8, uvStride*uvHeight)
 	v := make([]uint8, uvStride*uvHeight)
 
+	// The planes are padded out to whole macroblocks. Only the padding needs the
+	// edge clamps, so the interior runs without them and the padding replicates
+	// the last real column and row instead of re-deriving them per pixel.
+	rowBytes := width * 4
 	for py := 0; py < yHeight; py++ {
-		srcY := py
-		if srcY > height-1 {
-			srcY = height - 1
+		dst := y[py*yStride : py*yStride+yStride : py*yStride+yStride]
+		if py >= height {
+			copy(dst, y[(height-1)*yStride:height*yStride])
+			continue
 		}
-		for px := 0; px < yStride; px++ {
-			srcX := px
-			if srcX > width-1 {
-				srcX = width - 1
+		src := rgba[py*rowBytes : py*rowBytes+rowBytes : py*rowBytes+rowBytes]
+		offset := 0
+		for px := 0; px < width; px++ {
+			// One 32-bit load beats three byte loads: the alpha byte is discarded
+			// but the bounds check and the address arithmetic are paid once.
+			pixel := binary.LittleEndian.Uint32(src[offset : offset+4 : offset+4])
+			dst[px] = elossyRgbToY(uint8(pixel), uint8(pixel>>8), uint8(pixel>>16))
+			offset += 4
+		}
+		if width < yStride {
+			last := dst[width-1]
+			for px := width; px < yStride; px++ {
+				dst[px] = last
 			}
-			offset := (srcY*width + srcX) * 4
-			y[py*yStride+px] = elossyRgbToY(rgba[offset], rgba[offset+1], rgba[offset+2])
 		}
 	}
 
+	// A chroma row past the image bottom clamps both of its source rows to the
+	// last one, so every such row is identical and only the first is computed.
+	uvRows := (height + 1) / 2
 	for py := 0; py < uvHeight; py++ {
-		for px := 0; px < uvStride; px++ {
-			var sumR, sumG, sumB int32
-			for dy := 0; dy < 2; dy++ {
-				srcY := py*2 + dy
-				if srcY > height-1 {
-					srcY = height - 1
-				}
-				for dx := 0; dx < 2; dx++ {
-					srcX := px*2 + dx
-					if srcX > width-1 {
-						srcX = width - 1
-					}
-					offset := (srcY*width + srcX) * 4
-					sumR += int32(rgba[offset])
-					sumG += int32(rgba[offset+1])
-					sumB += int32(rgba[offset+2])
-				}
+		dstU := u[py*uvStride : py*uvStride+uvStride : py*uvStride+uvStride]
+		dstV := v[py*uvStride : py*uvStride+uvStride : py*uvStride+uvStride]
+		if py > uvRows {
+			copy(dstU, u[uvRows*uvStride:(uvRows+1)*uvStride])
+			copy(dstV, v[uvRows*uvStride:(uvRows+1)*uvStride])
+			continue
+		}
+		y0 := py * 2
+		if y0 > height-1 {
+			y0 = height - 1
+		}
+		y1 := py*2 + 1
+		if y1 > height-1 {
+			y1 = height - 1
+		}
+		row0 := rgba[y0*rowBytes : y0*rowBytes+rowBytes : y0*rowBytes+rowBytes]
+		row1 := rgba[y1*rowBytes : y1*rowBytes+rowBytes : y1*rowBytes+rowBytes]
+
+		// A 2x2 quad is two 64-bit loads. Masking to alternate bytes keeps each
+		// channel in its own 16-bit lane, which holds the sum of four samples
+		// without carrying into its neighbour, so the twelve byte loads and the
+		// per-sample widening collapse into a handful of word operations.
+		const evenBytes = uint64(0x00FF00FF00FF00FF)
+		quads := width / 2
+		offset := 0
+		for px := 0; px < quads; px++ {
+			word0 := binary.LittleEndian.Uint64(row0[offset : offset+8 : offset+8])
+			word1 := binary.LittleEndian.Uint64(row1[offset : offset+8 : offset+8])
+			rb := (word0 & evenBytes) + (word1 & evenBytes)
+			ga := ((word0 >> 8) & evenBytes) + ((word1 >> 8) & evenBytes)
+			sumR := int32((rb & 0xffff) + ((rb >> 32) & 0xffff))
+			sumB := int32(((rb >> 16) & 0xffff) + (rb >> 48))
+			sumG := int32((ga & 0xffff) + ((ga >> 32) & 0xffff))
+			dstU[px] = elossyRgbToU(sumR, sumG, sumB)
+			dstV[px] = elossyRgbToV(sumR, sumG, sumB)
+			offset += 8
+		}
+		if quads < uvStride {
+			// Both an odd image's last chroma column and the padding columns clamp
+			// their whole 2x2 quad onto the last pixel column, so they all take the
+			// same value.
+			last := (width - 1) * 4
+			sumR := 2 * (int32(row0[last]) + int32(row1[last]))
+			sumG := 2 * (int32(row0[last+1]) + int32(row1[last+1]))
+			sumB := 2 * (int32(row0[last+2]) + int32(row1[last+2]))
+			padU := elossyRgbToU(sumR, sumG, sumB)
+			padV := elossyRgbToV(sumR, sumG, sumB)
+			for px := quads; px < uvStride; px++ {
+				dstU[px] = padU
+				dstV[px] = padV
 			}
-			u[py*uvStride+px] = elossyRgbToU(sumR, sumG, sumB)
-			v[py*uvStride+px] = elossyRgbToV(sumR, sumG, sumB)
 		}
 	}
 
@@ -701,22 +813,60 @@ func elossyBuildSegmentCandidates(source *elossyPlanes, mbWidth, mbHeight int, b
 	return candidates
 }
 
-// elossyStatsMacroblockLimit is how many macroblocks the probability-convergence
-// pass looks at. Its output is an aggregate over token counts, so half the frame
-// pins the table down to within a percent of encoded size while halving what is
-// the more expensive of the two search passes. A quarter of the frame is
-// noticeably faster still but costs up to 3% on images whose top differs from
-// the rest.
-func elossyStatsMacroblockLimit(mbCount int) int {
-	const minimum = 512
-	if mbCount <= minimum {
-		return mbCount
+// elossyPassCoverage selects which macroblock rows an encode pass covers: a
+// prefix of the frame, or a band of rows out of every stride of them.
+type elossyPassCoverage struct {
+	// mbLimit caps how many macroblocks the pass encodes, rounded up to whole
+	// rows. Zero covers the frame.
+	mbLimit int
+	// rowBand and rowStride encode rowBand rows out of every rowStride. Equal
+	// values cover every row.
+	rowBand   int
+	rowStride int
+}
+
+func (c elossyPassCoverage) sampled() bool {
+	return c.rowBand < c.rowStride
+}
+
+func elossyFullCoverage() elossyPassCoverage {
+	return elossyPassCoverage{rowBand: 1, rowStride: 1}
+}
+
+func elossyPrefixCoverage(mbLimit int) elossyPassCoverage {
+	return elossyPassCoverage{mbLimit: mbLimit, rowBand: 1, rowStride: 1}
+}
+
+// elossyStatsCoverage is how the probability-convergence pass samples the
+// frame: every fourth macroblock row rather than a prefix of half of them. The
+// table it produces is an aggregate over token counts, so what it needs is a
+// sample of the whole frame, not a contiguous piece of it, and a quarter of the
+// rows spread down the frame prices a frame better than half of them taken from
+// the top.
+//
+// The pass fills the rows it skips with the source, which the sampled rows
+// then predict from. Sampling more sparsely than this is what costs: at one row
+// in eight the lower efforts, where nothing downstream re-prices what the table
+// mis-costs, give up over 1% of size. Sampling in deeper bands at the same row
+// count is worse still, so what the table wants is spread, not locality.
+//
+// The sample is not thinned below ~256 macroblocks, under which the counts are
+// too sparse to estimate the tail of the level distribution.
+func elossyStatsCoverage(mbWidth, mbHeight int) elossyPassCoverage {
+	const minimumMacroblocks = 256
+	const maximumStride = 4
+	rows := (minimumMacroblocks + mbWidth - 1) / mbWidth
+	if rows < 1 {
+		rows = 1
 	}
-	limit := mbCount / 2
-	if limit < minimum {
-		limit = minimum
+	stride := mbHeight / rows
+	if stride > maximumStride {
+		stride = maximumStride
 	}
-	return limit
+	if stride <= 1 {
+		return elossyFullCoverage()
+	}
+	return elossyPassCoverage{rowBand: 1, rowStride: stride}
 }
 
 // elossyLimitedRows is how many macroblock rows a pass covers under mbLimit.

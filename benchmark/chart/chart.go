@@ -10,14 +10,16 @@
 // writes a light and a dark variant of each figure, which results.md selects
 // between with GitHub's #gh-light-mode-only / #gh-dark-mode-only anchors.
 //
-//	go run ./chart -md ../results.md -out ../charts
+//	go run ./chart -md results.md -out charts   (from benchmark/)
 //
-// Two figures, because size/quality and speed are different questions:
+// Three figures, because size/quality, speed and memory are different questions:
 //
 //   - rate-distortion: output size and PSNR, both relative to libwebp, one point
 //     per image. Engines that are strictly better sit up and to the left.
-//   - encode time: geometric mean of each engine's ms/op relative to libwebp,
-//     grouped by mode, one panel per machine, log scale.
+//   - encode time: geometric mean of each engine's ms/op, grouped by mode, one
+//     panel per machine.
+//   - peak memory: geometric mean of each engine's peak RSS per megapixel, laid
+//     out the same way.
 package main
 
 import (
@@ -37,6 +39,7 @@ type row struct {
 	psnr               float64
 	hasPSNR            bool
 	ms                 float64
+	mibPerMP           float64
 }
 
 type dataset struct {
@@ -97,6 +100,7 @@ func main() {
 		figures := map[string]string{
 			"rate-distortion": rateDistortion(sets[0], th),
 			"encode-time":     encodeTime(sets, th),
+			"peak-memory":     peakMemory(sets, th),
 		}
 		for name, svg := range figures {
 			path := filepath.Join(*out, fmt.Sprintf("%s-%s.svg", name, th.name))
@@ -109,7 +113,9 @@ func main() {
 }
 
 // parseMarkdown reads every fenced block that follows a "## " heading and holds
-// benchmark rows, taking the heading as the panel label.
+// benchmark rows, taking the heading as the panel label. A heading with several
+// blocks under it (timings and peak RSS) yields one dataset: rows carrying the
+// same engine/mode/image are merged, so each figure can read the column it wants.
 func parseMarkdown(path string) ([]dataset, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -118,9 +124,9 @@ func parseMarkdown(path string) ([]dataset, error) {
 	defer f.Close()
 
 	var sets []dataset
+	byLabel := map[string]int{}
 	var heading string
 	var fenced bool
-	var cur dataset
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -130,35 +136,73 @@ func parseMarkdown(path string) ([]dataset, error) {
 		case strings.HasPrefix(line, "## "):
 			heading = strings.TrimSpace(strings.TrimPrefix(line, "## "))
 		case strings.HasPrefix(line, "```"):
-			if fenced {
-				if len(cur.rows) > 0 {
-					sets = append(sets, cur)
-				}
-				cur = dataset{}
-			} else {
-				cur = dataset{label: heading}
-			}
 			fenced = !fenced
 		case fenced:
-			if r, ok := parseRow(line); ok {
-				cur.rows = append(cur.rows, r)
+			r, ok := parseRow(line)
+			if !ok {
+				continue
 			}
+			i, seen := byLabel[heading]
+			if !seen {
+				i = len(sets)
+				byLabel[heading] = i
+				sets = append(sets, dataset{label: heading})
+			}
+			sets[i].merge(r)
 		}
 	}
 	return sets, sc.Err()
 }
 
-// parseRow accepts both the whitespace-aligned table in results.md and the raw
-// comma-separated output of webpbench/rustbench.
+// merge folds a row into the dataset, filling in the columns of an existing row
+// for the same measurement rather than adding a duplicate.
+func (d *dataset) merge(r row) {
+	for i := range d.rows {
+		e := &d.rows[i]
+		if e.engine != r.engine || e.mode != r.mode || e.file != r.file {
+			continue
+		}
+		if r.bytes > 0 {
+			e.bytes = r.bytes
+		}
+		if r.ms > 0 {
+			e.ms = r.ms
+		}
+		if r.mibPerMP > 0 {
+			e.mibPerMP = r.mibPerMP
+		}
+		if r.hasPSNR {
+			e.psnr, e.hasPSNR = r.psnr, true
+		}
+		return
+	}
+	d.rows = append(d.rows, r)
+}
+
+// parseRow accepts both the whitespace-aligned tables in results.md and the raw
+// comma-separated output of webpbench/rustbench, for the timing table (9 columns)
+// and the peak-RSS table (8).
 func parseRow(line string) (row, bool) {
 	fields := strings.Fields(strings.ReplaceAll(line, ",", " "))
-	if len(fields) != 9 || fields[0] == "file" || fields[0] == "engine" {
+	if len(fields) != 9 && len(fields) != 8 {
+		return row{}, false
+	}
+	if fields[0] == "file" || fields[0] == "engine" {
 		return row{}, false
 	}
 	// results.md orders columns file,mode,engine; the tools emit engine,mode,file.
 	file, mode, engine := fields[0], fields[1], fields[2]
 	if engine == "lossless" || engine == "lossy-fast" || engine == "lossy-slow" {
 		file, mode, engine = fields[2], fields[1], fields[0]
+	}
+	r := row{engine: engine, mode: mode, file: file}
+	if len(fields) == 8 {
+		mibPerMP, err := strconv.ParseFloat(fields[7], 64)
+		if err != nil {
+			return row{}, false
+		}
+		r.mibPerMP = mibPerMP
+		return r, true
 	}
 	bytes, err := strconv.Atoi(fields[5])
 	if err != nil {
@@ -168,7 +212,7 @@ func parseRow(line string) (row, bool) {
 	if err != nil {
 		return row{}, false
 	}
-	r := row{engine: engine, mode: mode, file: file, bytes: bytes, ms: ms}
+	r.bytes, r.ms = bytes, ms
 	if psnr, err := strconv.ParseFloat(fields[6], 64); err == nil {
 		r.psnr, r.hasPSNR = psnr, true
 	}

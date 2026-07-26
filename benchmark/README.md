@@ -67,6 +67,20 @@ the pixels that engine was handed, reported as `psnr_db` over RGB (lossless is
 exact, so it shows `-`). Size alone would rank an encoder that quantizes harder
 as the winner, so the two columns have to be read together.
 
+### Memory
+
+`run.sh` also emits a peak-RSS table, and `benchmark/run-mem.sh` runs that pass
+on its own. Peak RSS is process-wide, which is the only figure comparable across
+a pure-Go encoder, a cgo one that allocates in C, and wazero's WASM linear
+memory: Go heap statistics would miss two of the four engines. So each
+measurement gets its own process that decodes the source image, encodes it once,
+and reports its own `ru_maxrss`. Source bitmap and language runtime are included,
+because an application encoding an image pays for those too.
+
+`mib_per_mp` divides that peak by the image's megapixels, which makes the figures
+comparable across test images of different sizes. It is not a constant per
+engine: a fixed runtime floor spread over a small image inflates it.
+
 ## Results
 
 See `benchmark/results.md` for captured runs on arm64 and amd64 (machines and
@@ -81,5 +95,6 @@ benchmark/chart/chart.go        # rewrites benchmark/charts/*.svg
 
 It writes a light and a dark variant of each figure; `results.md` picks between
 them with GitHub's `#gh-light-mode-only` / `#gh-dark-mode-only` anchors. The
-first line of `chart.go` is a comment to Go and a command to `sh`, so it runs
-directly as a script or as `go run ./chart` from `benchmark/`.
+first line of `chart.go` is a comment to Go and a command to `sh`, so running the
+file is enough; its `-md` and `-out` defaults are relative to `benchmark/chart`,
+so from `benchmark/` it is `go run ./chart -md results.md -out charts`.

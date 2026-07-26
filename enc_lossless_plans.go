@@ -23,13 +23,7 @@ func elosslessColorTransformDelta(transform int8, color uint8) int32 {
 	return (int32(transform) * int32(int8(color))) >> 5
 }
 
-func elosslessEstimateTransformCoefficient(pairs [][2]int32) int8 {
-	numerator := int64(0)
-	denominator := int64(0)
-	for _, p := range pairs {
-		numerator += int64(p[0]) * int64(p[1])
-		denominator += int64(p[1]) * int64(p[1])
-	}
+func elosslessTransformCoefficientFromSums(numerator, denominator int64) int8 {
 	if denominator == 0 {
 		return 0
 	}
@@ -40,6 +34,30 @@ func elosslessEstimateTransformCoefficient(pairs [][2]int32) int8 {
 		coefficient = 127
 	}
 	return int8(coefficient)
+}
+
+// elosslessGreenCrossSums accumulates the green-to-red and green-to-blue dot
+// products for one pixel.
+func elosslessGreenCrossSums(pixel uint32, redGreen, blueGreen, greenSq *int64) {
+	red := int64(int8(byte((pixel >> 16) & 0xff)))
+	green := int64(int8(byte((pixel >> 8) & 0xff)))
+	blue := int64(int8(byte(pixel & 0xff)))
+	*redGreen += red * green
+	*blueGreen += blue * green
+	*greenSq += green * green
+}
+
+// elosslessRedBlueCrossSums accumulates the red-to-blue dot products for one
+// pixel, against the blue channel already adjusted by greenToBlue.
+func elosslessRedBlueCrossSums(pixel uint32, greenToBlue int8, blueRed, redSq *int64) {
+	red := uint8((pixel >> 16) & 0xff)
+	green := uint8((pixel >> 8) & 0xff)
+	blue := uint8(pixel & 0xff)
+	transformedBlue := uint8((int32(blue) - elosslessColorTransformDelta(greenToBlue, green)) & 0xff)
+	tb := int64(int8(transformedBlue))
+	r := int64(int8(red))
+	*blueRed += tb * r
+	*redSq += r * r
 }
 
 func elosslessEstimateCrossColorTransformRegion(width, height int, argb []uint32, tileX, tileY, bits int) elosslessCrossColorTransform {
@@ -53,36 +71,25 @@ func elosslessEstimateCrossColorTransformRegion(width, height int, argb []uint32
 	if height < endY {
 		endY = height
 	}
-	capacity := (endX - startX) * (endY - startY)
-
-	redPairs := make([][2]int32, 0, capacity)
-	blueGreenPairs := make([][2]int32, 0, capacity)
+	var redGreen, blueGreen, greenSq int64
 	for y := startY; y < endY; y++ {
+		row := argb[y*width:]
 		for x := startX; x < endX; x++ {
-			pixel := argb[y*width+x]
-			red := int32(int8(byte((pixel >> 16) & 0xff)))
-			green := int32(int8(byte((pixel >> 8) & 0xff)))
-			blue := int32(int8(byte(pixel & 0xff)))
-			redPairs = append(redPairs, [2]int32{red, green})
-			blueGreenPairs = append(blueGreenPairs, [2]int32{blue, green})
+			elosslessGreenCrossSums(row[x], &redGreen, &blueGreen, &greenSq)
 		}
 	}
 
-	greenToRed := elosslessEstimateTransformCoefficient(redPairs)
-	greenToBlue := elosslessEstimateTransformCoefficient(blueGreenPairs)
+	greenToRed := elosslessTransformCoefficientFromSums(redGreen, greenSq)
+	greenToBlue := elosslessTransformCoefficientFromSums(blueGreen, greenSq)
 
-	blueRedPairs := make([][2]int32, 0, capacity)
+	var blueRed, redSq int64
 	for y := startY; y < endY; y++ {
+		row := argb[y*width:]
 		for x := startX; x < endX; x++ {
-			pixel := argb[y*width+x]
-			red := uint8((pixel >> 16) & 0xff)
-			green := uint8((pixel >> 8) & 0xff)
-			blue := uint8(pixel & 0xff)
-			transformedBlue := uint8((int32(blue) - elosslessColorTransformDelta(greenToBlue, green)) & 0xff)
-			blueRedPairs = append(blueRedPairs, [2]int32{int32(int8(transformedBlue)), int32(int8(red))})
+			elosslessRedBlueCrossSums(row[x], greenToBlue, &blueRed, &redSq)
 		}
 	}
-	redToBlue := elosslessEstimateTransformCoefficient(blueRedPairs)
+	redToBlue := elosslessTransformCoefficientFromSums(blueRed, redSq)
 
 	return elosslessCrossColorTransform{
 		greenToRed:  greenToRed,
@@ -92,28 +99,19 @@ func elosslessEstimateCrossColorTransformRegion(width, height int, argb []uint32
 }
 
 func elosslessEstimateCrossColorTransform(argb []uint32) elosslessCrossColorTransform {
-	redPairs := make([][2]int32, 0, len(argb))
-	blueGreenPairs := make([][2]int32, 0, len(argb))
+	var redGreen, blueGreen, greenSq int64
 	for _, pixel := range argb {
-		red := int32(int8(byte((pixel >> 16) & 0xff)))
-		green := int32(int8(byte((pixel >> 8) & 0xff)))
-		blue := int32(int8(byte(pixel & 0xff)))
-		redPairs = append(redPairs, [2]int32{red, green})
-		blueGreenPairs = append(blueGreenPairs, [2]int32{blue, green})
+		elosslessGreenCrossSums(pixel, &redGreen, &blueGreen, &greenSq)
 	}
 
-	greenToRed := elosslessEstimateTransformCoefficient(redPairs)
-	greenToBlue := elosslessEstimateTransformCoefficient(blueGreenPairs)
+	greenToRed := elosslessTransformCoefficientFromSums(redGreen, greenSq)
+	greenToBlue := elosslessTransformCoefficientFromSums(blueGreen, greenSq)
 
-	blueRedPairs := make([][2]int32, 0, len(argb))
+	var blueRed, redSq int64
 	for _, pixel := range argb {
-		red := uint8((pixel >> 16) & 0xff)
-		green := uint8((pixel >> 8) & 0xff)
-		blue := uint8(pixel & 0xff)
-		transformedBlue := uint8((int32(blue) - elosslessColorTransformDelta(greenToBlue, green)) & 0xff)
-		blueRedPairs = append(blueRedPairs, [2]int32{int32(int8(transformedBlue)), int32(int8(red))})
+		elosslessRedBlueCrossSums(pixel, greenToBlue, &blueRed, &redSq)
 	}
-	redToBlue := elosslessEstimateTransformCoefficient(blueRedPairs)
+	redToBlue := elosslessTransformCoefficientFromSums(blueRed, redSq)
 
 	return elosslessCrossColorTransform{
 		greenToRed:  greenToRed,
@@ -623,8 +621,8 @@ func elosslessEstimateTokenStreamCostBytes(width int, argb []uint32, options elo
 	extraBits := 0
 	for _, token := range tokens {
 		if token.kind == elosslessTokCopy {
-			planeCode := elosslessDistanceToPlaneCode(width, token.distance)
-			extraBits += elosslessPrefixExtraBitCount(token.length) + elosslessPrefixExtraBitCount(planeCode)
+			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
+			extraBits += elosslessPrefixExtraBitCount(int(token.length)) + elosslessPrefixExtraBitCount(planeCode)
 		}
 	}
 	totalBits := elosslessHistogramCost(&histograms, &group) + extraBits + len(tokens)
@@ -674,53 +672,79 @@ func elosslessEstimateTransformPlanScore(width int, plan *elosslessTransformPlan
 	return score, nil
 }
 
-func elosslessCollectTransformPlans(width, height int, argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []elosslessTransformPlan {
+func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []func(width, height int) elosslessTransformPlan {
 	subtractIsDistinct := !elosslessSlicesEqualU32(subtractGreen, argb)
-	plans := []elosslessTransformPlan{elosslessBuildRawPlan(argb)}
+	builders := []func(int, int) elosslessTransformPlan{
+		func(_, _ int) elosslessTransformPlan { return elosslessBuildRawPlan(argb) },
+	}
 
 	if subtractIsDistinct && profile.transformSearchLevel >= 1 {
-		plans = append(plans, elosslessBuildSubtractGreenPlan(subtractGreen))
+		builders = append(builders, func(_, _ int) elosslessTransformPlan {
+			return elosslessBuildSubtractGreenPlan(subtractGreen)
+		})
 	}
 	if profile.transformSearchLevel >= 2 {
-		plans = append(plans, elosslessBuildGlobalCrossPlan(width, height, argb, false))
-		plans = append(plans, elosslessBuildGlobalPredictorPlan(width, height, argb, false))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, argb, false) },
+			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalPredictorPlan(w, h, argb, false) })
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 3 {
-		plans = append(plans, elosslessBuildGlobalCrossPlan(width, height, subtractGreen, true))
-		plans = append(plans, elosslessBuildGlobalPredictorPlan(width, height, subtractGreen, true))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, subtractGreen, true) },
+			func(w, h int) elosslessTransformPlan {
+				return elosslessBuildGlobalPredictorPlan(w, h, subtractGreen, true)
+			})
 	}
 	if profile.transformSearchLevel >= 4 {
-		plans = append(plans, elosslessBuildGlobalTransformPlan(width, height, argb, false))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalTransformPlan(w, h, argb, false) })
 		if subtractIsDistinct {
-			plans = append(plans, elosslessBuildGlobalTransformPlan(width, height, subtractGreen, true))
+			builders = append(builders, func(w, h int) elosslessTransformPlan {
+				return elosslessBuildGlobalTransformPlan(w, h, subtractGreen, true)
+			})
 		}
 	}
 	if profile.transformSearchLevel >= 5 {
-		plans = append(plans, elosslessBuildTiledCrossPlan(width, height, argb, false))
-		plans = append(plans, elosslessBuildTiledPredictorPlan(width, height, argb, false))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, argb, false) },
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledPredictorPlan(w, h, argb, false) })
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 6 {
-		plans = append(plans, elosslessBuildTiledCrossPlan(width, height, subtractGreen, true))
-		plans = append(plans, elosslessBuildTiledPredictorPlan(width, height, subtractGreen, true))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, subtractGreen, true) },
+			func(w, h int) elosslessTransformPlan {
+				return elosslessBuildTiledPredictorPlan(w, h, subtractGreen, true)
+			})
 	}
 	if profile.transformSearchLevel >= 7 {
-		plans = append(plans, elosslessBuildTiledTransformPlan(width, height, argb, false))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledTransformPlan(w, h, argb, false) })
 		if subtractIsDistinct {
-			plans = append(plans, elosslessBuildTiledTransformPlan(width, height, subtractGreen, true))
+			builders = append(builders, func(w, h int) elosslessTransformPlan {
+				return elosslessBuildTiledTransformPlan(w, h, subtractGreen, true)
+			})
 		}
 	}
 
-	return plans
+	return builders
 }
 
-func elosslessShortlistTransformPlans(width int, plans []elosslessTransformPlan, profile *elosslessLosslessSearchProfile) ([]elosslessRankedPlan, error) {
-	ranked := make([]elosslessRankedPlan, 0, len(plans))
-	for i := range plans {
-		score, err := elosslessEstimateTransformPlanScore(width, &plans[i], profile)
+// elosslessShortlistTransformPlans scores every candidate transform and keeps
+// the best few. Candidates are built one at a time and their predicted images
+// are dropped after scoring: a plan's transform tile images fully determine its
+// predicted image, so the shortlisted ones are rebuilt by
+// elosslessRematerializePlan rather than kept alive at 4 bytes per pixel each.
+func elosslessShortlistTransformPlans(width, height int, argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) ([]elosslessRankedPlan, error) {
+	builders := elosslessTransformPlanBuilders(argb, subtractGreen, profile)
+	ranked := make([]elosslessRankedPlan, 0, len(builders))
+	for _, build := range builders {
+		plan := build(width, height)
+		score, err := elosslessEstimateTransformPlanScore(width, &plan, profile)
 		if err != nil {
 			return nil, err
 		}
-		ranked = append(ranked, elosslessRankedPlan{score: score, plan: plans[i]})
+		plan.predicted = nil
+		ranked = append(ranked, elosslessRankedPlan{score: score, plan: plan})
 	}
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score < ranked[j].score })
 	keep := profile.shortlistKeep
@@ -729,6 +753,46 @@ func elosslessShortlistTransformPlans(width int, plans []elosslessTransformPlan,
 	}
 	ranked = ranked[:keep]
 	return ranked, nil
+}
+
+// elosslessRematerializePlan recomputes plan.predicted from the plan's transform
+// tile images, reapplying the already-chosen transforms without repeating the
+// per-tile search that selected them.
+func elosslessRematerializePlan(width, height int, argb, subtractGreen []uint32, plan *elosslessTransformPlan) {
+	input := argb
+	if plan.useSubtractGreen {
+		input = subtractGreen
+	}
+	owned := false
+
+	if plan.crossBitsSet {
+		transforms := make([]elosslessCrossColorTransform, len(plan.crossImage))
+		for i, packed := range plan.crossImage {
+			transforms[i] = elosslessCrossColorTransform{
+				greenToRed:  int8(packed & 0xff),
+				greenToBlue: int8((packed >> 8) & 0xff),
+				redToBlue:   int8((packed >> 16) & 0xff),
+			}
+		}
+		input = elosslessApplyCrossColorTransform(width, height, input, plan.crossBits, transforms)
+		owned = true
+	}
+
+	if plan.predictorBitsSet {
+		modes := make([]uint8, len(plan.predictorImage))
+		for i, packed := range plan.predictorImage {
+			modes[i] = uint8((packed >> 8) & 0xff)
+		}
+		input = elosslessApplyPredictorTransform(width, height, input, plan.predictorBits, modes)
+		owned = true
+	}
+
+	if !owned {
+		predicted := make([]uint32, len(input))
+		copy(predicted, input)
+		input = predicted
+	}
+	plan.predicted = input
 }
 
 type elosslessRankedPlan struct {
@@ -783,11 +847,12 @@ func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *el
 			return nil, err
 		}
 		if bestCacheBits > 0 {
-			cachedTokens, err := elosslessApplyColorCacheToTokens(plan.predicted, baseTokens, bestCacheBits)
-			if err != nil {
+			// baseTokens is dead past this point, so rewrite it in place rather
+			// than allocating a second stream of one token per pixel.
+			if err := elosslessApplyColorCacheToTokens(baseTokens, plan.predicted, baseTokens, bestCacheBits); err != nil {
 				return nil, err
 			}
-			withCache, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, cachedTokens, bestCacheBits, profile.entropySearchLevel)
+			withCache, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, bestCacheBits, profile.entropySearchLevel)
 			if err != nil {
 				return nil, err
 			}

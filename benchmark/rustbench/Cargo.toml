@@ -9,6 +9,8 @@ publish = false
 [dependencies]
 webp-rust = { path = "../../../webp-rust" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# getrusage, for the peak-RSS pass.
+libc = "0.2"
 
 [profile.release]
 opt-level = 3

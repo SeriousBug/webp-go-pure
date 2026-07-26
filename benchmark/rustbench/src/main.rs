@@ -7,7 +7,16 @@
 // psnr_db scores the encoder's own output against the pixels it was handed, and
 // is "-" for lossless.
 //
+// With --mem it runs the peak-RSS pass instead, emitting:
+//
+//   engine,mode,file,width,height,megapixels,peak_rss_mib,mib_per_mp
+//
+// Each measurement gets its own process (this binary, re-executed with
+// --mem-one) that decodes the source image, encodes it once, and reports its own
+// ru_maxrss, matching what benchmark/webpbench does for the Go engines.
+//
 // Usage: rustbench <dir> [budget_ms] [min_iters] [max_iters]
+//        rustbench <dir> --mem
 use std::time::{Duration, Instant};
 
 use webp_rust::{decode, encode_lossless, encode_lossy, ImageBuffer};
@@ -17,12 +26,31 @@ const OURS_FAST_OPT: usize = 0;
 const OURS_SLOW_OPT: usize = 9;
 const OURS_LL_OPT: usize = 6;
 
+const MODE_NAMES: [&str; 3] = ["lossless", "lossy-fast", "lossy-slow"];
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let dir = args.get(1).map(String::as_str).unwrap_or("testdata/photos");
-    let budget = Duration::from_millis(args.get(2).and_then(|s| s.parse().ok()).unwrap_or(2000));
-    let min_iters: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(2);
-    let max_iters: u32 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(500);
+    if let Some(i) = args.iter().position(|a| a == "--mem-one") {
+        measure_rss(&args[i + 1], &args[i + 2]);
+        return;
+    }
+    let positional: Vec<&String> = args[1..].iter().filter(|a| !a.starts_with("--")).collect();
+    let dir = positional
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("testdata/photos");
+    let budget = Duration::from_millis(
+        positional
+            .get(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2000),
+    );
+    let min_iters: u32 = positional.get(2).and_then(|s| s.parse().ok()).unwrap_or(2);
+    let max_iters: u32 = positional
+        .get(3)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(500);
+    let mem_pass = args.iter().any(|a| a == "--mem");
 
     let mut paths: Vec<_> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("read dir {dir}: {e}"))
@@ -35,6 +63,24 @@ fn main() {
         })
         .collect();
     paths.sort();
+
+    if mem_pass {
+        let self_exe = std::env::current_exe().expect("current_exe");
+        for path in &paths {
+            for mode in MODE_NAMES {
+                let status = std::process::Command::new(&self_exe)
+                    .arg("--mem-one")
+                    .arg(mode)
+                    .arg(path)
+                    .status();
+                match status {
+                    Ok(s) if s.success() => {}
+                    other => eprintln!("webp-rust/{mode} {}: {other:?}", path.display()),
+                }
+            }
+        }
+        return;
+    }
 
     for path in paths {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
@@ -90,6 +136,59 @@ fn main() {
             }
         }
     }
+}
+
+/// Encodes one image once and reports this process's peak RSS: the source bitmap
+/// and the runtime are included, since an application encoding an image pays for
+/// those too.
+fn measure_rss(mode: &str, path: &str) {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let img = match image::open(path) {
+        Ok(i) => i.to_rgba8(),
+        Err(e) => {
+            eprintln!("skip {name}: {e}");
+            std::process::exit(1);
+        }
+    };
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    let buffer = ImageBuffer {
+        width: w,
+        height: h,
+        rgba: img.into_raw(),
+    };
+    let encoded = match mode {
+        "lossless" => encode_lossless(&buffer, OURS_LL_OPT, None),
+        "lossy-fast" => encode_lossy(&buffer, OURS_FAST_OPT, LOSSY_QUALITY, None),
+        "lossy-slow" => encode_lossy(&buffer, OURS_SLOW_OPT, LOSSY_QUALITY, None),
+        other => {
+            eprintln!("no such mode {other}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = encoded {
+        eprintln!("webp-rust/{mode} {name}: {e:?}");
+        std::process::exit(1);
+    }
+    let mib = peak_rss_bytes() as f64 / (1 << 20) as f64;
+    let mp = (w * h) as f64 / 1e6;
+    println!(
+        "webp-rust,{mode},{name},{w},{h},{mp:.2},{mib:.1},{:.1}",
+        mib / mp
+    );
+}
+
+fn peak_rss_bytes() -> u64 {
+    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) } != 0 {
+        return 0;
+    }
+    // Linux reports ru_maxrss in kilobytes, macOS in bytes.
+    let scale = if cfg!(target_os = "macos") { 1 } else { 1024 };
+    usage.ru_maxrss as u64 * scale
 }
 
 fn measure<E>(

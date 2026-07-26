@@ -218,6 +218,32 @@ func rateDistortion(d dataset, th theme) string {
 // fast ones to nothing. Every bar carries its value, so a bar too short to see
 // still reports its number.
 func encodeTime(sets []dataset, th theme) string {
+	return barPanels(sets, th, barSpec{
+		title:    "Encode time",
+		subtitle: "Geometric mean of each engine's ms/op over the test images, at quality 90. Each panel has its own scale.",
+		footnote: "Each panel has its own scale, so compare bars within a panel and read the labels across panels. A bar that fades out with an arrow runs off the top of its panel. wasm is libwebp compiled to WebAssembly: that gap is the cost of dropping cgo.",
+		value:    func(r row) float64 { return r.ms },
+		format:   duration,
+	})
+}
+
+func peakMemory(sets []dataset, th theme) string {
+	return barPanels(sets, th, barSpec{
+		title:    "Peak memory",
+		subtitle: "Geometric mean of each engine's peak RSS in MiB per megapixel of source image, at quality 90. Each panel has its own scale.",
+		footnote: "One encode per process: source bitmap, runtime and encoder together, which is what an application pays. A 1080p frame is 2.1 MP and a 4K frame roughly 10 MP, so multiply through to size a workload. wasm carries a WebAssembly runtime and its own linear memory, which is why it costs more than the same encoder as C.",
+		value:    func(r row) float64 { return r.mibPerMP },
+		format:   func(v float64) string { return fmt.Sprintf("%.0f", v) },
+	})
+}
+
+type barSpec struct {
+	title, subtitle, footnote string
+	value                     func(row) float64
+	format                    func(float64) string
+}
+
+func barPanels(sets []dataset, th theme, spec barSpec) string {
 	engines := []string{engOurs, engLibwebp, engWasm, engRust}
 	names := map[string]string{
 		engOurs: "webp-go-pure", engLibwebp: "libwebp", engWasm: "wasm", engRust: "webp-rust",
@@ -239,10 +265,10 @@ func encodeTime(sets []dataset, th theme) string {
 				var n int
 				for _, file := range d.files() {
 					r, ok := d.find(eng, mode, file)
-					if !ok || r.ms <= 0 {
+					if !ok || spec.value(r) <= 0 {
 						continue
 					}
-					sum += math.Log(r.ms)
+					sum += math.Log(spec.value(r))
 					n++
 				}
 				if n > 0 {
@@ -267,8 +293,7 @@ func encodeTime(sets []dataset, th theme) string {
 
 	fadeID := 0
 	c := &canvas{}
-	header(c, th, h, "Encode time",
-		"Geometric mean of each engine's ms/op over the test images, at quality 90. Each panel has its own scale.")
+	header(c, th, h, spec.title, spec.subtitle)
 	var entries []struct{ color, label string }
 	for _, eng := range engines {
 		entries = append(entries, struct{ color, label string }{color(eng), names[eng]})
@@ -278,6 +303,29 @@ func encodeTime(sets []dataset, th theme) string {
 	for gi, mode := range allModes {
 		cx := gutter + float64(gi)*(colW+colGap)
 		c.text(cx+colW/2, headerY, 13.5, th.inkPrimary, "middle", "600", mode)
+	}
+
+	// Whether to clip is decided per mode rather than per panel: with two machines
+	// landing either side of the threshold, the same mode would otherwise be drawn
+	// clipped in one row and not the other, which reads as a difference in the data.
+	panelValues := func(ri int, mode string) []float64 {
+		var vs []float64
+		for _, eng := range engines {
+			if v, ok := times[ri][mode][eng]; ok {
+				vs = append(vs, v)
+			}
+		}
+		sort.Sort(sort.Reverse(sort.Float64Slice(vs)))
+		return vs
+	}
+	clipMode := map[string]bool{}
+	for _, mode := range allModes {
+		for ri := range sets {
+			vs := panelValues(ri, mode)
+			if len(vs) > 1 && vs[0] > 2*vs[1] {
+				clipMode[mode] = true
+			}
+		}
 	}
 
 	for ri, d := range sets {
@@ -292,18 +340,12 @@ func encodeTime(sets []dataset, th theme) string {
 			// A bar more than twice the next tallest would flatten the rest of
 			// the panel, so the panel scales to the runner-up and the outlier is
 			// drawn clipped, with its value.
-			var sorted []float64
-			for _, eng := range engines {
-				if v, ok := times[ri][mode][eng]; ok {
-					sorted = append(sorted, v)
-				}
-			}
+			sorted := panelValues(ri, mode)
 			if len(sorted) == 0 {
 				continue
 			}
-			sort.Sort(sort.Reverse(sort.Float64Slice(sorted)))
 			scaleMax := sorted[0]
-			if len(sorted) > 1 && sorted[0] > 2*sorted[1] {
+			if len(sorted) > 1 && clipMode[mode] {
 				scaleMax = sorted[1]
 			}
 			c.line(cx, rowBot, cx+colW, rowBot, th.axis, 1)
@@ -346,7 +388,7 @@ func encodeTime(sets []dataset, th theme) string {
 					c.printf(`<path d="%s" fill="%s"/>`, barPath(x, barW, rowBot, rowBot-(v/scaleMax)*usable), color(eng))
 					labelY = rowBot - (v/scaleMax)*usable - 7
 				}
-				labels = append(labels, pending{x + barW/2, labelY, duration(v)})
+				labels = append(labels, pending{x + barW/2, labelY, spec.format(v)})
 			}
 
 			// Labels go on after every bar in the panel, so a taller neighbour
@@ -364,8 +406,7 @@ func encodeTime(sets []dataset, th theme) string {
 		}
 	}
 
-	footnote(c, th, 40, 550,
-		"Each panel has its own scale, so compare bars within a panel and read the labels across panels. A bar that fades out with an arrow runs off the top of its panel. wasm is libwebp compiled to WebAssembly: that gap is the cost of dropping cgo.")
+	footnote(c, th, 40, 550, spec.footnote)
 	c.printf(`</svg>`)
 	return c.b.String()
 }

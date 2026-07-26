@@ -34,24 +34,31 @@ func elossyBuildCandidateVp8Frame(width, height, mbWidth, mbHeight int, candidat
 // elossyRunCandidatePass searches one candidate under the given probability
 // table and returns the resulting candidate alongside the table the emitted
 // tokens imply.
-func elossyRunCandidatePass(width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, table *elossyCoeffProbTables, mbLimit int) (elossyEncodedLossyCandidate, elossyCoeffProbTables) {
+func elossyRunCandidatePass(scratch *elossyEncodeScratch, width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, segmentQuants *[numMbSegments]elossyQuantMatrices, table *elossyCoeffProbTables, coverage elossyPassCoverage) (elossyEncodedLossyCandidate, elossyCoeffProbTables) {
 	var stats elossyCoeffStats
-	partition, reconstructed, modes := elossyEncodeTokenPartition(source, mbWidth, mbHeight, profile, segment, segmentQuants, table, &stats, mbLimit)
+	buffers := scratch.acquire()
+	elossyEncodeTokenPartition(scratch, buffers, source, profile, segment, segmentQuants, table, &stats, coverage)
 	// A limited pass only reconstructs its prefix, so the rest of the plane is
 	// still blank and scoring it would swamp the distortion with the untouched
 	// remainder.
 	sseHeight := height
-	if rows := elossyLimitedRows(mbWidth, mbHeight, mbLimit); rows < mbHeight {
+	if rows := elossyLimitedRows(mbWidth, mbHeight, coverage.mbLimit); rows < mbHeight {
 		sseHeight = min(height, rows*16)
+	}
+	if coverage.sampled() {
+		// A sampled pass reconstructs nothing coherent to score: the rows it
+		// skips still hold the source it seeded them with.
+		sseHeight = 0
 	}
 	return elossyEncodedLossyCandidate{
 		baseQuant:      segment.quantizer[0],
 		segment:        *segment,
 		probabilities:  *table,
-		modes:          modes,
-		tokenPartition: partition,
-		distortion:     elossyReconstructionSse(source, &reconstructed, width, sseHeight),
-		reconstructed:  reconstructed,
+		modes:          buffers.modes,
+		tokenPartition: buffers.partition,
+		distortion:     elossyReconstructionSse(source, &buffers.reconstructed, width, sseHeight),
+		reconstructed:  buffers.reconstructed,
+		buffers:        buffers,
 	}, elossyFinalizeTokenProbabilities(&stats)
 }
 
@@ -59,11 +66,11 @@ func elossyRunCandidatePass(width, height int, source *elossyPlanes, mbWidth, mb
 // partition, probabilities, and modes. searchTable is the probability table the
 // search scores rates against; passing a table converged by an earlier cheap
 // pass avoids repeating that pass.
-func elossyEncodeLossyCandidate(width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, searchTable *elossyCoeffProbTables) (elossyEncodedLossyCandidate, error) {
+func elossyEncodeLossyCandidate(scratch *elossyEncodeScratch, width, height int, source *elossyPlanes, mbWidth, mbHeight int, profile *elossyLossySearchProfile, segment *elossySegmentConfig, searchTable *elossyCoeffProbTables) (elossyEncodedLossyCandidate, error) {
 	segmentQuants := elossyBuildSegmentQuantizers(segment)
 
 	if !profile.updateProbabilities {
-		candidate, _ := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, 0)
+		candidate, _ := elossyRunCandidatePass(scratch, width, height, source, mbWidth, mbHeight, profile, segment, &segmentQuants, &elossyCoeffsProba0, elossyFullCoverage())
 		candidate.probabilities = coeffsProba0
 		return candidate, nil
 	}
@@ -79,10 +86,12 @@ func elossyEncodeLossyCandidate(width, height int, source *elossyPlanes, mbWidth
 		table = *searchTable
 	} else {
 		priorProfile := elossyStatsProfile(profile)
-		_, table = elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, &priorProfile, segment, &segmentQuants, &elossyCoeffsProba0, elossyStatsMacroblockLimit(mbWidth*mbHeight))
+		var prior elossyEncodedLossyCandidate
+		prior, table = elossyRunCandidatePass(scratch, width, height, source, mbWidth, mbHeight, &priorProfile, segment, &segmentQuants, &elossyCoeffsProba0, elossyStatsCoverage(mbWidth, mbHeight))
+		scratch.release(prior.buffers)
 	}
 
-	candidate, _ := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, profile, segment, &segmentQuants, &table, 0)
+	candidate, _ := elossyRunCandidatePass(scratch, width, height, source, mbWidth, mbHeight, profile, segment, &segmentQuants, &table, elossyFullCoverage())
 	return candidate, nil
 }
 
@@ -98,7 +107,7 @@ func elossyReconstructionSse(source *elossyPlanes, reconstructed *elossyPlanes, 
 
 // elossyFinalizeLossyCandidate finalizes the lossy candidate by choosing the best
 // filter configuration.
-func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWidth, mbHeight int, baseQuant int32, optimizationLevel uint8, candidate *elossyEncodedLossyCandidate) ([]byte, error) {
+func elossyFinalizeLossyCandidate(scratch *elossyEncodeScratch, width, height int, source *elossyPlanes, mbWidth, mbHeight int, baseQuant int32, optimizationLevel uint8, candidate *elossyEncodedLossyCandidate) ([]byte, error) {
 	mbCount := mbWidth * mbHeight
 	if !elossyUseExhaustiveFilterSearch(optimizationLevel, mbCount) {
 		filter := elossyHeuristicFilter(baseQuant)
@@ -106,7 +115,7 @@ func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWid
 	}
 
 	filters := elossyFilterCandidates(baseQuant)
-	scratch := elossyNewFilterScratch(&candidate.reconstructed, mbWidth, mbHeight)
+	filterScratch := scratch.filterScratch(&candidate.reconstructed)
 	var bestDistortion uint64
 	var bestLen int
 	var bestVp8 []byte
@@ -116,7 +125,7 @@ func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWid
 		if err != nil {
 			return nil, err
 		}
-		distortion := elossyFilteredDistortion(source, &candidate.reconstructed, &scratch, width, height, mbWidth, mbHeight, &filters[i], candidate.modes)
+		distortion := elossyFilteredDistortion(source, &candidate.reconstructed, &filterScratch, width, height, mbWidth, mbHeight, &filters[i], candidate.modes)
 		replace := !found ||
 			distortion < bestDistortion ||
 			(distortion == bestDistortion && len(vp8) < bestLen)
@@ -147,7 +156,7 @@ func elossyFinalizeLossyCandidate(width, height int, source *elossyPlanes, mbWid
 // Candidates are scored on their token partition rather than a built frame:
 // a truncated pass has no frame to build, and the partition is where a
 // segmentation's cost difference shows up anyway.
-func elossyShortlistCandidates(source *elossyPlanes, width, height, mbWidth, mbHeight int, profile *elossyLossySearchProfile, candidates []elossySegmentConfig, baseQuant int32) []int {
+func elossyShortlistCandidates(scratch *elossyEncodeScratch, source *elossyPlanes, width, height, mbWidth, mbHeight int, profile *elossyLossySearchProfile, candidates []elossySegmentConfig, baseQuant int32) []int {
 	if len(candidates) <= elossyMaxFullSearchCandidates || !profile.updateProbabilities {
 		indices := make([]int, len(candidates))
 		for i := range candidates {
@@ -164,11 +173,12 @@ func elossyShortlistCandidates(source *elossyPlanes, width, height, mbWidth, mbH
 	scored := make([]ranked, 0, len(candidates))
 	for i := range candidates {
 		segmentQuants := elossyBuildSegmentQuantizers(&candidates[i])
-		candidate, _ := elossyRunCandidatePass(width, height, source, mbWidth, mbHeight, profile, &candidates[i], &segmentQuants, &elossyCoeffsProba0, limit)
+		candidate, _ := elossyRunCandidatePass(scratch, width, height, source, mbWidth, mbHeight, profile, &candidates[i], &segmentQuants, &elossyCoeffsProba0, elossyPrefixCoverage(limit))
 		scored = append(scored, ranked{
 			index: i,
 			cost:  elossyFrameRdCost(candidate.distortion, len(candidate.tokenPartition), baseQuant),
 		})
+		scratch.release(candidate.buffers)
 	}
 	sort.SliceStable(scored, func(a, b int) bool { return scored[a].cost < scored[b].cost })
 
@@ -200,13 +210,14 @@ func encodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *Lo
 	// Candidates are ranked on rate *and* distortion; only the winner pays for
 	// the filter search.
 	heuristic := elossyHeuristicFilter(baseQuant)
-	shortlist := elossyShortlistCandidates(&source, width, height, mbWidth, mbHeight, &profile, candidates, baseQuant)
+	scratch := elossyNewEncodeScratch(mbWidth, mbHeight, len(source.y)/4)
+	shortlist := elossyShortlistCandidates(scratch, &source, width, height, mbWidth, mbHeight, &profile, candidates, baseQuant)
 
 	var best elossyEncodedLossyCandidate
 	var bestCost uint64
 	found := false
 	for _, index := range shortlist {
-		candidate, err := elossyEncodeLossyCandidate(width, height, &source, mbWidth, mbHeight, &profile, &candidates[index], nil)
+		candidate, err := elossyEncodeLossyCandidate(scratch, width, height, &source, mbWidth, mbHeight, &profile, &candidates[index], nil)
 		if err != nil {
 			return nil, err
 		}
@@ -217,15 +228,18 @@ func encodeLossyRgbaToVp8WithOptions(width, height int, rgba []byte, options *Lo
 		cost := elossyFrameRdCost(candidate.distortion, len(probe), baseQuant)
 		if !found || cost < bestCost {
 			bestCost = cost
+			scratch.release(best.buffers)
 			best = candidate
 			found = true
+		} else {
+			scratch.release(candidate.buffers)
 		}
 	}
 
 	if !found {
 		return nil, encBitstream("lossy candidate search produced no output")
 	}
-	return elossyFinalizeLossyCandidate(width, height, &source, mbWidth, mbHeight, baseQuant, options.Effort, &best)
+	return elossyFinalizeLossyCandidate(scratch, width, height, &source, mbWidth, mbHeight, baseQuant, options.Effort, &best)
 }
 
 // EncodeLossyRgbaToVp8 encodes RGBA pixels to a raw lossy VP8 frame payload.
