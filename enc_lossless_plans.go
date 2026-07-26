@@ -672,53 +672,79 @@ func elosslessEstimateTransformPlanScore(width int, plan *elosslessTransformPlan
 	return score, nil
 }
 
-func elosslessCollectTransformPlans(width, height int, argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []elosslessTransformPlan {
+func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []func(width, height int) elosslessTransformPlan {
 	subtractIsDistinct := !elosslessSlicesEqualU32(subtractGreen, argb)
-	plans := []elosslessTransformPlan{elosslessBuildRawPlan(argb)}
+	builders := []func(int, int) elosslessTransformPlan{
+		func(_, _ int) elosslessTransformPlan { return elosslessBuildRawPlan(argb) },
+	}
 
 	if subtractIsDistinct && profile.transformSearchLevel >= 1 {
-		plans = append(plans, elosslessBuildSubtractGreenPlan(subtractGreen))
+		builders = append(builders, func(_, _ int) elosslessTransformPlan {
+			return elosslessBuildSubtractGreenPlan(subtractGreen)
+		})
 	}
 	if profile.transformSearchLevel >= 2 {
-		plans = append(plans, elosslessBuildGlobalCrossPlan(width, height, argb, false))
-		plans = append(plans, elosslessBuildGlobalPredictorPlan(width, height, argb, false))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, argb, false) },
+			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalPredictorPlan(w, h, argb, false) })
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 3 {
-		plans = append(plans, elosslessBuildGlobalCrossPlan(width, height, subtractGreen, true))
-		plans = append(plans, elosslessBuildGlobalPredictorPlan(width, height, subtractGreen, true))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, subtractGreen, true) },
+			func(w, h int) elosslessTransformPlan {
+				return elosslessBuildGlobalPredictorPlan(w, h, subtractGreen, true)
+			})
 	}
 	if profile.transformSearchLevel >= 4 {
-		plans = append(plans, elosslessBuildGlobalTransformPlan(width, height, argb, false))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalTransformPlan(w, h, argb, false) })
 		if subtractIsDistinct {
-			plans = append(plans, elosslessBuildGlobalTransformPlan(width, height, subtractGreen, true))
+			builders = append(builders, func(w, h int) elosslessTransformPlan {
+				return elosslessBuildGlobalTransformPlan(w, h, subtractGreen, true)
+			})
 		}
 	}
 	if profile.transformSearchLevel >= 5 {
-		plans = append(plans, elosslessBuildTiledCrossPlan(width, height, argb, false))
-		plans = append(plans, elosslessBuildTiledPredictorPlan(width, height, argb, false))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, argb, false) },
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledPredictorPlan(w, h, argb, false) })
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 6 {
-		plans = append(plans, elosslessBuildTiledCrossPlan(width, height, subtractGreen, true))
-		plans = append(plans, elosslessBuildTiledPredictorPlan(width, height, subtractGreen, true))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, subtractGreen, true) },
+			func(w, h int) elosslessTransformPlan {
+				return elosslessBuildTiledPredictorPlan(w, h, subtractGreen, true)
+			})
 	}
 	if profile.transformSearchLevel >= 7 {
-		plans = append(plans, elosslessBuildTiledTransformPlan(width, height, argb, false))
+		builders = append(builders,
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledTransformPlan(w, h, argb, false) })
 		if subtractIsDistinct {
-			plans = append(plans, elosslessBuildTiledTransformPlan(width, height, subtractGreen, true))
+			builders = append(builders, func(w, h int) elosslessTransformPlan {
+				return elosslessBuildTiledTransformPlan(w, h, subtractGreen, true)
+			})
 		}
 	}
 
-	return plans
+	return builders
 }
 
-func elosslessShortlistTransformPlans(width int, plans []elosslessTransformPlan, profile *elosslessLosslessSearchProfile) ([]elosslessRankedPlan, error) {
-	ranked := make([]elosslessRankedPlan, 0, len(plans))
-	for i := range plans {
-		score, err := elosslessEstimateTransformPlanScore(width, &plans[i], profile)
+// elosslessShortlistTransformPlans scores every candidate transform and keeps
+// the best few. Candidates are built one at a time and their predicted images
+// are dropped after scoring: a plan's transform tile images fully determine its
+// predicted image, so the shortlisted ones are rebuilt by
+// elosslessRematerializePlan rather than kept alive at 4 bytes per pixel each.
+func elosslessShortlistTransformPlans(width, height int, argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) ([]elosslessRankedPlan, error) {
+	builders := elosslessTransformPlanBuilders(argb, subtractGreen, profile)
+	ranked := make([]elosslessRankedPlan, 0, len(builders))
+	for _, build := range builders {
+		plan := build(width, height)
+		score, err := elosslessEstimateTransformPlanScore(width, &plan, profile)
 		if err != nil {
 			return nil, err
 		}
-		ranked = append(ranked, elosslessRankedPlan{score: score, plan: plans[i]})
+		plan.predicted = nil
+		ranked = append(ranked, elosslessRankedPlan{score: score, plan: plan})
 	}
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score < ranked[j].score })
 	keep := profile.shortlistKeep
@@ -727,6 +753,46 @@ func elosslessShortlistTransformPlans(width int, plans []elosslessTransformPlan,
 	}
 	ranked = ranked[:keep]
 	return ranked, nil
+}
+
+// elosslessRematerializePlan recomputes plan.predicted from the plan's transform
+// tile images, reapplying the already-chosen transforms without repeating the
+// per-tile search that selected them.
+func elosslessRematerializePlan(width, height int, argb, subtractGreen []uint32, plan *elosslessTransformPlan) {
+	input := argb
+	if plan.useSubtractGreen {
+		input = subtractGreen
+	}
+	owned := false
+
+	if plan.crossBitsSet {
+		transforms := make([]elosslessCrossColorTransform, len(plan.crossImage))
+		for i, packed := range plan.crossImage {
+			transforms[i] = elosslessCrossColorTransform{
+				greenToRed:  int8(packed & 0xff),
+				greenToBlue: int8((packed >> 8) & 0xff),
+				redToBlue:   int8((packed >> 16) & 0xff),
+			}
+		}
+		input = elosslessApplyCrossColorTransform(width, height, input, plan.crossBits, transforms)
+		owned = true
+	}
+
+	if plan.predictorBitsSet {
+		modes := make([]uint8, len(plan.predictorImage))
+		for i, packed := range plan.predictorImage {
+			modes[i] = uint8((packed >> 8) & 0xff)
+		}
+		input = elosslessApplyPredictorTransform(width, height, input, plan.predictorBits, modes)
+		owned = true
+	}
+
+	if !owned {
+		predicted := make([]uint32, len(input))
+		copy(predicted, input)
+		input = predicted
+	}
+	plan.predicted = input
 }
 
 type elosslessRankedPlan struct {
