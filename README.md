@@ -24,7 +24,7 @@ If you can use cgo, use libwebp itself. It is the C reference implementation,
 and it encodes faster than we do at slightly better quality per byte.
 
 Without cgo, the option is libwebp compiled to WebAssembly and run through
-wazero, as [gen2brain/webp](https://github.com/gen2brain/webp) does. Running it
+wazero, such as [gen2brain/webp](https://github.com/gen2brain/webp). Running it
 that way costs both time and memory, and we come out ahead of it:
 
 - **Lossy:** 1.1-3.4x faster, at 1.7-3.8x lower peak memory.
