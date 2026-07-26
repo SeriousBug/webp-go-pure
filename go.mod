@@ -1,3 +1,3 @@
 module github.com/SeriousBug/webp-go-pure
 
-go 1.26
+go 1.22
