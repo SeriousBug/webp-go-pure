@@ -11,13 +11,12 @@ animation frames. All pixel data in and out of the library is packed 8-bit RGBA.
 
 This started as a Go port of [webp-rust](https://github.com/mith-mmk/webp-rust)
 by MITH@mmk, and the container handling and decoders still follow it. The
-encoders have since diverged: the trellis quantizer, the coefficient probability
-convergence, the intra mode screening and the segmentation search are ported
-from [libwebp](https://chromium.googlesource.com/webm/libwebp/), and the search
-strategies, memory layout and the hand-written arm64 NEON and amd64 SSE kernels
-are our own.
-The port also found and fixed a bitstream bug still present in webp-rust v0.2.1,
-described in [benchmark/results.md](benchmark/results.md).
+encoders have since diverged: parts are ported from
+[libwebp](https://chromium.googlesource.com/webm/libwebp/), the C reference
+implementation, and the rest is our own work, down to hand-written arm64 NEON
+and amd64 SSE assembly. The port also found and fixed a bitstream bug still
+present in webp-rust v0.2.1, described in
+[benchmark/results.md](benchmark/results.md).
 
 ## Performance
 
