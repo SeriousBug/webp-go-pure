@@ -35,6 +35,24 @@ jobs:
       - name: test (race detector)
         run: go test -race ./...
 
+  # The examples in README.md and docs/ are the real code, not a copy of it.
+  # glitterate extracts them into test files and go test runs them, so a snippet
+  # that stops compiling, or an output line that stops being true, fails here.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: SeriousBug/glitterate@v1
+        with:
+          input: |
+            README.md
+            docs/**/*.md
+      - name: examples
+        run: CGO_ENABLED=0 go test -run 'Example' -v .
+
   # riscv64 has no native runner, so run a small conversion subset under QEMU
   # user-mode emulation to confirm the generic (non-asm) fallback path actually
   # produces correct output. Emulation is slow, so this is deliberately limited

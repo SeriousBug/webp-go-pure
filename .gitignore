@@ -4,3 +4,7 @@
 benchmark/rustbench/target/
 *.prof
 /webpprofile
+
+# Extracted from the docs by glitterate, see .github/workflows/ci.yml
+/docs_readme_test.go
+/docs_image_interop_test.go
