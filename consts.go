@@ -51,7 +51,7 @@ const (
 	alphaFlag     uint32 = 0x0000_0010
 )
 
-// WebpFormat identifies the primary still-image codec of a WebP container.
+// Format identifies the primary still-image codec of a WebP container.
 type Format int
 
 const (

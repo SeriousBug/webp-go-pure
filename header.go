@@ -2,7 +2,7 @@ package webp
 
 import "bytes"
 
-// ChunkHeader holds common metadata for a RIFF chunk.
+// chunkHeader holds common metadata for a RIFF chunk.
 type chunkHeader struct {
 	Fourcc     [4]byte
 	Offset     int
@@ -11,14 +11,14 @@ type chunkHeader struct {
 	DataOffset int
 }
 
-// Vp8xHeader is a parsed VP8X extended header.
+// vp8xHeader is a parsed VP8X extended header.
 type vp8xHeader struct {
 	Flags        uint32
 	CanvasWidth  int
 	CanvasHeight int
 }
 
-// WebpFeatures are high-level image features derived from the container and bitstream.
+// FeatureInfo holds high-level image features derived from the container and bitstream.
 type FeatureInfo struct {
 	Width        int
 	Height       int
@@ -28,7 +28,7 @@ type FeatureInfo struct {
 	vp8x         *vp8xHeader
 }
 
-// ParsedWebp is a parsed still-image WebP container with raw chunk slices.
+// parsedWebp is a parsed still-image WebP container with raw chunk slices.
 type parsedWebp struct {
 	Features    FeatureInfo
 	RiffSize    *int
@@ -39,13 +39,13 @@ type parsedWebp struct {
 	alphaHeader *alphaHeader
 }
 
-// AnimationHeader is a parsed ANIM chunk.
+// animationHeader is a parsed ANIM chunk.
 type animationHeader struct {
 	BackgroundColor uint32
 	LoopCount       uint16
 }
 
-// ParsedAnimationFrame is a parsed animation frame entry.
+// parsedAnimationFrame is a parsed animation frame entry.
 type parsedAnimationFrame struct {
 	FrameChunk          chunkHeader
 	XOffset             int
@@ -62,7 +62,7 @@ type parsedAnimationFrame struct {
 	alphaHeader         *alphaHeader
 }
 
-// ParsedAnimationWebp is a parsed animated WebP container.
+// parsedAnimationWebp is a parsed animated WebP container.
 type parsedAnimationWebp struct {
 	Features  FeatureInfo
 	RiffSize  *int
@@ -179,7 +179,7 @@ func riffLimitOf(riffSize *int) *int {
 	return &limit
 }
 
-// GetFeatures returns high-level WebP features without fully decoding the image.
+// Features returns high-level WebP features without fully decoding the image.
 func Features(data []byte) (FeatureInfo, error) {
 	riffSize, offset, err := parseRiff(data)
 	if err != nil {
@@ -271,7 +271,7 @@ func Features(data []byte) (FeatureInfo, error) {
 	}, nil
 }
 
-// ParseStillWebp parses a still-image WebP container and returns raw chunk slices.
+// parseStillWebp parses a still-image WebP container and returns raw chunk slices.
 func parseStillWebp(data []byte) (parsedWebp, error) {
 	riffSize, offset, err := parseRiff(data)
 	if err != nil {
@@ -420,7 +420,7 @@ func parseAnimationFrame(data []byte, features FeatureInfo, chunk chunkHeader, r
 	}, nil
 }
 
-// ParseAnimationWebp parses an animated WebP container and returns frame-level chunk slices.
+// parseAnimationWebp parses an animated WebP container and returns frame-level chunk slices.
 func parseAnimationWebp(data []byte) (parsedAnimationWebp, error) {
 	riffSize, offset, err := parseRiff(data)
 	if err != nil {
