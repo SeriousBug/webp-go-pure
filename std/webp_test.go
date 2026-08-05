@@ -1,4 +1,4 @@
-package webpstd
+package webp
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	webp "github.com/SeriousBug/webp-go-pure"
+	codec "github.com/SeriousBug/webp-go-pure"
 )
 
 func loadSample(t *testing.T, name string) []byte {
@@ -53,6 +53,50 @@ func decodeJPEG(t *testing.T, src image.Image) *image.YCbCr {
 		t.Fatalf("image/jpeg returned %v, expected 4:2:0", ycbcr.SubsampleRatio)
 	}
 	return ycbcr
+}
+
+func TestImportingThePackageRegistersTheFormat(t *testing.T) {
+	for _, name := range []string{"sample_lossy.webp", "sample_lossless.webp", "sample_animation.webp"} {
+		t.Run(name, func(t *testing.T) {
+			data := loadSample(t, name)
+
+			img, format, err := image.Decode(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if format != "webp" {
+				t.Fatalf("format %q, want webp", format)
+			}
+			if img.Bounds() != image.Rect(0, 0, 1920, 1080) {
+				t.Fatalf("bounds %v", img.Bounds())
+			}
+
+			config, format, err := image.DecodeConfig(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if format != "webp" {
+				t.Fatalf("config format %q, want webp", format)
+			}
+			if config.Width != 1920 || config.Height != 1080 {
+				t.Fatalf("config %dx%d", config.Width, config.Height)
+			}
+		})
+	}
+}
+
+func TestSentinelsAreReExported(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 128})
+
+	// Matching on the re-exported sentinel must work without importing the root
+	// package, which is the reason it is re-exported.
+	if _, err := EncodeBytes(src, nil); !errors.Is(err, ErrLossyAlpha) {
+		t.Fatalf("expected ErrLossyAlpha, got %v", err)
+	}
+	if ErrLossyAlpha != codec.ErrLossyAlpha {
+		t.Fatal("the re-exported sentinel is not the codec's own")
+	}
 }
 
 func TestDecodeReturnsTheNativeRepresentation(t *testing.T) {
@@ -171,12 +215,12 @@ func TestEncodeTakesThePlanarPathForYCbCr(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	planes := &webp.YUVImage{
+	planes := &codec.YUVImage{
 		Width: src.Rect.Dx(), Height: src.Rect.Dy(),
 		Y: src.Y, U: src.Cb, V: src.Cr,
 		YStride: src.YStride, UVStride: src.CStride,
 	}
-	viaPlanar, err := webp.EncodeLossyYUV(planes, &webp.LossyOptions{Quality: 80, Effort: 2})
+	viaPlanar, err := codec.EncodeLossyYUV(planes, &codec.LossyOptions{Quality: 80, Effort: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +336,7 @@ func TestEncodeRejectsAlphaForLossy(t *testing.T) {
 	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 128})
 
 	_, err := EncodeBytes(src, nil)
-	if !errors.Is(err, webp.ErrLossyAlpha) {
+	if !errors.Is(err, codec.ErrLossyAlpha) {
 		t.Fatalf("expected ErrLossyAlpha, got %v", err)
 	}
 }
@@ -330,7 +374,7 @@ func TestEncodeRejectsTransparentNYCbCrA(t *testing.T) {
 	transparent := &image.NYCbCrA{YCbCr: *ycbcr, A: alpha, AStride: 32}
 
 	_, err := EncodeBytes(transparent, nil)
-	if !errors.Is(err, webp.ErrLossyAlpha) {
+	if !errors.Is(err, codec.ErrLossyAlpha) {
 		t.Fatalf("expected ErrLossyAlpha, got %v", err)
 	}
 }

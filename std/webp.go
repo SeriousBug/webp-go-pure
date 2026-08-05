@@ -1,13 +1,15 @@
-// Package webpstd decodes and encodes WebP through the standard library's image
-// interfaces. It lives at the import path .../webp-go-pure/std.
+// Package webp decodes and encodes WebP through the standard library's image
+// interfaces. It lives at the import path .../webp-go-pure/std, so that the
+// codec it is built on can keep the root of the module.
 //
 // It has the same shape as image/png and image/jpeg, so it drops into code that
 // already speaks image.Image:
 //
-//	img, err := webpstd.Decode(r)
-//	err = webpstd.Encode(w, img, &webpstd.Options{Quality: 80})
+//	img, err := webp.Decode(r)
+//	err = webp.Encode(w, img, &webp.Options{Quality: 80})
 //
-// Import the register subpackage to make image.Decode recognize WebP.
+// Importing it registers WebP with image.Decode and image.DecodeConfig, the way
+// image/png and golang.org/x/image/webp do.
 //
 // # Avoiding conversions
 //
@@ -21,7 +23,7 @@
 //
 // Anything else still works, it just costs a conversion through
 // *image.NRGBA.
-package webpstd
+package webp
 
 import (
 	"errors"
@@ -30,7 +32,23 @@ import (
 	"image/draw"
 	"io"
 
-	webp "github.com/SeriousBug/webp-go-pure"
+	codec "github.com/SeriousBug/webp-go-pure"
+)
+
+func init() {
+	// The magic stops at VP8 so it also matches VP8L and VP8X.
+	image.RegisterFormat("webp", "RIFF????WEBPVP8", Decode, DecodeConfig)
+}
+
+// Errors from the underlying codec, re-exported so that a caller matching on
+// them does not have to import the root package as well.
+var (
+	ErrInvalidParam  = codec.ErrInvalidParam
+	ErrNotEnoughData = codec.ErrNotEnoughData
+	ErrBitstream     = codec.ErrBitstream
+	ErrUnsupported   = codec.ErrUnsupported
+	ErrAnimated      = codec.ErrAnimated
+	ErrLossyAlpha    = codec.ErrLossyAlpha
 )
 
 // DefaultQuality is the lossy quality [Options] uses when Quality is zero.
@@ -104,13 +122,13 @@ func Decode(r io.Reader) (image.Image, error) {
 }
 
 func decode(data []byte) (image.Image, error) {
-	features, err := webp.Features(data)
+	features, err := codec.Features(data)
 	if err != nil {
 		return nil, err
 	}
 
 	if features.HasAnimation {
-		anim, err := webp.DecodeAnimation(data)
+		anim, err := codec.DecodeAnimation(data)
 		if err != nil {
 			return nil, err
 		}
@@ -120,15 +138,15 @@ func decode(data []byte) (image.Image, error) {
 		return nrgbaOf(anim.Width, anim.Height, anim.Frames[0].RGBA), nil
 	}
 
-	if features.Format == webp.FormatLossy {
-		yuv, err := webp.DecodeYUV(data)
+	if features.Format == codec.FormatLossy {
+		yuv, err := codec.DecodeYUV(data)
 		if err != nil {
 			return nil, err
 		}
 		return imageOfYUV(&yuv), nil
 	}
 
-	img, err := webp.Decode(data)
+	img, err := codec.Decode(data)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +162,7 @@ func nrgbaOf(width, height int, pix []byte) *image.NRGBA {
 }
 
 // imageOfYUV wraps decoded planes without copying them.
-func imageOfYUV(yuv *webp.YUVImage) image.Image {
+func imageOfYUV(yuv *codec.YUVImage) image.Image {
 	ycbcr := image.YCbCr{
 		Y:              yuv.Y,
 		Cb:             yuv.U,
@@ -174,13 +192,13 @@ const configProbeLimit = 1 << 20
 func DecodeConfig(r io.Reader) (image.Config, error) {
 	buf := make([]byte, 0, 512)
 	for {
-		features, err := webp.Features(buf)
+		features, err := codec.Features(buf)
 		if err == nil {
 			return configOf(features), nil
 		}
 		// Anything other than a short buffer is a real parse failure, and
 		// reading more will not fix it.
-		if !errors.Is(err, webp.ErrNotEnoughData) {
+		if !errors.Is(err, codec.ErrNotEnoughData) {
 			return image.Config{}, err
 		}
 		if len(buf) >= configProbeLimit {
@@ -205,9 +223,9 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 	}
 }
 
-func configOf(features webp.FeatureInfo) image.Config {
+func configOf(features codec.FeatureInfo) image.Config {
 	model := color.NRGBAModel
-	if !features.HasAnimation && features.Format == webp.FormatLossy {
+	if !features.HasAnimation && features.Format == codec.FormatLossy {
 		model = color.YCbCrModel
 		if features.HasAlpha {
 			model = color.NYCbCrAModel
@@ -224,7 +242,7 @@ func configOf(features webp.FeatureInfo) image.Config {
 // lossy, quality 90.
 //
 // The lossy encoder does not support transparency and rejects an image that is
-// not fully opaque with an error matching webp.ErrLossyAlpha. Set
+// not fully opaque with an error matching codec.ErrLossyAlpha. Set
 // [Options.Lossless] to keep an alpha channel.
 func Encode(w io.Writer, m image.Image, o *Options) error {
 	var opts Options
@@ -254,7 +272,7 @@ func encode(m image.Image, o *Options) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		return webp.EncodeLossless(img, &webp.LosslessOptions{Effort: effort, EXIF: o.EXIF})
+		return codec.EncodeLossless(img, &codec.LosslessOptions{Effort: effort, EXIF: o.EXIF})
 	}
 
 	quality, err := o.quality()
@@ -265,23 +283,23 @@ func encode(m image.Image, o *Options) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	lossy := &webp.LossyOptions{Quality: quality, Effort: effort, EXIF: o.EXIF}
+	lossy := &codec.LossyOptions{Quality: quality, Effort: effort, EXIF: o.EXIF}
 
 	if planes, ok := planesOf(m); ok {
-		return webp.EncodeLossyYUV(planes, lossy)
+		return codec.EncodeLossyYUV(planes, lossy)
 	}
 	img, err := rgbaOf(m)
 	if err != nil {
 		return nil, err
 	}
-	return webp.EncodeLossy(img, lossy)
+	return codec.EncodeLossy(img, lossy)
 }
 
 // planesOf recognizes the images that are already in the encoder's own layout,
 // which is what makes a JPEG transcode free of colorspace math. Anything it
 // turns down falls back to the RGBA path, so turning a case down costs
 // performance and never correctness.
-func planesOf(m image.Image) (*webp.YUVImage, bool) {
+func planesOf(m image.Image) (*codec.YUVImage, bool) {
 	var ycbcr *image.YCbCr
 	switch src := m.(type) {
 	case *image.YCbCr:
@@ -310,7 +328,7 @@ func planesOf(m image.Image) (*webp.YUVImage, bool) {
 		return nil, false
 	}
 
-	return &webp.YUVImage{
+	return &codec.YUVImage{
 		Width:    b.Dx(),
 		Height:   b.Dy(),
 		Y:        ycbcr.Y,
@@ -326,17 +344,17 @@ func planesOf(m image.Image) (*webp.YUVImage, bool) {
 // Note that *image.RGBA is deliberately not special-cased: its pixels are
 // alpha-premultiplied, and handing them over as-is would darken everything that
 // is not fully opaque. draw.Draw un-premultiplies on the way into an NRGBA.
-func rgbaOf(m image.Image) (*webp.Image, error) {
+func rgbaOf(m image.Image) (*codec.Image, error) {
 	b := m.Bounds()
 	width, height := b.Dx(), b.Dy()
 
 	if src, ok := m.(*image.NRGBA); ok && src.Stride == width*4 && len(src.Pix) >= width*height*4 {
-		return &webp.Image{Width: width, Height: height, RGBA: src.Pix[:width*height*4]}, nil
+		return &codec.Image{Width: width, Height: height, RGBA: src.Pix[:width*height*4]}, nil
 	}
 
 	dst := image.NewNRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(dst, dst.Bounds(), m, b.Min, draw.Src)
-	return &webp.Image{Width: width, Height: height, RGBA: dst.Pix}, nil
+	return &codec.Image{Width: width, Height: height, RGBA: dst.Pix}, nil
 }
 
 // Animation is a decoded animated WebP, in the shape of gif.GIF.
@@ -361,7 +379,7 @@ func DecodeAll(r io.Reader) (*Animation, error) {
 		return nil, err
 	}
 
-	features, err := webp.Features(data)
+	features, err := codec.Features(data)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +395,7 @@ func DecodeAll(r io.Reader) (*Animation, error) {
 		}, nil
 	}
 
-	anim, err := webp.DecodeAnimation(data)
+	anim, err := codec.DecodeAnimation(data)
 	if err != nil {
 		return nil, err
 	}

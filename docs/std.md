@@ -1,8 +1,22 @@
 # The std package
 
 `github.com/SeriousBug/webp-go-pure/std` implements the standard library's codec
-interfaces. Its package name is `webpstd`, so it does not collide with the root
-`webp` package when you import both.
+interfaces. Its package name is `webp`, so a bare import reads the way
+`image/png` and `image/jpeg` do at the call site, and importing it registers the
+format with `image.Decode`.
+
+The root package is also named `webp`, so on the rare occasion you want both,
+give one of them a name:
+
+```go
+import (
+	"github.com/SeriousBug/webp-go-pure/std"
+	codec "github.com/SeriousBug/webp-go-pure"
+)
+```
+
+The error sentinels are re-exported here, so matching on `webp.ErrLossyAlpha`
+and friends does not need the second import.
 
 <!-- glitterate append=1 file="docs_std_test.go" text="
 package webp_test
@@ -14,13 +28,12 @@ import (
 	\"image/color\"
 	\"os\"
 
-	webp \"github.com/SeriousBug/webp-go-pure\"
-	webpstd \"github.com/SeriousBug/webp-go-pure/std\"
+	\"github.com/SeriousBug/webp-go-pure/std\"
 )
 " -->
 
 ```go
-import webpstd "github.com/SeriousBug/webp-go-pure/std"
+import "github.com/SeriousBug/webp-go-pure/std"
 ```
 
     Decode(r io.Reader) (image.Image, error)
@@ -52,7 +65,7 @@ func decodedType(path string) (string, error) {
 	}
 	defer f.Close()
 
-	img, err := webpstd.Decode(f)
+	img, err := webp.Decode(f)
 	if err != nil {
 		return "", err
 	}
@@ -95,11 +108,11 @@ func encodeHalfTransparentRed() (color.NRGBA, error) {
 	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
 	src.Set(0, 0, color.NRGBA{R: 255, A: 128})
 
-	data, err := webpstd.EncodeBytes(src, &webpstd.Options{Lossless: true})
+	data, err := webp.EncodeBytes(src, &webp.Options{Lossless: true})
 	if err != nil {
 		return color.NRGBA{}, err
 	}
-	decoded, err := webpstd.DecodeBytes(data)
+	decoded, err := webp.DecodeBytes(data)
 	if err != nil {
 		return color.NRGBA{}, err
 	}
@@ -115,14 +128,14 @@ unchanged would return `{128 0 0 128}`.
 <!-- glitterate append=4 file="docs_std_test.go" -->
 ```go
 func encodeLossless(img image.Image) ([]byte, error) {
-	return webpstd.EncodeBytes(img, &webpstd.Options{Lossless: true, Effort: 9})
+	return webp.EncodeBytes(img, &webp.Options{Lossless: true, Effort: 9})
 }
 ```
 
 | field | meaning |
 | --- | --- |
 | `Quality` | 1..100 for lossy. Zero means 90. Ignored when `Lossless` is set. |
-| `Effort` | 0..9, higher is slower and smaller. Zero means the default for the mode, 0 lossy and 6 lossless. Pass `webpstd.EffortFastest` to ask for 0 explicitly. |
+| `Effort` | 0..9, higher is slower and smaller. Zero means the default for the mode, 0 lossy and 6 lossless. Pass `webp.EffortFastest` to ask for 0 explicitly. |
 | `Lossless` | Encode with VP8L, reproducing the input exactly. |
 | `EXIF` | Raw EXIF bytes to embed as a metadata chunk. |
 
@@ -145,7 +158,7 @@ func encodeTransparent() string {
 	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
 	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 128})
 
-	_, err := webpstd.EncodeBytes(src, nil)
+	_, err := webp.EncodeBytes(src, nil)
 	if errors.Is(err, webp.ErrLossyAlpha) {
 		return "needs lossless"
 	}
@@ -171,7 +184,7 @@ func summarizeAnimation(path string) (string, error) {
 	}
 	defer f.Close()
 
-	anim, err := webpstd.DecodeAll(f)
+	anim, err := webp.DecodeAll(f)
 	if err != nil {
 		return "", err
 	}
@@ -228,7 +241,7 @@ func Example_encodeLossless() {
 	if err != nil {
 		panic(err)
 	}
-	decoded, err := webpstd.DecodeBytes(data)
+	decoded, err := webp.DecodeBytes(data)
 	if err != nil {
 		panic(err)
 	}
@@ -257,7 +270,7 @@ func Example_decodeConfig() {
 	}
 	defer f.Close()
 
-	config, err := webpstd.DecodeConfig(f)
+	config, err := webp.DecodeConfig(f)
 	if err != nil {
 		panic(err)
 	}

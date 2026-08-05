@@ -1,11 +1,11 @@
-package webpstd
+package webp
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	webp "github.com/SeriousBug/webp-go-pure"
+	codec "github.com/SeriousBug/webp-go-pure"
 )
 
 func benchSample(b *testing.B) []byte {
@@ -36,7 +36,7 @@ func BenchmarkDecodeRGBA(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := webp.Decode(data); err != nil {
+		if _, err := codec.Decode(data); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -62,11 +62,11 @@ func BenchmarkTranscodeRGBA(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		img, err := webp.Decode(data)
+		img, err := codec.Decode(data)
 		if err != nil {
 			b.Fatal(err)
 		}
-		if _, err := webp.EncodeLossy(&img, &webp.LossyOptions{Quality: 80}); err != nil {
+		if _, err := codec.EncodeLossy(&img, &codec.LossyOptions{Quality: 80}); err != nil {
 			b.Fatal(err)
 		}
 	}

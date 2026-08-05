@@ -46,14 +46,12 @@ import (
 	\"io\"
 	\"os\"
 
-	webpstd \"github.com/SeriousBug/webp-go-pure/std\"
-
-	_ \"github.com/SeriousBug/webp-go-pure/std/register\"
+	\"github.com/SeriousBug/webp-go-pure/std\"
 )
 " -->
 
 ```go
-import webpstd "github.com/SeriousBug/webp-go-pure/std"
+import "github.com/SeriousBug/webp-go-pure/std"
 ```
 
 `Decode`, `DecodeConfig` and `Encode` have the same signatures as the ones in
@@ -62,7 +60,7 @@ import webpstd "github.com/SeriousBug/webp-go-pure/std"
 <!-- glitterate append=2 file="docs_readme_test.go" -->
 ```go
 func describe(r io.Reader) (string, error) {
-	img, err := webpstd.Decode(r)
+	img, err := webp.Decode(r)
 	if err != nil {
 		return "", err
 	}
@@ -80,7 +78,7 @@ Encoding takes an options struct, or `nil` for the defaults (lossy, quality 90):
 <!-- glitterate append=3 file="docs_readme_test.go" -->
 ```go
 func writeWebP(w io.Writer, img image.Image) error {
-	return webpstd.Encode(w, img, &webpstd.Options{Quality: 80})
+	return webp.Encode(w, img, &webp.Options{Quality: 80})
 }
 ```
 
@@ -99,7 +97,7 @@ func jpegToWebP(dst io.Writer, src io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return webpstd.Encode(dst, img, &webpstd.Options{Quality: 80})
+	return webp.Encode(dst, img, &webp.Options{Quality: 80})
 }
 ```
 
@@ -111,12 +109,8 @@ costs a conversion.
 
 ### image.Decode
 
-Import the register package for its side effect to teach `image.Decode` and
-`image.DecodeConfig` about WebP:
-
-```go
-import _ "github.com/SeriousBug/webp-go-pure/std/register"
-```
+Importing the package registers WebP with `image.Decode` and
+`image.DecodeConfig`, the way `image/png` and `golang.org/x/image/webp` do:
 
 <!-- glitterate append=5 file="docs_readme_test.go" -->
 ```go
@@ -126,10 +120,15 @@ func sniffFormat(r io.Reader) (string, error) {
 }
 ```
 
-Registration is a separate package because `image.RegisterFormat` is a
-process-wide global that `x/image/webp` and `gen2brain/webp` also claim, so
-which decoder wins should be your call rather than a consequence of linking this
-library.
+That makes this package a drop-in for `golang.org/x/image/webp`, which has the
+same two function signatures. Swapping the import path is the whole migration,
+and you gain the encoder and animation support it does not have.
+
+One caveat worth knowing: `image.RegisterFormat` is a process-wide list that
+neither rejects duplicates nor allows unregistering, and `x/image/webp` and
+`gen2brain/webp` claim the same magic bytes. If more than one of them ends up in
+your binary, package initialization order decides which decoder `image.Decode`
+picks.
 
 ## More
 
@@ -185,7 +184,7 @@ func Example_jpegToWebP() {
 		panic(err)
 	}
 
-	img, err := webpstd.Decode(bytes.NewReader(out.Bytes()))
+	img, err := webp.Decode(bytes.NewReader(out.Bytes()))
 	if err != nil {
 		panic(err)
 	}
