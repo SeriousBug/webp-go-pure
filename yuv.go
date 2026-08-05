@@ -7,8 +7,9 @@ package webp
 // each direction, so going through [Image] costs a YUV/RGBA conversion in
 // whichever direction you are travelling. [DecodeYUV] and [EncodeLossyYUV]
 // skip it. This is what makes a JPEG transcode cheap: a baseline JPEG is
-// already planar 4:2:0 YCbCr in the same colorspace, so its planes can be fed
-// straight to the encoder.
+// already planar 4:2:0 YCbCr, so its planes need only a range rescale rather
+// than a full colorspace conversion. Set [YUVImage.Range] to say which range
+// the samples are in.
 //
 // The Y plane holds Height rows of Width samples at YStride bytes per row. The
 // U and V planes hold (Height+1)/2 rows of (Width+1)/2 samples at UVStride
@@ -28,6 +29,11 @@ type YUVImage struct {
 	YStride int
 	// UVStride is the byte offset between successive rows of U and V.
 	UVStride int
+	// Range is how the samples use the 0..255 byte range. The zero value,
+	// [RangeLimited], is what lossy WebP itself stores. Planes taken from
+	// image/jpeg or from an image.YCbCr are [RangeFull] and must say so, or
+	// they will encode with lifted blacks and clipped whites.
+	Range ColorRange
 	// A, when non-nil, is a full-resolution straight-alpha plane of Height rows
 	// at AStride bytes per row. [DecodeYUV] sets it when the container carries
 	// an ALPH chunk. The lossy encoder does not support alpha, so
@@ -67,6 +73,7 @@ func DecodeYUV(data []byte) (YUVImage, error) {
 	out := YUVImage{
 		Width:    yuv.Width,
 		Height:   yuv.Height,
+		Range:    RangeLimited,
 		Y:        yuv.Y,
 		U:        yuv.U,
 		V:        yuv.V,

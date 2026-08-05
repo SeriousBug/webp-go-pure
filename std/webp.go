@@ -13,13 +13,11 @@
 //
 // # Avoiding conversions
 //
-// Lossy WebP and JPEG are both planar 4:2:0 YCbCr in the same colorspace, so
-// this package moves planes rather than pixels wherever it can. [Decode] hands
-// back the decoder's own planes as an *image.YCbCr instead of converting them
-// to RGBA, and [Encode] feeds an *image.YCbCr straight to the encoder instead
-// of converting it twice. Transcoding a JPEG to lossy WebP therefore does no
-// colorspace math at all: image/jpeg decodes to *image.YCbCr, and that is
-// exactly what the WebP encoder wants.
+// Lossy WebP and JPEG are both planar 4:2:0 YCbCr, so this package moves planes
+// rather than pixels wherever it can. [Decode] hands back the decoder's own
+// planes as an *image.YCbCr instead of converting them to RGBA, and [Encode]
+// feeds an *image.YCbCr to the encoder in the same layout. Transcoding a JPEG
+// to lossy WebP therefore skips the RGBA round trip.
 //
 // Anything else still works, it just costs a conversion through
 // *image.NRGBA.
@@ -153,6 +151,49 @@ func decode(data []byte) (image.Image, error) {
 	return nrgbaOf(img.Width, img.Height, img.RGBA), nil
 }
 
+// DecodeNRGBA decodes a WebP image into an *image.NRGBA whatever the file
+// holds, for callers who want one predictable pixel layout rather than the type
+// [Decode] picks. The alpha is straight, not premultiplied.
+//
+// This is cheaper than decoding and converting yourself, because the codec
+// converts its own planes rather than going through an intermediate image.
+func DecodeNRGBA(r io.Reader) (*image.NRGBA, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return decodeNRGBA(data)
+}
+
+// DecodeNRGBABytes is [DecodeNRGBA] without the io.Reader.
+func DecodeNRGBABytes(data []byte) (*image.NRGBA, error) {
+	return decodeNRGBA(data)
+}
+
+func decodeNRGBA(data []byte) (*image.NRGBA, error) {
+	features, err := codec.Features(data)
+	if err != nil {
+		return nil, err
+	}
+
+	if features.HasAnimation {
+		anim, err := codec.DecodeAnimation(data)
+		if err != nil {
+			return nil, err
+		}
+		if len(anim.Frames) == 0 {
+			return nil, errors.New("webp: animation has no frames")
+		}
+		return nrgbaOf(anim.Width, anim.Height, anim.Frames[0].RGBA), nil
+	}
+
+	img, err := codec.Decode(data)
+	if err != nil {
+		return nil, err
+	}
+	return nrgbaOf(img.Width, img.Height, img.RGBA), nil
+}
+
 func nrgbaOf(width, height int, pix []byte) *image.NRGBA {
 	return &image.NRGBA{
 		Pix:    pix,
@@ -162,7 +203,13 @@ func nrgbaOf(width, height int, pix []byte) *image.NRGBA {
 }
 
 // imageOfYUV wraps decoded planes without copying them.
+//
+// WebP stores limited-range samples and image.YCbCr is defined as full range,
+// so the planes are rescaled in place first. Skipping this is what makes some
+// WebP decoders return washed out images: white arrives as 235 rather than 255.
 func imageOfYUV(yuv *codec.YUVImage) image.Image {
+	yuv.ConvertRange(codec.RangeFull)
+
 	ycbcr := image.YCbCr{
 		Y:              yuv.Y,
 		Cb:             yuv.U,
@@ -296,9 +343,9 @@ func encode(m image.Image, o *Options) ([]byte, error) {
 }
 
 // planesOf recognizes the images that are already in the encoder's own layout,
-// which is what makes a JPEG transcode free of colorspace math. Anything it
-// turns down falls back to the RGBA path, so turning a case down costs
-// performance and never correctness.
+// which is what makes a JPEG transcode cheap. Anything it turns down falls back
+// to the RGBA path, so turning a case down costs performance and never
+// correctness.
 func planesOf(m image.Image) (*codec.YUVImage, bool) {
 	var ycbcr *image.YCbCr
 	switch src := m.(type) {
@@ -329,8 +376,11 @@ func planesOf(m image.Image) (*codec.YUVImage, bool) {
 	}
 
 	return &codec.YUVImage{
-		Width:    b.Dx(),
-		Height:   b.Dy(),
+		Width:  b.Dx(),
+		Height: b.Dy(),
+		// image.YCbCr is full range by definition; the encoder rescales as it
+		// packs, so this costs nothing beyond the copy it already makes.
+		Range:    codec.RangeFull,
 		Y:        ycbcr.Y,
 		U:        ycbcr.Cb,
 		V:        ycbcr.Cr,

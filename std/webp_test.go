@@ -5,6 +5,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/jpeg"
 	"io"
 	"os"
@@ -82,6 +83,85 @@ func TestImportingThePackageRegistersTheFormat(t *testing.T) {
 				t.Fatalf("config %dx%d", config.Width, config.Height)
 			}
 		})
+	}
+}
+
+func TestDecodeNRGBAAlwaysReturnsNRGBA(t *testing.T) {
+	for _, name := range []string{"sample_lossy.webp", "sample_lossless.webp", "sample_animation.webp"} {
+		t.Run(name, func(t *testing.T) {
+			img, err := DecodeNRGBA(bytes.NewReader(loadSample(t, name)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if img.Bounds() != image.Rect(0, 0, 1920, 1080) {
+				t.Fatalf("bounds %v", img.Bounds())
+			}
+			if img.Stride != 1920*4 || len(img.Pix) != 1920*1080*4 {
+				t.Fatalf("stride %d, %d pixels", img.Stride, len(img.Pix))
+			}
+		})
+	}
+}
+
+// DecodeNRGBA has to agree with Decode; it is a different layout, not a
+// different image.
+//
+// Not pixel for pixel, though. Reading an *image.YCbCr replicates each chroma
+// sample across its 2x2 block, where the codec's own YUV to RGB pass
+// interpolates between neighbours, so the two diverge at sharp color edges. The
+// bound is on the mean, which is what a range or colorspace mistake would move.
+func TestDecodeNRGBAMatchesDecode(t *testing.T) {
+	data := loadSample(t, "sample_lossy.webp")
+
+	native, err := DecodeBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	converted, err := DecodeNRGBABytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sum, n float64
+	bounds := converted.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			wantR, wantG, wantB, wantA := native.At(x, y).RGBA()
+			gotR, gotG, gotB, gotA := converted.At(x, y).RGBA()
+			if wantA != gotA {
+				t.Fatalf("at (%d,%d): alpha %d vs %d", x, y, wantA, gotA)
+			}
+			sum += absDiff(wantR, gotR) + absDiff(wantG, gotG) + absDiff(wantB, gotB)
+			n += 3
+		}
+	}
+	if mean := sum / n / 257; mean > 1 {
+		t.Fatalf("mean channel difference %.3f, want under 1", mean)
+	}
+}
+
+// The regression this guards: WebP stores limited-range YCbCr and image.YCbCr
+// is defined as full range, so handing the decoder's planes over untouched
+// makes white read as 235 and black as 16.
+func TestDecodeProducesFullRangeYCbCr(t *testing.T) {
+	for _, want := range []color.NRGBA{{0, 0, 0, 255}, {255, 255, 255, 255}} {
+		src := image.NewNRGBA(image.Rect(0, 0, 32, 32))
+		draw.Draw(src, src.Bounds(), &image.Uniform{want}, image.Point{}, draw.Src)
+
+		data, err := EncodeBytes(src, &Options{Quality: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, err := DecodeBytes(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := img.(*image.YCbCr); !ok {
+			t.Fatalf("decoded %T, wanted the planar path under test", img)
+		}
+		if got := color.NRGBAModel.Convert(img.At(16, 16)).(color.NRGBA); got != want {
+			t.Errorf("solid %v decoded to %v", want, got)
+		}
 	}
 }
 
@@ -219,6 +299,7 @@ func TestEncodeTakesThePlanarPathForYCbCr(t *testing.T) {
 		Width: src.Rect.Dx(), Height: src.Rect.Dy(),
 		Y: src.Y, U: src.Cb, V: src.Cr,
 		YStride: src.YStride, UVStride: src.CStride,
+		Range:   codec.RangeFull,
 	}
 	viaPlanar, err := codec.EncodeLossyYUV(planes, &codec.LossyOptions{Quality: 80, Effort: 2})
 	if err != nil {

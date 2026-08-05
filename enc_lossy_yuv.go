@@ -43,7 +43,10 @@ func elossyValidateYuv(img *YUVImage) error {
 // same way elossyRgbaToYuv420 does. The encoder reads whole macroblocks, so the
 // padding has to hold edge-clamped samples rather than zeroes, which would
 // otherwise show up as a hard edge the transform has to spend bits on.
-func elossyCopyPaddedPlane(dst []uint8, dstStride, dstHeight int, src []byte, srcStride, width, height int) {
+//
+// A non-nil table is applied per sample on the way across, which is how a
+// full-range source pays for its range rescale without a second pass.
+func elossyCopyPaddedPlane(dst []uint8, dstStride, dstHeight int, src []byte, srcStride, width, height int, table *[256]uint8) {
 	for row := 0; row < dstHeight; row++ {
 		start := row * dstStride
 		out := dst[start : start+dstStride : start+dstStride]
@@ -53,7 +56,13 @@ func elossyCopyPaddedPlane(dst []uint8, dstStride, dstHeight int, src []byte, sr
 			continue
 		}
 		in := src[row*srcStride:]
-		copy(out[:width], in[:width])
+		if table == nil {
+			copy(out[:width], in[:width])
+		} else {
+			for col, v := range in[:width] {
+				out[col] = table[v]
+			}
+		}
 		if width < dstStride {
 			pad := out[width-1]
 			for col := width; col < dstStride; col++ {
@@ -64,9 +73,9 @@ func elossyCopyPaddedPlane(dst []uint8, dstStride, dstHeight int, src []byte, sr
 }
 
 // elossyYuvToPlanes repacks caller-supplied 4:2:0 planes into the encoder's
-// macroblock-padded layout. Unlike elossyRgbaToYuv420 this is a per-row copy
-// rather than per-pixel colorspace math: the samples are already what the
-// encoder wants, only the strides and the edge padding differ.
+// macroblock-padded layout. Unlike elossyRgbaToYuv420 this needs no colorspace
+// conversion, only the strides, the edge padding, and a range rescale when the
+// source is full range.
 func elossyYuvToPlanes(img *YUVImage, mbWidth, mbHeight int) elossyPlanes {
 	yStride := mbWidth * 16
 	uvStride := mbWidth * 8
@@ -77,11 +86,16 @@ func elossyYuvToPlanes(img *YUVImage, mbWidth, mbHeight int) elossyPlanes {
 	u := make([]uint8, uvStride*uvHeight)
 	v := make([]uint8, uvStride*uvHeight)
 
+	var luma, chroma *[256]uint8
+	if img.Range == RangeFull {
+		luma, chroma = lumaFullToLimited, chromaFullToLimited
+	}
+
 	uvWidth := (img.Width + 1) / 2
 	uvRows := (img.Height + 1) / 2
-	elossyCopyPaddedPlane(y, yStride, yHeight, img.Y, img.YStride, img.Width, img.Height)
-	elossyCopyPaddedPlane(u, uvStride, uvHeight, img.U, img.UVStride, uvWidth, uvRows)
-	elossyCopyPaddedPlane(v, uvStride, uvHeight, img.V, img.UVStride, uvWidth, uvRows)
+	elossyCopyPaddedPlane(y, yStride, yHeight, img.Y, img.YStride, img.Width, img.Height, luma)
+	elossyCopyPaddedPlane(u, uvStride, uvHeight, img.U, img.UVStride, uvWidth, uvRows, chroma)
+	elossyCopyPaddedPlane(v, uvStride, uvHeight, img.V, img.UVStride, uvWidth, uvRows, chroma)
 
 	return elossyPlanes{
 		yStride:  yStride,
