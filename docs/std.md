@@ -22,13 +22,13 @@ and friends does not need the second import.
 package webp_test
 
 import (
-	\"errors\"
-	\"fmt\"
-	\"image\"
-	\"image/color\"
-	\"os\"
+	"errors"
+	"fmt"
+	"image"
+	"image/color"
+	"os"
 
-	\"github.com/SeriousBug/webp-go-pure/std\"
+	"github.com/SeriousBug/webp-go-pure/std"
 )
 " -->
 
@@ -73,16 +73,32 @@ func decodedType(path string) (string, error) {
 }
 ```
 
-Handing back the decoder's own planes is what makes decoding a 1920x1080 lossy
-image 18ms instead of 25ms, and 10MB instead of 18MB. Nothing downstream has to
-care: `*image.YCbCr` satisfies `image.Image`, so `At`, `Bounds` and
-`draw.Draw` work as usual.
+Nothing downstream has to care which one you get: they all satisfy
+`image.Image`, so `At`, `Bounds` and `draw.Draw` work as usual. Handing back the
+planes rather than converting them is what makes decoding a 1920x1080 lossy
+image about a quarter faster on half the memory.
 
-This is also why `Decode` returns a plain `*image.YCbCr` rather than an
-`*image.NYCbCrA` with an opaque alpha plane when there is no `ALPH` chunk. A
-type switch on `*image.YCbCr` does not match `*image.NYCbCrA`, and `jpeg.Encode`
-has exactly that switch, so the wrong choice here would cost a conversion in
-every WebP to JPEG transcode.
+If you would rather have one predictable layout, `DecodeNRGBA` and
+`DecodeNRGBABytes` always return an `*image.NRGBA`, with straight (not
+premultiplied) alpha. That is cheaper than converting the result of `Decode`
+yourself, because the codec converts its own planes directly.
+
+<!-- glitterate append=3 file="docs_std_test.go" -->
+```go
+func decodeAsNRGBA(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	img, err := webp.DecodeNRGBA(f)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%T %v", img, img.Bounds()), nil
+}
+```
 
 ## What Encode recognizes
 
@@ -94,15 +110,14 @@ every WebP to JPEG transcode.
 - `*image.NRGBA` is already the layout the byte-oriented API takes.
 
 Everything else, including `*image.RGBA`, is drawn into an `*image.NRGBA` first.
-Falling back only ever costs time, never correctness, so sub-images, non-4:2:0
-chroma and odd crop origins are all handled, just not for free.
+Falling back costs time, never correctness, so sub-images, non-4:2:0 chroma and
+odd crop origins all encode correctly, just not for free.
 
-`*image.RGBA` is deliberately not in that list. Its pixels are
-alpha-premultiplied, and the WebP encoders take straight alpha, so passing the
-bytes through unchanged would darken everything that is not fully opaque.
-`draw.Draw` un-premultiplies on the way through.
+`*image.RGBA` is one of those, and it is worth knowing why: its pixels are
+alpha-premultiplied and WebP stores straight alpha, so the conversion is what
+keeps semi-transparent pixels from coming out dark.
 
-<!-- glitterate append=3 file="docs_std_test.go" -->
+<!-- glitterate append=4 file="docs_std_test.go" -->
 ```go
 func encodeHalfTransparentRed() (color.NRGBA, error) {
 	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
@@ -125,7 +140,7 @@ unchanged would return `{128 0 0 128}`.
 
 ## Options
 
-<!-- glitterate append=4 file="docs_std_test.go" -->
+<!-- glitterate append=5 file="docs_std_test.go" -->
 ```go
 func encodeLossless(img image.Image) ([]byte, error) {
 	return webp.EncodeBytes(img, &webp.Options{Lossless: true, Effort: 9})
@@ -142,17 +157,13 @@ func encodeLossless(img image.Image) ([]byte, error) {
 A `nil` `*Options` means all of the above defaults, so `Encode(w, img, nil)` is
 lossy at quality 90.
 
-Every zero field means "the default", which is why `Effort` needs
-`EffortFastest` to request 0. `Quality` needs no such escape hatch: quality 0 is
-not a setting anyone wants, so zero is free to mean the default.
-
 ## Alpha
 
 The lossy encoder cannot store transparency. Encoding an image that is not fully
 opaque fails with an error matching `webp.ErrLossyAlpha`, rather than silently
 flattening it:
 
-<!-- glitterate append=5 file="docs_std_test.go" -->
+<!-- glitterate append=6 file="docs_std_test.go" -->
 ```go
 func encodeTransparent() string {
 	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
@@ -175,7 +186,7 @@ way: lossy files carrying an `ALPH` chunk decode to `*image.NYCbCrA`.
 shape of `gif.GIF`. Unlike `gif.GIF`, the delays are in milliseconds, because
 that is what the WebP container stores.
 
-<!-- glitterate append=6 file="docs_std_test.go" -->
+<!-- glitterate append=7 file="docs_std_test.go" -->
 ```go
 func summarizeAnimation(path string) (string, error) {
 	f, err := os.Open(path)
@@ -203,16 +214,12 @@ Encoding animations is not implemented.
 
 `DecodeConfig` reads a header rather than a file. It reports the dimensions and
 the color model `Decode` would produce, reading a few hundred bytes for a
-typical file and growing only when metadata chunks sit in front of the image
-data.
+typical file and more only when metadata chunks sit in front of the image data.
+Use it to check an image's size before committing to decoding it.
 
-The `image` package treats a `DecodeConfig` that disagrees with `Decode` as a
-security problem, since callers use it to size a decode before committing to
-it, so the two are tested against each other.
-
-<!-- glitterate append=7 file="docs_std_test.go" text="
+<!-- glitterate append=8 file="docs_std_test.go" text="
 func Example_decodedType() {
-	for _, path := range []string{\"testdata/sample_lossy.webp\", \"testdata/sample_lossless.webp\"} {
+	for _, path := range []string{"testdata/sample_lossy.webp", "testdata/sample_lossless.webp"} {
 		name, err := decodedType(path)
 		if err != nil {
 			panic(err)
@@ -222,6 +229,16 @@ func Example_decodedType() {
 	// Output:
 	// *image.YCbCr
 	// *image.NRGBA
+}
+
+func Example_decodeAsNRGBA() {
+	// Lossy input, which Decode would hand back as an *image.YCbCr.
+	line, err := decodeAsNRGBA("testdata/sample_lossy.webp")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(line)
+	// Output: *image.NRGBA (0,0)-(1920,1080)
 }
 
 func Example_encodeHalfTransparentRed() {
@@ -255,7 +272,7 @@ func Example_encodeTransparent() {
 }
 
 func Example_summarizeAnimation() {
-	line, err := summarizeAnimation(\"testdata/sample_animation.webp\")
+	line, err := summarizeAnimation("testdata/sample_animation.webp")
 	if err != nil {
 		panic(err)
 	}
@@ -264,7 +281,7 @@ func Example_summarizeAnimation() {
 }
 
 func Example_decodeConfig() {
-	f, err := os.Open(\"testdata/sample_lossy.webp\")
+	f, err := os.Open("testdata/sample_lossy.webp")
 	if err != nil {
 		panic(err)
 	}

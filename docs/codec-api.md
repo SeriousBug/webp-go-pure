@@ -9,11 +9,12 @@ points, or when you want to avoid the `image` package entirely.
 package webp_test
 
 import (
-	\"errors\"
-	\"fmt\"
-	\"os\"
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
 
-	webp \"github.com/SeriousBug/webp-go-pure\"
+	webp "github.com/SeriousBug/webp-go-pure"
 )
 " -->
 
@@ -53,10 +54,9 @@ whether there is alpha or animation, reading only a header rather than the whole
 file.
 
 `EncodeLossy` and `EncodeLossless` take a `nil` options pointer for the defaults,
-quality 90 effort 0 and effort 6 respectively. Note that a non-nil
+quality 90 effort 0 and effort 6 respectively. Watch out for one edge: a non-nil
 `LossyOptions` with `Quality` left at zero asks for quality 0, not the default.
-The `std` package's `Options` does not have that edge; this one keeps it for
-compatibility.
+The `std` package's `Options` reads zero as the default instead.
 
 The lossy encoder does not support transparency and rejects input with any pixel
 whose alpha is not `0xff`. Lossless takes alpha as it comes.
@@ -122,7 +122,8 @@ encoder.
 
 Lossy WebP is natively planar 4:2:0 YCbCr. `Decode` and `EncodeLossy` convert to
 and from RGBA, which costs about a quarter of a lossy decode and an extra
-`width * height * 4` buffer. `DecodeYUV` and `EncodeLossyYUV` skip it:
+`width * height * 4` buffer. `DecodeYUV` and `EncodeLossyYUV` skip that, which
+is worth it when you are recompressing rather than looking at the pixels:
 
 <!-- glitterate append=5 file="docs_codec_api_test.go" -->
 ```go
@@ -145,12 +146,27 @@ planes to hand back. Check `Features` first, or use `Decode`, which handles
 both. `EncodeLossyYUV` rejects a non-nil alpha plane, since the lossy encoder
 has nowhere to put it.
 
-Most callers should not need this directly. `std` uses it to produce and consume
-`*image.YCbCr`, which covers the same ground with the standard library's types.
+### Sample range
+
+WebP stores YCbCr in the BT.601 studio range, where luma runs 16..235 and chroma
+16..240 rather than using all 256 codes. JPEG and Go's `image.YCbCr` use the
+full 0..255. `YUVImage.Range` says which one a set of planes is in, and getting
+it wrong lifts blacks and dims whites by around 8 percent.
+
+`RangeLimited` is the zero value, so planes from `DecodeYUV` and planes you hand
+to `EncodeLossyYUV` are assumed to be WebP's own. Set `Range: webp.RangeFull` on
+planes that came from somewhere else, such as `image/jpeg`, and the encoder
+rescales them as it reads. `ConvertRange` rescales an existing `YUVImage` in
+place:
+
+    planes.ConvertRange(webp.RangeFull)
+
+Most callers do not need any of this: `std` handles the range when it converts
+to and from `*image.YCbCr`.
 
 <!-- glitterate append=6 file="docs_codec_api_test.go" text="
 func Example_codecRoundTrip() {
-	data, err := os.ReadFile(\"testdata/sample_lossy.webp\")
+	data, err := os.ReadFile("testdata/sample_lossy.webp")
 	if err != nil {
 		panic(err)
 	}
@@ -170,7 +186,8 @@ func Example_encodeWithExif() {
 	}
 	img := webp.Image{Width: 4, Height: 4, RGBA: pix}
 
-	data, err := encodeWithExif(img, []byte(\"Exif\\x00\\x00II*\\x00\\x08\\x00\\x00\\x00\\x00\\x00\"))
+	exif := []byte("Exif\x00\x00II*\x00\x08\x00\x00\x00\x00\x00")
+	data, err := encodeWithExif(img, exif)
 	if err != nil {
 		panic(err)
 	}
@@ -178,12 +195,12 @@ func Example_encodeWithExif() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(decoded.Width, decoded.Height)
-	// Output: 4 4
+	fmt.Println(decoded.Width, decoded.Height, bytes.Contains(data, exif))
+	// Output: 4 4 true
 }
 
 func Example_decodeAnything() {
-	for _, name := range []string{\"testdata/sample_lossy.webp\", \"testdata/sample_animation.webp\"} {
+	for _, name := range []string{"testdata/sample_lossy.webp", "testdata/sample_animation.webp"} {
 		data, err := os.ReadFile(name)
 		if err != nil {
 			panic(err)
@@ -200,20 +217,24 @@ func Example_decodeAnything() {
 }
 
 func Example_recompress() {
-	data, err := os.ReadFile(\"testdata/sample_lossy.webp\")
+	data, err := os.ReadFile("testdata/sample_lossy.webp")
 	if err != nil {
 		panic(err)
 	}
 
-	smaller, err := recompress(data, 50)
+	low, err := recompress(data, 30)
 	if err != nil {
 		panic(err)
 	}
-	features, err := webp.Features(smaller)
+	high, err := recompress(data, 90)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(features.Width, features.Height, features.Format == webp.FormatLossy)
-	// Output: 1920 1080 true
+	features, err := webp.Features(low)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(features.Width, features.Height, features.Format == webp.FormatLossy, len(low) < len(high))
+	// Output: 1920 1080 true true
 }
 " -->

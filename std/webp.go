@@ -1,6 +1,5 @@
 // Package webp decodes and encodes WebP through the standard library's image
-// interfaces. It lives at the import path .../webp-go-pure/std, so that the
-// codec it is built on can keep the root of the module.
+// interfaces, at the import path .../webp-go-pure/std.
 //
 // It has the same shape as image/png and image/jpeg, so it drops into code that
 // already speaks image.Image:

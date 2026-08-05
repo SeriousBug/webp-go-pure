@@ -39,14 +39,16 @@ Full tables, PSNR and peak-memory figures, the test corpus and the method are in
 package webp_test
 
 import (
-	\"bytes\"
-	\"fmt\"
-	\"image\"
-	\"image/jpeg\"
-	\"io\"
-	\"os\"
+	"bytes"
+	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
+	"io"
+	"os"
 
-	\"github.com/SeriousBug/webp-go-pure/std\"
+	"github.com/SeriousBug/webp-go-pure/std"
 )
 " -->
 
@@ -69,9 +71,11 @@ func describe(r io.Reader) (string, error) {
 }
 ```
 
-That reports `1920x1080 *image.YCbCr`, not `*image.RGBA`, because lossy WebP is
-natively planar YCbCr and converting it would throw work away. Lossless input
-decodes to `*image.NRGBA`, and lossy input with alpha to `*image.NYCbCrA`.
+The concrete type depends on the file: `*image.YCbCr` for lossy,
+`*image.NYCbCrA` for lossy with transparency, `*image.NRGBA` for lossless. All
+of them are an `image.Image`, so `At`, `Bounds` and `draw.Draw` work as usual.
+If you would rather always get the same type, `DecodeNRGBA` returns an
+`*image.NRGBA` whatever the file holds.
 
 Encoding takes an options struct, or `nil` for the defaults (lossy, quality 90):
 
@@ -88,7 +92,7 @@ encode time for file size.
 
 ### Transcoding
 
-Converting a JPEG needs no conversion code, and does no colorspace math:
+Converting a JPEG needs no conversion code, and takes a shortcut internally:
 
 <!-- glitterate append=4 file="docs_readme_test.go" -->
 ```go
@@ -101,11 +105,10 @@ func jpegToWebP(dst io.Writer, src io.Reader) error {
 }
 ```
 
-`image/jpeg` decodes to a 4:2:0 `*image.YCbCr`, and that is exactly what the
-lossy WebP encoder wants, so the planes move across untouched. Compared with
-routing the same transcode through RGBA, on a 1920x1080 image that is 44ms
-against 53ms and 17MB against 25MB. Any other image type still works, it just
-costs a conversion.
+JPEG and lossy WebP store pixels the same way, so `Encode` skips the RGBA round
+trip when it is handed the `*image.YCbCr` that `image/jpeg` produces. That makes
+the transcode faster and roughly a third lighter on memory. Any other image type
+still works, it just costs a conversion.
 
 ### image.Decode
 
@@ -122,13 +125,14 @@ func sniffFormat(r io.Reader) (string, error) {
 
 That makes this package a drop-in for `golang.org/x/image/webp`, which has the
 same two function signatures. Swapping the import path is the whole migration,
-and you gain the encoder and animation support it does not have.
+and you gain the encoder and animation support it does not have. Lossy images
+will decode to slightly different colors, because `x/image/webp` reads WebP's
+samples as if they spanned the full 0-255 range and so lifts blacks and dims
+whites; a white pixel comes back as 235 there and 255 here.
 
-One caveat worth knowing: `image.RegisterFormat` is a process-wide list that
-neither rejects duplicates nor allows unregistering, and `x/image/webp` and
-`gen2brain/webp` claim the same magic bytes. If more than one of them ends up in
-your binary, package initialization order decides which decoder `image.Decode`
-picks.
+Keep only one WebP package in your binary. `image.RegisterFormat` has no way to
+unregister, and every WebP package claims the same magic bytes, so with two of
+them linked in it is import order that decides which one `image.Decode` uses.
 
 ## More
 
@@ -140,7 +144,7 @@ picks.
 
 <!-- glitterate append=6 file="docs_readme_test.go" text="
 func Example_describe() {
-	f, err := os.Open(\"testdata/sample_lossy.webp\")
+	f, err := os.Open("testdata/sample_lossy.webp")
 	if err != nil {
 		panic(err)
 	}
@@ -174,8 +178,12 @@ func Example_writeWebP() {
 }
 
 func Example_jpegToWebP() {
+	want := color.RGBA{40, 90, 160, 255}
+	src := image.NewRGBA(image.Rect(0, 0, 48, 32))
+	draw.Draw(src, src.Bounds(), &image.Uniform{want}, image.Point{}, draw.Src)
+
 	var source bytes.Buffer
-	if err := jpeg.Encode(&source, image.NewRGBA(image.Rect(0, 0, 48, 32)), nil); err != nil {
+	if err := jpeg.Encode(&source, src, nil); err != nil {
 		panic(err)
 	}
 
@@ -188,12 +196,25 @@ func Example_jpegToWebP() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(img.Bounds())
-	// Output: (0,0)-(48,32)
+
+	got := color.NRGBAModel.Convert(img.At(24, 16)).(color.NRGBA)
+	fmt.Println(img.Bounds(), nearNRGBA(got, color.NRGBA{want.R, want.G, want.B, want.A}, 8))
+	// Output: (0,0)-(48,32) true
+}
+
+func nearNRGBA(a, b color.NRGBA, tolerance int) bool {
+	diff := func(x, y uint8) int {
+		if x > y {
+			return int(x - y)
+		}
+		return int(y - x)
+	}
+	return diff(a.R, b.R) <= tolerance && diff(a.G, b.G) <= tolerance &&
+		diff(a.B, b.B) <= tolerance && a.A == b.A
 }
 
 func Example_sniffFormat() {
-	f, err := os.Open(\"testdata/sample_lossless.webp\")
+	f, err := os.Open("testdata/sample_lossless.webp")
 	if err != nil {
 		panic(err)
 	}
