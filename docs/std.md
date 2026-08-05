@@ -1,0 +1,267 @@
+# The std package
+
+`github.com/SeriousBug/webp-go-pure/std` implements the standard library's codec
+interfaces. Its package name is `webpstd`, so it does not collide with the root
+`webp` package when you import both.
+
+<!-- glitterate append=1 file="docs_std_test.go" text="
+package webp_test
+
+import (
+	\"errors\"
+	\"fmt\"
+	\"image\"
+	\"image/color\"
+	\"os\"
+
+	webp \"github.com/SeriousBug/webp-go-pure\"
+	webpstd \"github.com/SeriousBug/webp-go-pure/std\"
+)
+" -->
+
+```go
+import webpstd "github.com/SeriousBug/webp-go-pure/std"
+```
+
+    Decode(r io.Reader) (image.Image, error)
+    DecodeConfig(r io.Reader) (image.Config, error)
+    DecodeAll(r io.Reader) (*Animation, error)
+    Encode(w io.Writer, m image.Image, o *Options) error
+
+`DecodeBytes` and `EncodeBytes` are the same two operations for callers who
+already hold, or want, a `[]byte`. They skip the copy that `io.ReadAll` and
+`Write` would make.
+
+## What Decode returns
+
+The concrete type is whichever one costs nothing to produce:
+
+| input | type |
+| --- | --- |
+| lossy `VP8` | `*image.YCbCr`, 4:2:0 |
+| lossy `VP8` with an `ALPH` chunk | `*image.NYCbCrA`, 4:2:0 |
+| lossless `VP8L` | `*image.NRGBA` |
+| animated | first frame, as `*image.NRGBA` |
+
+<!-- glitterate append=2 file="docs_std_test.go" -->
+```go
+func decodedType(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	img, err := webpstd.Decode(f)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%T", img), nil
+}
+```
+
+Handing back the decoder's own planes is what makes decoding a 1920x1080 lossy
+image 18ms instead of 25ms, and 10MB instead of 18MB. Nothing downstream has to
+care: `*image.YCbCr` satisfies `image.Image`, so `At`, `Bounds` and
+`draw.Draw` work as usual.
+
+This is also why `Decode` returns a plain `*image.YCbCr` rather than an
+`*image.NYCbCrA` with an opaque alpha plane when there is no `ALPH` chunk. A
+type switch on `*image.YCbCr` does not match `*image.NYCbCrA`, and `jpeg.Encode`
+has exactly that switch, so the wrong choice here would cost a conversion in
+every WebP to JPEG transcode.
+
+## What Encode recognizes
+
+`Encode` looks for the types it can feed to the encoder without converting:
+
+- `*image.YCbCr` at 4:2:0 goes straight through as planes.
+- `*image.NYCbCrA` at 4:2:0 goes straight through when it is opaque. The lossy
+  encoder has no alpha channel, so a transparent one is rejected instead.
+- `*image.NRGBA` is already the layout the byte-oriented API takes.
+
+Everything else, including `*image.RGBA`, is drawn into an `*image.NRGBA` first.
+Falling back only ever costs time, never correctness, so sub-images, non-4:2:0
+chroma and odd crop origins are all handled, just not for free.
+
+`*image.RGBA` is deliberately not in that list. Its pixels are
+alpha-premultiplied, and the WebP encoders take straight alpha, so passing the
+bytes through unchanged would darken everything that is not fully opaque.
+`draw.Draw` un-premultiplies on the way through.
+
+<!-- glitterate append=3 file="docs_std_test.go" -->
+```go
+func encodeHalfTransparentRed() (color.NRGBA, error) {
+	src := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	src.Set(0, 0, color.NRGBA{R: 255, A: 128})
+
+	data, err := webpstd.EncodeBytes(src, &webpstd.Options{Lossless: true})
+	if err != nil {
+		return color.NRGBA{}, err
+	}
+	decoded, err := webpstd.DecodeBytes(data)
+	if err != nil {
+		return color.NRGBA{}, err
+	}
+	return color.NRGBAModel.Convert(decoded.At(0, 0)).(color.NRGBA), nil
+}
+```
+
+That returns `{255 0 0 128}`. A library that passed `*image.RGBA` pixels through
+unchanged would return `{128 0 0 128}`.
+
+## Options
+
+<!-- glitterate append=4 file="docs_std_test.go" -->
+```go
+func encodeLossless(img image.Image) ([]byte, error) {
+	return webpstd.EncodeBytes(img, &webpstd.Options{Lossless: true, Effort: 9})
+}
+```
+
+| field | meaning |
+| --- | --- |
+| `Quality` | 1..100 for lossy. Zero means 90. Ignored when `Lossless` is set. |
+| `Effort` | 0..9, higher is slower and smaller. Zero means the default for the mode, 0 lossy and 6 lossless. Pass `webpstd.EffortFastest` to ask for 0 explicitly. |
+| `Lossless` | Encode with VP8L, reproducing the input exactly. |
+| `EXIF` | Raw EXIF bytes to embed as a metadata chunk. |
+
+A `nil` `*Options` means all of the above defaults, so `Encode(w, img, nil)` is
+lossy at quality 90.
+
+Every zero field means "the default", which is why `Effort` needs
+`EffortFastest` to request 0. `Quality` needs no such escape hatch: quality 0 is
+not a setting anyone wants, so zero is free to mean the default.
+
+## Alpha
+
+The lossy encoder cannot store transparency. Encoding an image that is not fully
+opaque fails with an error matching `webp.ErrLossyAlpha`, rather than silently
+flattening it:
+
+<!-- glitterate append=5 file="docs_std_test.go" -->
+```go
+func encodeTransparent() string {
+	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 128})
+
+	_, err := webpstd.EncodeBytes(src, nil)
+	if errors.Is(err, webp.ErrLossyAlpha) {
+		return "needs lossless"
+	}
+	return fmt.Sprint(err)
+}
+```
+
+Set `Lossless` to keep the alpha channel. Decoding transparency works either
+way: lossy files carrying an `ALPH` chunk decode to `*image.NYCbCrA`.
+
+## Animations
+
+`DecodeAll` returns every frame, already composited onto the canvas, in the
+shape of `gif.GIF`. Unlike `gif.GIF`, the delays are in milliseconds, because
+that is what the WebP container stores.
+
+<!-- glitterate append=6 file="docs_std_test.go" -->
+```go
+func summarizeAnimation(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	anim, err := webpstd.DecodeAll(f)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d frames, %dms first", len(anim.Image), anim.Delay[0]), nil
+}
+```
+
+A still image decodes as a single-frame animation, so a caller that handles both
+does not need to branch. In the other direction, `Decode` on an animated file
+returns the first frame rather than failing, which is what makes
+`image.Decode` work on animations.
+
+Encoding animations is not implemented.
+
+## DecodeConfig
+
+`DecodeConfig` reads a header rather than a file. It reports the dimensions and
+the color model `Decode` would produce, reading a few hundred bytes for a
+typical file and growing only when metadata chunks sit in front of the image
+data.
+
+The `image` package treats a `DecodeConfig` that disagrees with `Decode` as a
+security problem, since callers use it to size a decode before committing to
+it, so the two are tested against each other.
+
+<!-- glitterate append=7 file="docs_std_test.go" text="
+func Example_decodedType() {
+	for _, path := range []string{\"testdata/sample_lossy.webp\", \"testdata/sample_lossless.webp\"} {
+		name, err := decodedType(path)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(name)
+	}
+	// Output:
+	// *image.YCbCr
+	// *image.NRGBA
+}
+
+func Example_encodeHalfTransparentRed() {
+	pixel, err := encodeHalfTransparentRed()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(pixel.R, pixel.G, pixel.B, pixel.A)
+	// Output: 255 0 0 128
+}
+
+func Example_encodeLossless() {
+	src := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	src.SetNRGBA(1, 1, color.NRGBA{R: 3, G: 5, B: 7, A: 9})
+
+	data, err := encodeLossless(src)
+	if err != nil {
+		panic(err)
+	}
+	decoded, err := webpstd.DecodeBytes(data)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(color.NRGBAModel.Convert(decoded.At(1, 1)).(color.NRGBA))
+	// Output: {3 5 7 9}
+}
+
+func Example_encodeTransparent() {
+	fmt.Println(encodeTransparent())
+	// Output: needs lossless
+}
+
+func Example_summarizeAnimation() {
+	line, err := summarizeAnimation(\"testdata/sample_animation.webp\")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(line)
+	// Output: 3 frames, 500ms first
+}
+
+func Example_decodeConfig() {
+	f, err := os.Open(\"testdata/sample_lossy.webp\")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	config, err := webpstd.DecodeConfig(f)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(config.Width, config.Height, config.ColorModel == color.YCbCrModel)
+	// Output: 1920 1080 true
+}
+" -->

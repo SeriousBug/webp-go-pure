@@ -1,11 +1,11 @@
-// Package std decodes and encodes WebP through the standard library's image
-// interfaces.
+// Package webpstd decodes and encodes WebP through the standard library's image
+// interfaces. It lives at the import path .../webp-go-pure/std.
 //
 // It has the same shape as image/png and image/jpeg, so it drops into code that
 // already speaks image.Image:
 //
-//	img, err := std.Decode(r)
-//	err = std.Encode(w, img, &std.Options{Quality: 80})
+//	img, err := webpstd.Decode(r)
+//	err = webpstd.Encode(w, img, &webpstd.Options{Quality: 80})
 //
 // Import the register subpackage to make image.Decode recognize WebP.
 //
@@ -21,7 +21,7 @@
 //
 // Anything else still works, it just costs a conversion through
 // *image.NRGBA.
-package std
+package webpstd
 
 import (
 	"errors"

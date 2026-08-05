@@ -14,11 +14,11 @@ package register
 import (
 	"image"
 
-	"github.com/SeriousBug/webp-go-pure/std"
+	webpstd "github.com/SeriousBug/webp-go-pure/std"
 )
 
 func init() {
 	// The magic matches VP8, VP8L and VP8X, the three things the fourth chunk
 	// can be, so this covers lossy, lossless and extended containers alike.
-	image.RegisterFormat("webp", "RIFF????WEBPVP8", std.Decode, std.DecodeConfig)
+	image.RegisterFormat("webp", "RIFF????WEBPVP8", webpstd.Decode, webpstd.DecodeConfig)
 }

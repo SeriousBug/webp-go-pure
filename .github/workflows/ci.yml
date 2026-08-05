@@ -51,7 +51,7 @@ jobs:
             README.md
             docs/**/*.md
       - name: examples
-        run: CGO_ENABLED=0 go test -run 'Example' -v .
+        run: CGO_ENABLED=0 go test -run 'Example' -v ./...
 
   # riscv64 has no native runner, so run a small conversion subset under QEMU
   # user-mode emulation to confirm the generic (non-asm) fallback path actually
