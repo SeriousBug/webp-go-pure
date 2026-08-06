@@ -266,11 +266,6 @@ func lldecNewColorCache(hashBits int) (lldecColorCache, error) {
 	}, nil
 }
 
-func (c *lldecColorCache) insert(argb uint32) {
-	key := int((argb * lldecColorCacheHashMul) >> c.hashShift)
-	c.colors[key] = argb
-}
-
 func (c *lldecColorCache) lookup(key int) (uint32, error) {
 	if key < 0 || key >= len(c.colors) {
 		return 0, bitstreamErr("invalid VP8L color cache lookup")
@@ -741,18 +736,30 @@ func (d *lldecDecoder) decodeImageData(width, height, colorCacheBits int, metada
 	// The group only changes when the pixel crosses into another Huffman tile,
 	// so tracking x and y and the current tile keeps the per-pixel cost to two
 	// shifts, against a division and a lookup for every pixel.
+	groups := metadata.groups
+	hasHuffmanImage := metadata.hasHuffmanImage
+	huffmanImage := metadata.huffmanImage
+	huffmanXsize := metadata.huffmanXsize
 	subBits := metadata.huffmanSubsampleBits
-	group := &metadata.groups[0]
+	group := &groups[0]
 	tileX, tileY := -1, -1
 	x, y := 0, 0
+
+	// The colour cache is held as its own two fields so an insert is a multiply,
+	// a shift and a store, with nothing to load through a pointer first.
+	var cacheColors []uint32
+	var cacheShift uint32
+	if colorCache != nil {
+		cacheColors, cacheShift = colorCache.colors, colorCache.hashShift
+	}
 
 	for pos < len(data) {
 		if br.bitPos > br.totalBits {
 			return nil, notEnoughData("VP8L bitstream")
 		}
-		if metadata.hasHuffmanImage {
+		if hasHuffmanImage {
 			if tx, ty := x>>subBits, y>>subBits; tx != tileX || ty != tileY {
-				group = &metadata.groups[metadata.huffmanImage[ty*metadata.huffmanXsize+tx]]
+				group = &groups[huffmanImage[ty*huffmanXsize+tx]]
 				tileX, tileY = tx, ty
 			}
 		}
@@ -765,8 +772,8 @@ func (d *lldecDecoder) decodeImageData(width, height, colorCacheBits int, metada
 			alphaSym := group.alpha.readSymbol(br)
 			pixel := (uint32(alphaSym) << 24) | (uint32(redSym) << 16) | (uint32(code) << 8) | uint32(blueSym)
 			data[pos] = pixel
-			if colorCache != nil {
-				colorCache.insert(pixel)
+			if cacheColors != nil {
+				cacheColors[(pixel*lldecColorCacheHashMul)>>cacheShift] = pixel
 			}
 			pos++
 			if x++; x == width {
@@ -795,9 +802,9 @@ func (d *lldecDecoder) decodeImageData(width, height, colorCacheBits int, metada
 					dst[i] = src[i]
 				}
 			}
-			if colorCache != nil {
+			if cacheColors != nil {
 				for _, pixel := range dst {
-					colorCache.insert(pixel)
+					cacheColors[(pixel*lldecColorCacheHashMul)>>cacheShift] = pixel
 				}
 			}
 			pos += length
@@ -812,7 +819,7 @@ func (d *lldecDecoder) decodeImageData(width, height, colorCacheBits int, metada
 				return nil, err
 			}
 			data[pos] = pixel
-			colorCache.insert(pixel)
+			cacheColors[(pixel*lldecColorCacheHashMul)>>cacheShift] = pixel
 			pos++
 			if x++; x == width {
 				x = 0
