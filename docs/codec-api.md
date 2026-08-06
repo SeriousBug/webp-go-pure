@@ -84,6 +84,9 @@ lossy reject the alpha?" without matching on strings:
     webp.ErrAnimated
     webp.ErrLossyAlpha
 
+The std package exports the same sentinels, so matching an error from
+`webp.Decode` or `webp.Encode` there does not need this import.
+
 `Decode` handles still images only, so animated input needs a branch:
 
 <!-- glitterate append=4 file="docs_codec_api_test.go" -->

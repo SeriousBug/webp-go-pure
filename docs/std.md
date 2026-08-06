@@ -15,9 +15,6 @@ import (
 )
 ```
 
-The error sentinels are re-exported here, so matching on `webp.ErrLossyAlpha`
-and friends does not need the second import.
-
 <!-- glitterate append=1 file="docs_std_test.go" text="
 package webp_test
 
