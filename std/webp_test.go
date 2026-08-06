@@ -299,7 +299,7 @@ func TestEncodeTakesThePlanarPathForYCbCr(t *testing.T) {
 		Width: src.Rect.Dx(), Height: src.Rect.Dy(),
 		Y: src.Y, U: src.Cb, V: src.Cr,
 		YStride: src.YStride, UVStride: src.CStride,
-		Range:   codec.RangeFull,
+		Range: codec.RangeFull,
 	}
 	viaPlanar, err := codec.EncodeLossyYUV(planes, &codec.LossyOptions{Quality: 80, Effort: 2})
 	if err != nil {
