@@ -15,8 +15,13 @@
 // --mem-one) that decodes the source image, encodes it once, and reports its own
 // ru_maxrss, matching what benchmark/webpbench does for the Go engines.
 //
+// With --decode it times decoding instead, over the WebP files webpbench wrote
+// with -decode-dir. psnr_db then scores this decoder against libwebp's decode of
+// the same file, and is "-" when the two agree pixel for pixel.
+//
 // Usage: rustbench <dir> [budget_ms] [min_iters] [max_iters]
 //        rustbench <dir> --mem
+//        rustbench <decode_dir> --decode [budget_ms] [min_iters] [max_iters]
 use std::time::{Duration, Instant};
 
 use webp_rust::{decode, encode_lossless, encode_lossy, ImageBuffer};
@@ -51,6 +56,11 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(500);
     let mem_pass = args.iter().any(|a| a == "--mem");
+
+    if args.iter().any(|a| a == "--decode") {
+        decode_pass(dir, budget, min_iters, max_iters);
+        return;
+    }
 
     let mut paths: Vec<_> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("read dir {dir}: {e}"))
@@ -138,6 +148,55 @@ fn main() {
     }
 }
 
+/// Times webp-rust decoding the files webpbench wrote with -decode-dir: WebP
+/// encoded by libwebp, named `<image>.<mode>.webp`, next to `<image>.<mode>.rgba`
+/// holding libwebp's own decode of it. Scoring against that file is what keeps
+/// this engine's psnr_db column comparable with the Go engines'.
+fn decode_pass(dir: &str, budget: Duration, min_iters: u32, max_iters: u32) {
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("read dir {dir}: {e}"))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("webp"))
+        .collect();
+    paths.sort();
+
+    for path in paths {
+        let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+        let Some((name, mode)) = stem.rsplit_once('.') else {
+            eprintln!("skip {stem}: name does not carry a mode");
+            continue;
+        };
+        let data = match std::fs::read(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("skip {stem}: {e}");
+                continue;
+            }
+        };
+        let size = data.len();
+        let reference = std::fs::read(path.with_extension("rgba")).ok();
+
+        match measure(&|| decode(&data), budget, min_iters, max_iters) {
+            Ok((img, iters, per_op_ms)) => {
+                let (w, h) = (img.width, img.height);
+                let quality = match &reference {
+                    Some(r) if r == &img.rgba => "-".to_string(),
+                    Some(r) => match psnr_between(r, &img.rgba) {
+                        Some(db) => format!("{db:.2}"),
+                        None => {
+                            eprintln!("webp-rust/{mode} {name}: psnr failed");
+                            continue;
+                        }
+                    },
+                    None => "-".to_string(),
+                };
+                println!("webp-rust,{mode},{name},{w},{h},{size},{quality},{iters},{per_op_ms:.3}");
+            }
+            Err(e) => eprintln!("webp-rust/{mode} {name}: {e:?}"),
+        }
+    }
+}
+
 /// Encodes one image once and reports this process's peak RSS: the source bitmap
 /// and the runtime are included, since an application encoding an image pays for
 /// those too.
@@ -191,12 +250,12 @@ fn peak_rss_bytes() -> u64 {
     usage.ru_maxrss as u64 * scale
 }
 
-fn measure<E>(
-    f: &dyn Fn() -> Result<Vec<u8>, E>,
+fn measure<T, E>(
+    f: &dyn Fn() -> Result<T, E>,
     budget: Duration,
     min_iters: u32,
     max_iters: u32,
-) -> Result<(Vec<u8>, u32, f64), E> {
+) -> Result<(T, u32, f64), E> {
     let out = f()?; // warmup
     let start = Instant::now();
     let mut iters: u32 = 0;
@@ -215,12 +274,17 @@ fn measure<E>(
 /// RGB only. Decoding uses webp-rust's own decoder.
 fn psnr_of(src: &[u8], encoded: &[u8]) -> Option<f64> {
     let dec = decode(encoded).ok()?;
-    if dec.rgba.len() != src.len() {
+    psnr_between(src, &dec.rgba)
+}
+
+/// Scores two RGBA buffers against each other, over RGB only.
+fn psnr_between(want: &[u8], got: &[u8]) -> Option<f64> {
+    if want.len() != got.len() {
         return None;
     }
     let mut sum = 0.0f64;
     let mut n = 0u64;
-    for (i, (&a, &b)) in src.iter().zip(dec.rgba.iter()).enumerate() {
+    for (i, (&a, &b)) in want.iter().zip(got.iter()).enumerate() {
         if i % 4 == 3 {
             continue;
         }

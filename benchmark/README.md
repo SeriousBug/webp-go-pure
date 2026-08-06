@@ -1,23 +1,26 @@
-# WebP encoding benchmark
+# WebP benchmark
 
-Compares this pure-Go library against other WebP encoders for output size and
-encode speed. Re-runnable:
+Compares this pure-Go library against other WebP codecs for output size, encode
+speed and decode speed. Re-runnable:
 
 ```sh
-benchmark/run.sh [budget_ms]   # default budget 2000ms per measurement
+benchmark/run.sh        [budget_ms]   # encoding, default budget 2000ms per measurement
+benchmark/run-decode.sh [budget_ms]   # decoding
 ```
 
 ## Engines
 
-| Engine | What it is | cgo? |
-| --- | --- | --- |
-| `ours` | this pure-Go library | no |
-| `libwebp` | the C reference, via [go-webp](https://github.com/kolesa-team/go-webp) | yes |
-| `wasm` | libwebp compiled to WASM, via [gen2brain/webp](https://github.com/gen2brain/webp) | no |
-| `webp-rust` | the Rust library this port is based on ([../webp-rust](https://github.com/mith-mmk/webp-rust)) | n/a (separate binary) |
+| Engine | What it is | cgo? | Encode | Decode |
+| --- | --- | --- | --- | --- |
+| `ours` | this pure-Go library | no | yes | yes |
+| `libwebp` | the C reference, via [go-webp](https://github.com/kolesa-team/go-webp) | yes | yes | yes |
+| `wasm` | libwebp compiled to WASM, via [gen2brain/webp](https://github.com/gen2brain/webp) | no | yes | yes |
+| `webp-rust` | the Rust library this port is based on ([../webp-rust](https://github.com/mith-mmk/webp-rust)) | n/a (separate binary) | yes | yes |
+| `x/image` | [golang.org/x/image/webp](https://pkg.go.dev/golang.org/x/image/webp), the Go project's own decoder | no | - | yes |
 
 `wasm` is the cgo-free reference point: same libwebp algorithm as `libwebp`, but
-run through wazero instead of a C toolchain.
+run through wazero instead of a C toolchain. `x/image` is decode-only, so it
+appears in the decode pass alone.
 
 ### ImageMagick
 
@@ -40,12 +43,19 @@ The effort scales differ between codecs (our optimize is 0..9, libwebp method is
 0..6), so `fast`/`slow` mark each codec's own endpoints rather than an identical
 setting.
 
+The decode pass has two modes, `lossless` and `lossy`, named for the file being
+decoded rather than for any decoder setting. Every engine is handed the same
+file: libwebp encodes each test image once, at lossless level 6 and at lossy
+quality 90 method 6. Letting each engine decode its own encoder's output would
+measure the encoder too, and libwebp is the fastest encoder here, so it is also
+the cheapest way to produce the inputs.
+
 ## Requirements
 
 - Go toolchain.
 - cgo + libwebp + pkg-config for the `libwebp` engine: `brew install webp pkg-config`.
 - For the `webp-rust` engine: a `cargo` toolchain and `../webp-rust` checked out
-  next to this repo. `run.sh` skips it automatically if either is missing.
+  next to this repo. Both scripts skip it automatically if either is missing.
 
 The benchmark tooling and the cross-encoder compatibility tests live in their
 own Go module (`benchmark/`, with `webpbench/` and `compat/`), so the cgo and
@@ -66,6 +76,23 @@ For the lossy modes each engine's own output is decoded back and scored against
 the pixels that engine was handed, reported as `psnr_db` over RGB (lossless is
 exact, so it shows `-`). Size alone would rank an encoder that quantizes harder
 as the winner, so the two columns have to be read together.
+
+### Decoding
+
+The decode pass times the same loop over `run-decode.sh`'s inputs, and every
+engine has to end at packed 8-bit RGBA. That conversion is inside the timed
+call, because the engines do not return the same thing: `libwebp` hands back an
+`*image.NRGBA`, but `x/image` returns an `*image.YCbCr` for lossy files and
+`wasm` an `*image.NYCbCrA` for everything, and a decoder that stops at YCbCr
+planes has not done the color conversion the others already paid for. So the
+figure is what an application pays to get pixels it can index, not what the
+decode call alone costs.
+
+`psnr_db` here scores each engine against libwebp's decode of the same file, and
+reads `-` when the two agree pixel for pixel. A number means two decoders
+resolved one file to different pixels: the YCbCr-returning engines land there,
+because converting their planes through the standard library treats limited-range
+samples as full-range ones.
 
 ### Memory
 

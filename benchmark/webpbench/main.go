@@ -33,6 +33,15 @@
 // measurement therefore gets its own subprocess (this binary, re-executed with
 // -mem-one) that decodes the source image, encodes it once, and reports its own
 // ru_maxrss: what an application pays to encode that image with that engine.
+//
+// With -decode it times decoding instead, on the same CSV shape, adding a fourth
+// engine:
+//
+//	x/image - golang.org/x/image/webp, the Go project's own decoder (no encoder)
+//
+// Every engine decodes the same libwebp-encoded file, in modes "lossless" and
+// "lossy". Here psnr_db scores each decoder against libwebp's decode of that
+// same file, and is "-" when the two agree pixel for pixel.
 package main
 
 import (
@@ -98,6 +107,8 @@ func main() {
 	maxIters := flag.Int("max-iters", 500, "maximum iterations per measurement")
 	header := flag.Bool("header", false, "print CSV header line")
 	mem := flag.Bool("mem", false, "run the peak-RSS pass instead of the timing pass")
+	decode := flag.Bool("decode", false, "run the decode pass instead of the encode pass")
+	decodeDir := flag.String("decode-dir", "", "with -decode, `directory` to write the decode inputs and libwebp's reference decode to, for the Rust engine")
 	memOne := flag.String("mem-one", "", "internal: measure peak RSS of one `engine/mode` on -mem-file and exit")
 	memFile := flag.String("mem-file", "", "internal: source image for -mem-one")
 	flag.Parse()
@@ -131,6 +142,11 @@ func main() {
 		fmt.Println("engine,mode,file,width,height,bytes,psnr_db,iters,ms_per_op")
 	}
 	budget := time.Duration(*budgetMs) * time.Millisecond
+
+	if *decode {
+		decodePass(paths, *decodeDir, budget, *minIters, *maxIters)
+		return
+	}
 
 	for _, p := range paths {
 		buf, err := loadImageBuffer(p)
@@ -250,11 +266,12 @@ func wasmEncoder(img *image.NRGBA, opts gwebp.Options) func() ([]byte, error) {
 	}
 }
 
-func measure(fn func() ([]byte, error), budget time.Duration, minIters, maxIters int) (out []byte, iters int, perOp time.Duration, err error) {
+func measure[T any](fn func() (T, error), budget time.Duration, minIters, maxIters int) (out T, iters int, perOp time.Duration, err error) {
+	var zero T
 	t0 := time.Now()
 	out, err = fn() // warmup / first sample
 	if err != nil {
-		return nil, 0, 0, err
+		return zero, 0, 0, err
 	}
 	// If a single encode already exceeds the budget, report it as one iteration
 	// instead of paying for the warmup plus a full timed loop.
@@ -265,7 +282,7 @@ func measure(fn func() ([]byte, error), budget time.Duration, minIters, maxIters
 	start := time.Now()
 	for {
 		if _, err = fn(); err != nil {
-			return nil, 0, 0, err
+			return zero, 0, 0, err
 		}
 		iters++
 		elapsed := time.Since(start)
@@ -283,16 +300,21 @@ func psnrOf(src []byte, encoded []byte) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if len(dec.RGBA) != len(src) {
-		return 0, fmt.Errorf("decoded %d bytes, source has %d", len(dec.RGBA), len(src))
+	return psnrBetween(src, dec.RGBA)
+}
+
+// psnrBetween scores two RGBA buffers against each other, over RGB only.
+func psnrBetween(want, got []byte) (float64, error) {
+	if len(got) != len(want) {
+		return 0, fmt.Errorf("got %d bytes, want %d", len(got), len(want))
 	}
 	var sum float64
 	n := 0
-	for i := range src {
+	for i := range want {
 		if i%4 == 3 {
 			continue
 		}
-		d := float64(src[i]) - float64(dec.RGBA[i])
+		d := float64(want[i]) - float64(got[i])
 		sum += d * d
 		n++
 	}

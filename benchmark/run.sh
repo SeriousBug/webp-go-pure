@@ -57,6 +57,9 @@ echo
 } | column -t -s,
 
 echo
+echo "Decoding is a separate pass: benchmark/run-decode.sh"
+
+echo
 echo "Peak RSS (one encode per process, same settings):"
 echo
 {
