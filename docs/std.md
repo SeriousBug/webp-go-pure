@@ -44,7 +44,8 @@ already hold, or want, a `[]byte`. They skip the copy that `io.ReadAll` and
 
 ## What Decode returns
 
-The concrete type is whichever one costs nothing to produce:
+`Decode` returns the type that matches how the file stores its pixels, so no
+conversion happens on the way out:
 
 | input | type |
 | --- | --- |
