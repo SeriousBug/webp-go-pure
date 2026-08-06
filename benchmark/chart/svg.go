@@ -227,6 +227,22 @@ func encodeTime(sets []dataset, th theme) string {
 	})
 }
 
+// decodeTime plots the other direction, on the same bar layout. Every engine
+// decoded the same libwebp-encoded files and had to end at packed RGBA, so the
+// bars include the color conversion for the engines that return YCbCr planes.
+func decodeTime(sets []dataset, th theme) string {
+	return barPanels(sets, th, barSpec{
+		title:    "Decode time",
+		subtitle: "Geometric mean of each engine's ms/op over the test images, decoding files libwebp encoded. Each panel has its own scale.",
+		footnote: "Every engine ends at packed RGBA, so x/image and wasm pay for converting their YCbCr planes inside the measurement, as an application would. x/image is golang.org/x/image/webp, the Go project's own decoder, which has no encoder and so appears in this figure alone.",
+		modes:    decodeModes,
+		engines:  []string{engOurs, engLibwebp, engWasm, engRust, engXImage},
+		barW:     40,
+		value:    func(r row) float64 { return r.ms },
+		format:   duration,
+	})
+}
+
 func peakMemory(sets []dataset, th theme) string {
 	return barPanels(sets, th, barSpec{
 		title:    "Peak memory",
@@ -239,14 +255,26 @@ func peakMemory(sets []dataset, th theme) string {
 
 type barSpec struct {
 	title, subtitle, footnote string
-	value                     func(row) float64
-	format                    func(float64) string
+	// modes and engines default to the encode pass's three modes and four
+	// engines; barW widens the bars for a figure with fewer, wider panels.
+	modes, engines []string
+	barW           float64
+	value          func(row) float64
+	format         func(float64) string
 }
 
 func barPanels(sets []dataset, th theme, spec barSpec) string {
-	engines := []string{engOurs, engLibwebp, engWasm, engRust}
+	modes := spec.modes
+	if modes == nil {
+		modes = allModes
+	}
+	engines := spec.engines
+	if engines == nil {
+		engines = []string{engOurs, engLibwebp, engWasm, engRust}
+	}
 	names := map[string]string{
 		engOurs: "webp-go-pure", engLibwebp: "libwebp", engWasm: "wasm", engRust: "webp-rust",
+		engXImage: "x/image",
 	}
 	color := func(eng string) string {
 		if eng == engLibwebp {
@@ -258,7 +286,7 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 	times := make([]map[string]map[string]float64, len(sets))
 	for i, d := range sets {
 		times[i] = map[string]map[string]float64{}
-		for _, mode := range allModes {
+		for _, mode := range modes {
 			times[i][mode] = map[string]float64{}
 			for _, eng := range engines {
 				var sum float64
@@ -285,11 +313,15 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 		rightPd = 34.0
 		rowH    = 140.0
 		rowGap  = 70.0
-		barW    = 24.0
 		headerY = 128.0
 		row0Top = 172.0
 	)
-	colW := (figW - gutter - rightPd - 2*colGap) / 3.0
+	n := float64(len(modes))
+	colW := (figW - gutter - rightPd - (n-1)*colGap) / n
+	barW := spec.barW
+	if barW == 0 {
+		barW = 24
+	}
 
 	fadeID := 0
 	c := &canvas{}
@@ -300,9 +332,9 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 	}
 	legend(c, th, 40, 84, entries)
 
-	for gi, mode := range allModes {
+	for gi, mode := range modes {
 		cx := gutter + float64(gi)*(colW+colGap)
-		c.text(cx+colW/2, headerY, 13.5, th.inkPrimary, "middle", "600", mode)
+		c.text(cx+colW/2, headerY, 13.5, th.inkPrimary, "middle", "600", strings.TrimPrefix(mode, decodePrefix))
 	}
 
 	// Whether to clip is decided per mode rather than per panel: with two machines
@@ -319,7 +351,7 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 		return vs
 	}
 	clipMode := map[string]bool{}
-	for _, mode := range allModes {
+	for _, mode := range modes {
 		for ri := range sets {
 			vs := panelValues(ri, mode)
 			if len(vs) > 1 && vs[0] > 2*vs[1] {
@@ -334,7 +366,7 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 		c.text(gutter-18, rowTop+rowH/2, 12.5, th.inkSecondary, "end", "600", panelTitle(d.label))
 		c.text(gutter-18, rowTop+rowH/2+16, 11, th.muted, "end", "", machineDetail(d.label))
 
-		for gi, mode := range allModes {
+		for gi, mode := range modes {
 			cx := gutter + float64(gi)*(colW+colGap)
 
 			// A bar more than twice the next tallest would flatten the rest of
