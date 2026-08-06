@@ -92,7 +92,7 @@ encode time for file size.
 
 ### Transcoding
 
-Converting a JPEG needs no conversion code, and takes a shortcut internally:
+JPEG to WebP is a decode and an encode, with nothing in between:
 
 <!-- glitterate append=4 file="docs_readme_test.go" -->
 ```go
@@ -105,10 +105,8 @@ func jpegToWebP(dst io.Writer, src io.Reader) error {
 }
 ```
 
-JPEG and lossy WebP store pixels the same way, so `Encode` skips the RGBA round
-trip when it is handed the `*image.YCbCr` that `image/jpeg` produces. That makes
-the transcode faster and roughly a third lighter on memory. Any other image type
-still works, it just costs a conversion.
+This path is faster and about a third lighter on memory than transcoding through
+RGBA.
 
 ### image.Decode
 
@@ -123,12 +121,10 @@ func sniffFormat(r io.Reader) (string, error) {
 }
 ```
 
-That makes this package a drop-in for `golang.org/x/image/webp`, which has the
-same two function signatures. Swapping the import path is the whole migration,
-and you gain the encoder and animation support it does not have. Lossy images
-will decode to slightly different colors, because `x/image/webp` reads WebP's
-samples as if they spanned the full 0-255 range and so lifts blacks and dims
-whites; a white pixel comes back as 235 there and 255 here.
+To migrate from `golang.org/x/image/webp`, swapping the import path is enough:
+we support the same API, and add encoding and animations. One difference is that
+lossy colors come out with a wider range here. `x/image/webp` crushes blacks and
+whites slightly, decoding a white pixel to 235 where we give you 255.
 
 Keep only one WebP package in your binary. `image.RegisterFormat` has no way to
 unregister, and every WebP package claims the same magic bytes, so with two of

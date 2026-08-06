@@ -71,10 +71,8 @@ func decodedType(path string) (string, error) {
 }
 ```
 
-Nothing downstream has to care which one you get: they all satisfy
-`image.Image`, so `At`, `Bounds` and `draw.Draw` work as usual. Handing back the
-planes rather than converting them is what makes decoding a 1920x1080 lossy
-image about a quarter faster on half the memory.
+All four satisfy `image.Image`, so `At`, `Bounds` and `draw.Draw` work the same
+way whichever one you get.
 
 If you would rather have one predictable layout, `DecodeNRGBA` and
 `DecodeNRGBABytes` always return an `*image.NRGBA`, with straight (not
@@ -107,9 +105,9 @@ func decodeAsNRGBA(path string) (string, error) {
   encoder has no alpha channel, so a transparent one is rejected instead.
 - `*image.NRGBA` is already the layout the byte-oriented API takes.
 
-Everything else, including `*image.RGBA`, is drawn into an `*image.NRGBA` first.
-Falling back costs time, never correctness, so sub-images, non-4:2:0 chroma and
-odd crop origins all encode correctly, just not for free.
+`Encode` takes any `image.Image`. Anything not on that list, including
+`*image.RGBA`, sub-images, non-4:2:0 chroma and odd crop origins, is drawn into
+an `*image.NRGBA` first, which costs a pass over the pixels.
 
 `*image.RGBA` is one of those. Its pixels are alpha-premultiplied and WebP
 stores straight alpha, so the conversion keeps semi-transparent pixels from
@@ -210,10 +208,10 @@ Encoding animations is not implemented.
 
 ## DecodeConfig
 
-`DecodeConfig` reads a header rather than a file. It reports the dimensions and
-the color model `Decode` would produce, reading a few hundred bytes for a
-typical file and more only when metadata chunks sit in front of the image data.
-Use it to check an image's size before committing to decoding it.
+`DecodeConfig` reports the dimensions and the color model `Decode` would
+produce, without decoding the pixels. It reads a few hundred bytes of a typical
+file, more only when metadata chunks sit in front of the image data. Use it to
+check an image's size before committing to decoding it.
 
 <!-- glitterate append=8 file="docs_std_test.go" text="
 func Example_decodedType() {
