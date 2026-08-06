@@ -74,8 +74,8 @@ func encodeWithExif(img webp.Image, exif []byte) ([]byte, error) {
 
 ## Errors
 
-Errors unwrap to sentinels, so `errors.Is` answers the questions callers
-actually ask, without matching on strings or switching on an error kind:
+Errors unwrap to sentinels, so `errors.Is` answers "is this animated?" or "did
+lossy reject the alpha?" without matching on strings:
 
     webp.ErrInvalidParam
     webp.ErrNotEnoughData
@@ -84,8 +84,7 @@ actually ask, without matching on strings or switching on an error kind:
     webp.ErrAnimated
     webp.ErrLossyAlpha
 
-`Decode` handles still images only, so animated input is the one case every
-caller has to branch on:
+`Decode` handles still images only, so animated input needs a branch:
 
 <!-- glitterate append=4 file="docs_codec_api_test.go" -->
 ```go
@@ -123,7 +122,7 @@ encoder.
 Lossy WebP is natively planar 4:2:0 YCbCr. `Decode` and `EncodeLossy` convert to
 and from RGBA, which costs about a quarter of a lossy decode and an extra
 `width * height * 4` buffer. `DecodeYUV` and `EncodeLossyYUV` skip that, which
-is worth it when you are recompressing rather than looking at the pixels:
+is worth it when you are recompressing and never touch the pixels:
 
 <!-- glitterate append=5 file="docs_codec_api_test.go" -->
 ```go

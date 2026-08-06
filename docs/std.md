@@ -113,9 +113,9 @@ Everything else, including `*image.RGBA`, is drawn into an `*image.NRGBA` first.
 Falling back costs time, never correctness, so sub-images, non-4:2:0 chroma and
 odd crop origins all encode correctly, just not for free.
 
-`*image.RGBA` is one of those, and it is worth knowing why: its pixels are
-alpha-premultiplied and WebP stores straight alpha, so the conversion is what
-keeps semi-transparent pixels from coming out dark.
+`*image.RGBA` is one of those. Its pixels are alpha-premultiplied and WebP
+stores straight alpha, so the conversion keeps semi-transparent pixels from
+coming out dark.
 
 <!-- glitterate append=4 file="docs_std_test.go" -->
 ```go
@@ -205,8 +205,8 @@ func summarizeAnimation(path string) (string, error) {
 
 A still image decodes as a single-frame animation, so a caller that handles both
 does not need to branch. In the other direction, `Decode` on an animated file
-returns the first frame rather than failing, which is what makes
-`image.Decode` work on animations.
+returns the first frame rather than failing, so `image.Decode` works on
+animations.
 
 Encoding animations is not implemented.
 
