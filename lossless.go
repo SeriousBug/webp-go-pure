@@ -1,5 +1,7 @@
 package webp
 
+import "encoding/binary"
+
 const (
 	lldecARGBBlack            = 0xff000000
 	lldecMaxAllowedCodeLength = 15
@@ -33,13 +35,31 @@ var lldecCodeToPlane = [120]uint8{
 	0x7e, 0x61, 0x6f, 0x50, 0x71, 0x7f, 0x60, 0x70,
 }
 
+// lldecBitSlack is the zero padding lldecNewBitReader appends to the stream. It
+// lets peek load eight bytes unconditionally, including past the last bit of
+// real data: bitPos is only checked against totalBits once per decoded pixel,
+// and between two checks the decoder reads at most four Huffman symbols of
+// fifteen bits each, so it can be at most sixty bits beyond the end.
+const lldecBitSlack = 32
+
 type lldecBitReader struct {
-	data   []byte
-	bitPos int
+	data      []byte
+	bitPos    int
+	totalBits int
 }
 
 func lldecNewBitReader(data []byte) lldecBitReader {
-	return lldecBitReader{data: data, bitPos: 0}
+	padded := make([]byte, len(data)+lldecBitSlack)
+	copy(padded, data)
+	return lldecBitReader{data: padded, bitPos: 0, totalBits: len(data) * 8}
+}
+
+// peek returns the next 32 bits of the stream without consuming them, and
+// zero-fills past the end. Reading past the end is not an error here; it is
+// caught when the bits are consumed, which is what lets the Huffman lookup run
+// without a bounds check per symbol.
+func (br *lldecBitReader) peek() uint32 {
+	return uint32(binary.LittleEndian.Uint64(br.data[br.bitPos>>3:]) >> uint(br.bitPos&7))
 }
 
 func (br *lldecBitReader) readBit() (uint32, error) {
@@ -54,109 +74,180 @@ func (br *lldecBitReader) readBits(numBits int) (uint32, error) {
 	if end < br.bitPos {
 		return 0, bitstreamErr("VP8L bit position overflow")
 	}
-	if end > len(br.data)*8 {
+	if end > br.totalBits {
 		return 0, notEnoughData("VP8L bitstream")
 	}
-
-	var value uint32
-	for bitIndex := 0; bitIndex < numBits; bitIndex++ {
-		streamBit := br.bitPos + bitIndex
-		b := br.data[streamBit>>3]
-		bit := (b >> (streamBit & 7)) & 1
-		value |= uint32(bit) << bitIndex
-	}
+	value := br.peek() & (1<<uint(numBits) - 1)
 	br.bitPos = end
 	return value, nil
 }
 
+const (
+	lldecHuffRootBits = 8
+	lldecHuffRootSize = 1 << lldecHuffRootBits
+	lldecHuffRootMask = lldecHuffRootSize - 1
+)
+
+// lldecHuffCode is one entry of a canonical-code lookup table. In a root-table
+// entry with bits > lldecHuffRootBits, value is the offset of a second-level
+// table relative to this entry and bits-lldecHuffRootBits is how many further
+// bits index it.
+type lldecHuffCode struct {
+	value uint16
+	bits  uint8
+}
+
 type lldecHuffmanTree struct {
+	table        []lldecHuffCode
 	singleSymbol int32
-	byLen        []map[uint16]uint16
-	maxLen       int
+}
+
+// lldecNextCodeKey advances a bit-reversed canonical code of the given length.
+func lldecNextCodeKey(key uint32, length int) uint32 {
+	step := uint32(1) << (length - 1)
+	for key&step != 0 {
+		step >>= 1
+	}
+	if step == 0 {
+		return key
+	}
+	return (key & (step - 1)) + step
+}
+
+// lldecReplicate writes code into every slot of table congruent to its index
+// modulo step, which is how one code fills all the table entries whose extra
+// low-order bits it does not distinguish.
+func lldecReplicate(table []lldecHuffCode, step, end int, code lldecHuffCode) {
+	for end > 0 {
+		end -= step
+		table[end] = code
+	}
+}
+
+// lldecSubTableBits sizes a second-level table so it exactly covers the codes
+// that extend past the root table under one root prefix.
+func lldecSubTableBits(count *[lldecMaxAllowedCodeLength + 1]int, length int) int {
+	left := 1 << (length - lldecHuffRootBits)
+	for length < lldecMaxAllowedCodeLength {
+		left -= count[length]
+		if left <= 0 {
+			break
+		}
+		length++
+		left <<= 1
+	}
+	return length - lldecHuffRootBits
 }
 
 func lldecHuffmanFromCodeLengths(codeLengths []uint8) (lldecHuffmanTree, error) {
-	var counts [lldecMaxAllowedCodeLength + 1]int32
-	singleSymbol := int32(-1)
-	numSymbols := 0
-
-	for symbol, l := range codeLengths {
-		bits := int(l)
-		if bits > lldecMaxAllowedCodeLength {
+	var count [lldecMaxAllowedCodeLength + 1]int
+	for _, l := range codeLengths {
+		if int(l) > lldecMaxAllowedCodeLength {
 			return lldecHuffmanTree{}, bitstreamErr("invalid VP8L Huffman code length")
 		}
-		if bits > 0 {
-			counts[bits]++
-			singleSymbol = int32(uint16(symbol))
-			numSymbols++
-		}
+		count[l]++
 	}
+	count[0] = 0
+
+	var offset [lldecMaxAllowedCodeLength + 1]int
+	for l := 1; l < lldecMaxAllowedCodeLength; l++ {
+		offset[l+1] = offset[l] + count[l]
+	}
+	numSymbols := offset[lldecMaxAllowedCodeLength] + count[lldecMaxAllowedCodeLength]
 
 	if numSymbols == 0 {
 		return lldecHuffmanTree{}, bitstreamErr("empty VP8L Huffman tree")
 	}
-	if numSymbols == 1 {
-		return lldecHuffmanTree{singleSymbol: singleSymbol, byLen: nil, maxLen: 0}, nil
-	}
 
-	left := int32(1)
-	for bits := 1; bits <= lldecMaxAllowedCodeLength; bits++ {
-		left = (left << 1) - counts[bits]
-		if left < 0 {
-			return lldecHuffmanTree{}, bitstreamErr("oversubscribed VP8L Huffman tree")
+	sorted := make([]uint16, numSymbols)
+	for symbol, l := range codeLengths {
+		if l > 0 {
+			sorted[offset[l]] = uint16(symbol)
+			offset[l]++
 		}
 	}
-	if left != 0 {
+	if numSymbols == 1 {
+		return lldecHuffmanTree{singleSymbol: int32(sorted[0])}, nil
+	}
+
+	table := make([]lldecHuffCode, lldecHuffRootSize, lldecHuffRootSize+64)
+	var (
+		key       uint32
+		symbol    int
+		numNodes  = 1
+		numOpen   = 1
+		tableBase = 0
+		tableSize = lldecHuffRootSize
+		low       = uint32(0xffffffff)
+	)
+
+	for length, step := 1, 2; length <= lldecHuffRootBits; length, step = length+1, step<<1 {
+		numOpen <<= 1
+		numNodes += numOpen
+		numOpen -= count[length]
+		if numOpen < 0 {
+			return lldecHuffmanTree{}, bitstreamErr("oversubscribed VP8L Huffman tree")
+		}
+		for ; count[length] > 0; count[length]-- {
+			code := lldecHuffCode{value: sorted[symbol], bits: uint8(length)}
+			symbol++
+			lldecReplicate(table[key:], step, tableSize, code)
+			key = lldecNextCodeKey(key, length)
+		}
+	}
+
+	for length, step := lldecHuffRootBits+1, 2; length <= lldecMaxAllowedCodeLength; length, step = length+1, step<<1 {
+		numOpen <<= 1
+		numNodes += numOpen
+		numOpen -= count[length]
+		if numOpen < 0 {
+			return lldecHuffmanTree{}, bitstreamErr("oversubscribed VP8L Huffman tree")
+		}
+		for ; count[length] > 0; count[length]-- {
+			if key&lldecHuffRootMask != low {
+				tableBase += tableSize
+				tableBits := lldecSubTableBits(&count, length)
+				tableSize = 1 << tableBits
+				low = key & lldecHuffRootMask
+				table = append(table, make([]lldecHuffCode, tableSize)...)
+				table[low] = lldecHuffCode{
+					value: uint16(tableBase - int(low)),
+					bits:  uint8(tableBits + lldecHuffRootBits),
+				}
+			}
+			code := lldecHuffCode{value: sorted[symbol], bits: uint8(length - lldecHuffRootBits)}
+			symbol++
+			sub := key >> lldecHuffRootBits
+			lldecReplicate(table[tableBase+int(sub):], step, tableSize, code)
+			key = lldecNextCodeKey(key, length)
+		}
+	}
+
+	if numNodes != 2*numSymbols-1 {
 		return lldecHuffmanTree{}, bitstreamErr("incomplete VP8L Huffman tree")
 	}
 
-	var nextCode [lldecMaxAllowedCodeLength + 1]uint32
-	code := uint32(0)
-	for bits := 1; bits <= lldecMaxAllowedCodeLength; bits++ {
-		code = (code + uint32(counts[bits-1])) << 1
-		nextCode[bits] = code
-	}
-
-	byLen := make([]map[uint16]uint16, lldecMaxAllowedCodeLength+1)
-	for i := range byLen {
-		byLen[i] = make(map[uint16]uint16)
-	}
-	maxLen := 0
-
-	for symbol, l := range codeLengths {
-		bits := int(l)
-		if bits == 0 {
-			continue
-		}
-		canonical := nextCode[bits]
-		nextCode[bits]++
-		byLen[bits][lldecReverseBits(canonical, bits)] = uint16(symbol)
-		if bits > maxLen {
-			maxLen = bits
-		}
-	}
-
-	return lldecHuffmanTree{singleSymbol: -1, byLen: byLen, maxLen: maxLen}, nil
+	return lldecHuffmanTree{table: table, singleSymbol: -1}, nil
 }
 
-func (t *lldecHuffmanTree) readSymbol(br *lldecBitReader) (uint16, error) {
+// readSymbol does not report running off the end of the stream: past the end
+// peek yields zeros, so the symbol is garbage but the read is in bounds, and
+// the caller catches it by checking bitPos against totalBits once per pixel
+// rather than once per symbol.
+func (t *lldecHuffmanTree) readSymbol(br *lldecBitReader) uint16 {
 	if t.singleSymbol >= 0 {
-		return uint16(t.singleSymbol), nil
+		return uint16(t.singleSymbol)
 	}
-
-	code := uint16(0)
-	for bits := 1; bits <= t.maxLen; bits++ {
-		bit, err := br.readBit()
-		if err != nil {
-			return 0, err
-		}
-		code |= uint16(bit) << (bits - 1)
-		if symbol, ok := t.byLen[bits][code]; ok {
-			return symbol, nil
-		}
+	index := int(br.peek() & lldecHuffRootMask)
+	entry := t.table[index]
+	if entry.bits > lldecHuffRootBits {
+		br.bitPos += lldecHuffRootBits
+		nbits := uint(entry.bits) - lldecHuffRootBits
+		index += int(entry.value) + int(br.peek()&(1<<nbits-1))
+		entry = t.table[index]
 	}
-
-	return 0, bitstreamErr("invalid VP8L Huffman symbol")
+	br.bitPos += int(entry.bits)
+	return entry.value
 }
 
 type lldecColorCache struct {
@@ -589,11 +680,10 @@ func (d *lldecDecoder) readHuffmanCodeLengths(codeLengthTree *lldecHuffmanTree, 
 		}
 		maxSymbol--
 
-		cl, err := codeLengthTree.readSymbol(&d.br)
-		if err != nil {
-			return err
+		if d.br.bitPos > d.br.totalBits {
+			return notEnoughData("VP8L bitstream")
 		}
-		codeLen := int(cl)
+		codeLen := int(codeLengthTree.readSymbol(&d.br))
 		if codeLen < lldecCodeLengthRepeatCode {
 			codeLengths[symbol] = uint8(codeLen)
 			if codeLen != 0 {
@@ -647,46 +737,48 @@ func (d *lldecDecoder) decodeImageData(width, height, colorCacheBits int, metada
 		colorCacheLimit += 1 << colorCacheBits
 	}
 
+	br := &d.br
+	// The group only changes when the pixel crosses into another Huffman tile,
+	// so tracking x and y and the current tile keeps the per-pixel cost to two
+	// shifts, against a division and a lookup for every pixel.
+	subBits := metadata.huffmanSubsampleBits
+	group := &metadata.groups[0]
+	tileX, tileY := -1, -1
+	x, y := 0, 0
+
 	for pos < len(data) {
-		x := pos % width
-		y := pos / width
-		group := &metadata.groups[metadata.groupIndex(x, y)]
-		codeSym, err := group.green.readSymbol(&d.br)
-		if err != nil {
-			return nil, err
+		if br.bitPos > br.totalBits {
+			return nil, notEnoughData("VP8L bitstream")
 		}
-		code := int(codeSym)
+		if metadata.hasHuffmanImage {
+			if tx, ty := x>>subBits, y>>subBits; tx != tileX || ty != tileY {
+				group = &metadata.groups[metadata.huffmanImage[ty*metadata.huffmanXsize+tx]]
+				tileX, tileY = tx, ty
+			}
+		}
+		code := int(group.green.readSymbol(br))
 
 		switch {
 		case code < lldecNumLiteralCodes:
-			redSym, err := group.red.readSymbol(&d.br)
-			if err != nil {
-				return nil, err
-			}
-			blueSym, err := group.blue.readSymbol(&d.br)
-			if err != nil {
-				return nil, err
-			}
-			alphaSym, err := group.alpha.readSymbol(&d.br)
-			if err != nil {
-				return nil, err
-			}
+			redSym := group.red.readSymbol(br)
+			blueSym := group.blue.readSymbol(br)
+			alphaSym := group.alpha.readSymbol(br)
 			pixel := (uint32(alphaSym) << 24) | (uint32(redSym) << 16) | (uint32(code) << 8) | uint32(blueSym)
 			data[pos] = pixel
 			if colorCache != nil {
 				colorCache.insert(pixel)
 			}
 			pos++
+			if x++; x == width {
+				x = 0
+				y++
+			}
 		case code < lenCodeLimit:
-			length, err := lldecGetCopyValue(code-lldecNumLiteralCodes, &d.br)
+			length, err := lldecGetCopyValue(code-lldecNumLiteralCodes, br)
 			if err != nil {
 				return nil, err
 			}
-			distSym, err := group.dist.readSymbol(&d.br)
-			if err != nil {
-				return nil, err
-			}
-			distCode, err := lldecGetCopyValue(int(distSym), &d.br)
+			distCode, err := lldecGetCopyValue(int(group.dist.readSymbol(br)), br)
 			if err != nil {
 				return nil, err
 			}
@@ -694,14 +786,22 @@ func (d *lldecDecoder) decodeImageData(width, height, colorCacheBits int, metada
 			if dist > pos || pos+length > len(data) {
 				return nil, bitstreamErr("invalid VP8L backward reference")
 			}
-			for i := 0; i < length; i++ {
-				pixel := data[pos+i-dist]
-				data[pos+i] = pixel
-				if colorCache != nil {
+			src := data[pos-dist : pos-dist+length]
+			dst := data[pos : pos+length]
+			if dist >= length {
+				copy(dst, src)
+			} else {
+				for i := range dst {
+					dst[i] = src[i]
+				}
+			}
+			if colorCache != nil {
+				for _, pixel := range dst {
 					colorCache.insert(pixel)
 				}
 			}
 			pos += length
+			x, y = pos%width, pos/width
 		case code < colorCacheLimit:
 			key := code - lenCodeLimit
 			if colorCache == nil {
@@ -714,6 +814,10 @@ func (d *lldecDecoder) decodeImageData(width, height, colorCacheBits int, metada
 			data[pos] = pixel
 			colorCache.insert(pixel)
 			pos++
+			if x++; x == width {
+				x = 0
+				y++
+			}
 		default:
 			return nil, bitstreamErr("invalid VP8L green Huffman symbol")
 		}
@@ -762,12 +866,13 @@ func lldecPlaneCodeToDistance(width, planeCode int) int {
 	return dist
 }
 
+// lldecAddPixels adds two pixels channel-wise, each channel wrapping at 256. It
+// adds the two even channels and the two odd channels as pairs, so the whole
+// pixel takes two adds instead of four.
 func lldecAddPixels(a, b uint32) uint32 {
-	alpha := uint32(uint8(a>>24) + uint8(b>>24))
-	red := uint32(uint8(a>>16) + uint8(b>>16))
-	green := uint32(uint8(a>>8) + uint8(b>>8))
-	blue := uint32(uint8(a) + uint8(b))
-	return (alpha << 24) | (red << 16) | (green << 8) | blue
+	lo := (a & 0x00ff00ff) + (b & 0x00ff00ff)
+	hi := ((a >> 8) & 0x00ff00ff) + ((b >> 8) & 0x00ff00ff)
+	return (lo & 0x00ff00ff) | ((hi & 0x00ff00ff) << 8)
 }
 
 func lldecAverage2(a, b uint32) uint32 {
@@ -775,13 +880,13 @@ func lldecAverage2(a, b uint32) uint32 {
 }
 
 func lldecClip255(value int32) uint32 {
+	if uint32(value) <= 255 {
+		return uint32(value)
+	}
 	if value < 0 {
 		return 0
 	}
-	if value > 255 {
-		return 255
-	}
-	return uint32(value)
+	return 255
 }
 
 func lldecClampedAddSubtractFull(left, top, topLeft uint32) uint32 {
@@ -802,65 +907,131 @@ func lldecClampedAddSubtractHalf(left, top, topLeft uint32) uint32 {
 }
 
 func lldecAbs(v int32) int32 {
-	if v < 0 {
-		return -v
-	}
-	return v
+	mask := v >> 31
+	return (v ^ mask) - mask
 }
 
+// lldecSelectPredictor picks whichever of left and top is closer to
+// left+top-topLeft. The distance to left is |top-topLeft| channel-wise and the
+// distance to top is |left-topLeft|, so neither the prediction nor the two
+// distances have to be formed to compare them.
 func lldecSelectPredictor(left, top, topLeft uint32) uint32 {
-	predAlpha := int32(left>>24) + int32(top>>24) - int32(topLeft>>24)
-	predRed := int32((left>>16)&0xff) + int32((top>>16)&0xff) - int32((topLeft>>16)&0xff)
-	predGreen := int32((left>>8)&0xff) + int32((top>>8)&0xff) - int32((topLeft>>8)&0xff)
-	predBlue := int32(left&0xff) + int32(top&0xff) - int32(topLeft&0xff)
-
-	leftDistance := lldecAbs(predAlpha-int32(left>>24)) +
-		lldecAbs(predRed-int32((left>>16)&0xff)) +
-		lldecAbs(predGreen-int32((left>>8)&0xff)) +
-		lldecAbs(predBlue-int32(left&0xff))
-	topDistance := lldecAbs(predAlpha-int32(top>>24)) +
-		lldecAbs(predRed-int32((top>>16)&0xff)) +
-		lldecAbs(predGreen-int32((top>>8)&0xff)) +
-		lldecAbs(predBlue-int32(top&0xff))
-
-	if leftDistance < topDistance {
-		return left
+	diff := lldecAbs(int32(left>>24)-int32(topLeft>>24)) -
+		lldecAbs(int32(top>>24)-int32(topLeft>>24)) +
+		lldecAbs(int32((left>>16)&0xff)-int32((topLeft>>16)&0xff)) -
+		lldecAbs(int32((top>>16)&0xff)-int32((topLeft>>16)&0xff)) +
+		lldecAbs(int32((left>>8)&0xff)-int32((topLeft>>8)&0xff)) -
+		lldecAbs(int32((top>>8)&0xff)-int32((topLeft>>8)&0xff)) +
+		lldecAbs(int32(left&0xff)-int32(topLeft&0xff)) -
+		lldecAbs(int32(top&0xff)-int32(topLeft&0xff))
+	if diff <= 0 {
+		return top
 	}
-	return top
+	return left
 }
 
-func lldecPredict(mode uint8, left, top, topLeft, topRight uint32) uint32 {
+// lldecTopRight is the above-right neighbour, which wraps to the start of the
+// current row on the last column.
+func lldecTopRight(row, above []uint32, x, width int) uint32 {
+	if x+1 < width {
+		return above[x+1]
+	}
+	return row[0]
+}
+
+// lldecPredictSpan reconstructs row[from:to] under one predictor mode. The mode
+// is fixed across a transform tile, so choosing it once per span leaves each
+// mode a loop with no per-pixel dispatch.
+func lldecPredictSpan(mode uint8, row, above []uint32, from, to, width int) {
 	switch mode {
-	case 0, 14, 15:
-		return lldecARGBBlack
 	case 1:
-		return left
+		left := row[from-1]
+		for x := from; x < to; x++ {
+			left = lldecAddPixels(row[x], left)
+			row[x] = left
+		}
 	case 2:
-		return top
+		for x := from; x < to; x++ {
+			row[x] = lldecAddPixels(row[x], above[x])
+		}
 	case 3:
-		return topRight
+		for x := from; x < to; x++ {
+			row[x] = lldecAddPixels(row[x], lldecTopRight(row, above, x, width))
+		}
 	case 4:
-		return topLeft
+		topLeft := above[from-1]
+		for x := from; x < to; x++ {
+			row[x] = lldecAddPixels(row[x], topLeft)
+			topLeft = above[x]
+		}
 	case 5:
-		return lldecAverage2(lldecAverage2(left, topRight), top)
+		left := row[from-1]
+		for x := from; x < to; x++ {
+			pred := lldecAverage2(lldecAverage2(left, lldecTopRight(row, above, x, width)), above[x])
+			left = lldecAddPixels(row[x], pred)
+			row[x] = left
+		}
 	case 6:
-		return lldecAverage2(left, topLeft)
+		left, topLeft := row[from-1], above[from-1]
+		for x := from; x < to; x++ {
+			left = lldecAddPixels(row[x], lldecAverage2(left, topLeft))
+			row[x], topLeft = left, above[x]
+		}
 	case 7:
-		return lldecAverage2(left, top)
+		left := row[from-1]
+		for x := from; x < to; x++ {
+			left = lldecAddPixels(row[x], lldecAverage2(left, above[x]))
+			row[x] = left
+		}
 	case 8:
-		return lldecAverage2(topLeft, top)
+		topLeft := above[from-1]
+		for x := from; x < to; x++ {
+			top := above[x]
+			row[x] = lldecAddPixels(row[x], lldecAverage2(topLeft, top))
+			topLeft = top
+		}
 	case 9:
-		return lldecAverage2(top, topRight)
+		for x := from; x < to; x++ {
+			row[x] = lldecAddPixels(row[x], lldecAverage2(above[x], lldecTopRight(row, above, x, width)))
+		}
 	case 10:
-		return lldecAverage2(lldecAverage2(left, topLeft), lldecAverage2(top, topRight))
+		left, topLeft := row[from-1], above[from-1]
+		for x := from; x < to; x++ {
+			top := above[x]
+			pred := lldecAverage2(
+				lldecAverage2(left, topLeft),
+				lldecAverage2(top, lldecTopRight(row, above, x, width)))
+			left = lldecAddPixels(row[x], pred)
+			row[x], topLeft = left, top
+		}
+	// The three neighbour-comparing modes carry left and top-left across
+	// iterations: each is the previous pixel's own value and top, so they cost
+	// two loads a pixel that a register already holds.
 	case 11:
-		return lldecSelectPredictor(left, top, topLeft)
+		left, topLeft := row[from-1], above[from-1]
+		for x := from; x < to; x++ {
+			top := above[x]
+			left = lldecAddPixels(row[x], lldecSelectPredictor(left, top, topLeft))
+			row[x], topLeft = left, top
+		}
 	case 12:
-		return lldecClampedAddSubtractFull(left, top, topLeft)
+		left, topLeft := row[from-1], above[from-1]
+		for x := from; x < to; x++ {
+			top := above[x]
+			left = lldecAddPixels(row[x], lldecClampedAddSubtractFull(left, top, topLeft))
+			row[x], topLeft = left, top
+		}
 	case 13:
-		return lldecClampedAddSubtractHalf(left, top, topLeft)
-	default:
-		return lldecARGBBlack
+		left, topLeft := row[from-1], above[from-1]
+		for x := from; x < to; x++ {
+			top := above[x]
+			left = lldecAddPixels(row[x], lldecClampedAddSubtractHalf(left, top, topLeft))
+			row[x], topLeft = left, top
+		}
+	default: // opaque black
+		for x := from; x < to; x++ {
+			row[x] = lldecAddPixels(row[x], lldecARGBBlack)
+		}
 	}
 }
 
@@ -885,74 +1056,74 @@ func lldecExpandColorMap(palette []uint32, numColors, bits int) []uint32 {
 func lldecApplyInverseTransform(transform *lldecTransform, input []uint32) ([]uint32, error) {
 	switch transform.kind {
 	case lldecSubtractGreen:
-		output := make([]uint32, len(input))
+		// The first three transforms read each pixel only after every pixel they
+		// predict it from is already reconstructed, so they run over the decoded
+		// buffer in place and the decode holds one image-sized buffer instead of
+		// one per transform.
 		for i, argb := range input {
 			green := (argb >> 8) & 0xff
 			red := (((argb >> 16) & 0xff) + green) & 0xff
 			blue := ((argb & 0xff) + green) & 0xff
-			output[i] = (argb & 0xff00ff00) | (red << 16) | blue
+			input[i] = (argb & 0xff00ff00) | (red << 16) | blue
 		}
-		return output, nil
+		return input, nil
 	case lldecCrossColor:
 		expectedLen := transform.xsize * transform.ysize
 		if len(input) != expectedLen {
 			return nil, bitstreamErr("VP8L cross-color size mismatch")
 		}
 		tilesPerRow := lldecSubsampleSize(transform.xsize, transform.bits)
-		output := make([]uint32, len(input))
+		tileMask := 1<<transform.bits - 1
 		for y := 0; y < transform.ysize; y++ {
-			for x := 0; x < transform.xsize; x++ {
-				argb := input[y*transform.xsize+x]
-				code := transform.data[(y>>transform.bits)*tilesPerRow+(x>>transform.bits)]
-				greenToRed := uint8(code)
-				greenToBlue := uint8((code >> 8) & 0xff)
-				redToBlue := uint8((code >> 16) & 0xff)
-				green := uint8((argb >> 8) & 0xff)
+			row := input[y*transform.xsize : (y+1)*transform.xsize : (y+1)*transform.xsize]
+			tileRow := transform.data[(y>>transform.bits)*tilesPerRow:]
+			var greenToRed, greenToBlue, redToBlue uint8
+			for x, argb := range row {
+				if x&tileMask == 0 {
+					code := tileRow[x>>transform.bits]
+					greenToRed = uint8(code)
+					greenToBlue = uint8(code >> 8)
+					redToBlue = uint8(code >> 16)
+				}
+				green := uint8(argb >> 8)
 				red := int32((argb >> 16) & 0xff)
 				blue := int32(argb & 0xff)
 				red = (red + lldecColorTransformDelta(greenToRed, green)) & 0xff
 				blue = (blue + lldecColorTransformDelta(greenToBlue, green)) & 0xff
 				blue = (blue + lldecColorTransformDelta(redToBlue, uint8(red))) & 0xff
-				output[y*transform.xsize+x] = (argb & 0xff00ff00) | (uint32(red) << 16) | uint32(blue)
+				row[x] = (argb & 0xff00ff00) | (uint32(red) << 16) | uint32(blue)
 			}
 		}
-		return output, nil
+		return input, nil
 	case lldecPredictor:
 		expectedLen := transform.xsize * transform.ysize
 		if len(input) != expectedLen {
 			return nil, bitstreamErr("VP8L predictor size mismatch")
 		}
-		tilesPerRow := lldecSubsampleSize(transform.xsize, transform.bits)
-		output := make([]uint32, len(input))
-		for y := 0; y < transform.ysize; y++ {
-			for x := 0; x < transform.xsize; x++ {
-				residual := input[y*transform.xsize+x]
-				var pred uint32
-				if y == 0 {
-					if x == 0 {
-						pred = lldecARGBBlack
-					} else {
-						pred = output[y*transform.xsize+x-1]
-					}
-				} else if x == 0 {
-					pred = output[(y-1)*transform.xsize]
-				} else {
-					left := output[y*transform.xsize+x-1]
-					top := output[(y-1)*transform.xsize+x]
-					topLeft := output[(y-1)*transform.xsize+x-1]
-					var topRight uint32
-					if x+1 < transform.xsize {
-						topRight = output[(y-1)*transform.xsize+x+1]
-					} else {
-						topRight = output[y*transform.xsize]
-					}
-					mode := uint8((transform.data[(y>>transform.bits)*tilesPerRow+(x>>transform.bits)] >> 8) & 0x0f)
-					pred = lldecPredict(mode, left, top, topLeft, topRight)
+		width := transform.xsize
+		tilesPerRow := lldecSubsampleSize(width, transform.bits)
+		tileMask := 1<<transform.bits - 1
+
+		input[0] = lldecAddPixels(input[0], lldecARGBBlack)
+		for x := 1; x < width; x++ {
+			input[x] = lldecAddPixels(input[x], input[x-1])
+		}
+		for y := 1; y < transform.ysize; y++ {
+			row := input[y*width : (y+1)*width : (y+1)*width]
+			above := input[(y-1)*width : y*width : y*width]
+			tileRow := transform.data[(y>>transform.bits)*tilesPerRow:]
+			row[0] = lldecAddPixels(row[0], above[0])
+			for x := 1; x < width; {
+				end := (x | tileMask) + 1
+				if end > width {
+					end = width
 				}
-				output[y*transform.xsize+x] = lldecAddPixels(residual, pred)
+				mode := uint8((tileRow[x>>transform.bits] >> 8) & 0x0f)
+				lldecPredictSpan(mode, row, above, x, end, width)
+				x = end
 			}
 		}
-		return output, nil
+		return input, nil
 	default: // lldecColorIndexing
 		reducedWidth := lldecSubsampleSize(transform.xsize, transform.bits)
 		expectedLen := reducedWidth * transform.ysize
@@ -1005,12 +1176,10 @@ func lldecApplyInverseTransform(transform *lldecTransform, input []uint32) ([]ui
 
 func lldecArgbToRgba(argb []uint32) []byte {
 	rgba := make([]byte, len(argb)*4)
-	for index, pixel := range argb {
-		base := index * 4
-		rgba[base] = byte((pixel >> 16) & 0xff)
-		rgba[base+1] = byte((pixel >> 8) & 0xff)
-		rgba[base+2] = byte(pixel & 0xff)
-		rgba[base+3] = byte(pixel >> 24)
+	out := rgba
+	for _, pixel := range argb {
+		binary.BigEndian.PutUint32(out, pixel<<8|pixel>>24)
+		out = out[4:]
 	}
 	return rgba
 }
