@@ -22,6 +22,10 @@ import (
 // would credit an encoder that quietly landed below quality 90 with the win.
 var sweepPanels = []struct {
 	mode, title, unit string
+	// width is the panel's share of the row. The lossless panel earns a larger
+	// one: its curves span three decades of time and would otherwise crowd every
+	// engine but ours into the left edge.
+	width float64
 	// value reads the y axis off a curve point, and labelStep is the smallest
 	// change worth putting a number on.
 	value     func(sweepPoint) float64
@@ -30,21 +34,21 @@ var sweepPanels = []struct {
 	format    func(float64) string
 }{
 	{
-		mode: sweepPrefix + "lossless", title: "lossless", unit: "total size (MiB)",
+		mode: sweepPrefix + "lossless", title: "lossless", unit: "total size (MiB)", width: 1.3,
 		value:     func(p sweepPoint) float64 { return p.mib },
 		labelStep: func(prev float64) float64 { return prev * 0.01 },
 		logY:      true,
 		format:    formatMiB,
 	},
 	{
-		mode: sweepPrefix + "lossy", title: "lossy", unit: "total size (MiB)",
+		mode: sweepPrefix + "lossy", title: "lossy", unit: "total size (MiB)", width: 1,
 		value:     func(p sweepPoint) float64 { return p.mib },
 		labelStep: func(prev float64) float64 { return prev * 0.01 },
 		logY:      true,
 		format:    formatMiB,
 	},
 	{
-		mode: sweepPrefix + "lossy", title: "lossy", unit: "mean PSNR (dB)",
+		mode: sweepPrefix + "lossy", title: "lossy", unit: "mean PSNR (dB)", width: 1,
 		value:     func(p sweepPoint) float64 { return p.psnr },
 		labelStep: func(float64) float64 { return 0.1 },
 		format:    func(v float64) string { return fmt.Sprintf("%.1f", v) },
@@ -71,8 +75,18 @@ func effortSweep(sets []dataset, th theme) string {
 		row0Top  = 186.0
 		rowStrid = rowH + 108
 	)
-	n := float64(len(sweepPanels))
-	panelW := (figW - padL - padR - (n-1)*colGap) / n
+	var weight float64
+	for _, p := range sweepPanels {
+		weight += p.width
+	}
+	unit := (figW - padL - padR - float64(len(sweepPanels)-1)*colGap) / weight
+	panelX := make([]float64, len(sweepPanels))
+	panelWs := make([]float64, len(sweepPanels))
+	x := padL
+	for i, p := range sweepPanels {
+		panelX[i], panelWs[i] = x, p.width*unit
+		x += panelWs[i] + colGap
+	}
 
 	note := "Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless preset level 0-9, and nativewebp's three compression levels. Time and size are totals over the whole corpus and PSNR is the mean over it; time and size are on log scales. Faster is left, smaller is down, higher quality is up. A setting is labelled only where it moves the panel's value (1% of size, 0.1 dB of PSNR), so an unlabelled point is a setting that costs time and changes nothing: read the nearest label to its left. " +
 		"The lossy panels have to be read together, since an encoder can spend effort on either one: the same quality 90 request lands between 39 and 43 dB depending on engine and setting."
@@ -97,7 +111,7 @@ func effortSweep(sets []dataset, th theme) string {
 		c.text(40+textWidth(panelTitle(d.label), 13)+18, rowTop-44, 11.5, th.muted, "start", "", machineDetail(d.label))
 
 		for pi, panel := range sweepPanels {
-			px := padL + float64(pi)*(panelW+colGap)
+			px, panelW := panelX[pi], panelWs[pi]
 			curves := map[string][]sweepPoint{}
 			var xs, ys []float64
 			for _, eng := range engines {
@@ -220,9 +234,25 @@ type sweepPoint struct {
 // keeps the two axes on the same footing, since a big image costs proportionally
 // more of both.
 func sweepCurve(d dataset, mode, engine string) []sweepPoint {
+	// Only images measured at every setting count, so a half-finished capture
+	// cannot put more images into one setting's totals than another's: that
+	// reads as the higher setting being both faster and smaller, which is a
+	// property of the capture rather than of the encoder.
+	files := map[string]int{}
+	efforts := map[int]bool{}
+	for _, r := range d.rows {
+		if r.engine != engine || r.mode != mode || r.ms <= 0 || r.bytes <= 0 {
+			continue
+		}
+		files[r.file]++
+		efforts[r.effort] = true
+	}
 	byEffort := map[int]*sweepPoint{}
 	for _, r := range d.rows {
 		if r.engine != engine || r.mode != mode || r.ms <= 0 || r.bytes <= 0 {
+			continue
+		}
+		if files[r.file] != len(efforts) {
 			continue
 		}
 		p := byEffort[r.effort]

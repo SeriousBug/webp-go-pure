@@ -71,7 +71,7 @@ output size at each:
 | `ours` | `Effort` | 0..9, both modes |
 | `libwebp` | lossy `method` / lossless preset level (`cwebp -z`) | 0..6 / 0..9 |
 | `wasm` | `Method` | 0..6, both modes: gen2brain/webp exposes no lossless level |
-| `nativewebp` | `CompressionLevel` | 0, 4, 6 — the three its `getMethodLevel` distinguishes |
+| `nativewebp` | `CompressionLevel` | 0, 4, 6: the three its `getMethodLevel` distinguishes |
 
 The numbers are each engine's own scale and do not line up across engines, which
 is why the figure plots time against size and puts the effort number on the point

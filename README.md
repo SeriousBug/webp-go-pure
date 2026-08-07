@@ -26,11 +26,18 @@ both time and memory, and webp-go-pure comes out ahead of it:
 - **Lossless:** roughly even on time (0.9-2.3x), at 1.2-1.8x lower peak memory.
 
 For lossless encoding only, there is another pure Go encoder,
-[nativewebp](https://github.com/HugoSmits86/nativewebp). It runs faster and uses
-less than half the peak memory of ours, but creates files 8 to 23% larger.
+[nativewebp](https://github.com/HugoSmits86/nativewebp). Its compression level
+does almost nothing (its fastest and slowest settings differ by 0.06% in output
+size), so it sits at one point rather than on a curve. At the effort where we
+match its speed, our effort 3, we write files 8% smaller than it does. It does
+use less than half our peak memory.
 
-![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-light.svg#gh-light-mode-only)
-![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-dark.svg#gh-dark-mode-only)
+Effort is the knob to reach for either way. The figure below is every setting of
+every encoder: pick the time and size you want, then read the setting off the
+point.
+
+![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-light.svg#gh-light-mode-only)
+![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-dark.svg#gh-dark-mode-only)
 ![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](benchmark/charts/peak-memory-light.svg#gh-light-mode-only)
 ![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](benchmark/charts/peak-memory-dark.svg#gh-dark-mode-only)
 
