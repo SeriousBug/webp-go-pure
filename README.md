@@ -25,13 +25,11 @@ both time and memory, and webp-go-pure comes out ahead of it:
 - **Lossy:** 1.1-3.4x faster, at 1.7-3.8x lower peak memory.
 - **Lossless:** roughly even on time (0.9-2.3x), at 1.2-1.8x lower peak memory.
 
-For lossless alone there is a second pure-Go encoder,
-[nativewebp](https://github.com/HugoSmits86/nativewebp), and it sits at the other
-end of the tradeoff: its files run 8-23% larger than ours, which it encodes in
-roughly half the time and under half the peak memory. It gets there by skipping
-the search — it applies one fixed set of transforms rather than trying several
-and keeping the smallest. Pick it if you want VP8L written quickly and cheaply,
-and this library if you want the smaller file or need lossy at all.
+For lossless encoding only, there is another pure Go encoder,
+[nativewebp](https://github.com/HugoSmits86/nativewebp). It runs faster and uses
+less than half the peak memory of ours, but creates files 8 to 23% larger. It
+applies one fixed set of transforms instead of trying several and keeping the
+smallest, which is what buys the speed.
 
 ![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-light.svg#gh-light-mode-only)
 ![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-dark.svg#gh-dark-mode-only)
