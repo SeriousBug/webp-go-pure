@@ -27,9 +27,7 @@ both time and memory, and webp-go-pure comes out ahead of it:
 
 For lossless encoding only, there is another pure Go encoder,
 [nativewebp](https://github.com/HugoSmits86/nativewebp). It runs faster and uses
-less than half the peak memory of ours, but creates files 8 to 23% larger. It
-applies one fixed set of transforms instead of trying several and keeping the
-smallest, which is why it is faster.
+less than half the peak memory of ours, but creates files 8 to 23% larger.
 
 ![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-light.svg#gh-light-mode-only)
 ![Encode time per image for each engine, one panel per mode and machine](benchmark/charts/encode-time-dark.svg#gh-dark-mode-only)
