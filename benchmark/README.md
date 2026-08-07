@@ -16,11 +16,19 @@ benchmark/run-decode.sh [budget_ms]   # decoding
 | `libwebp` | the C reference, via [go-webp](https://github.com/kolesa-team/go-webp) | yes | yes | yes |
 | `wasm` | libwebp compiled to WASM, via [gen2brain/webp](https://github.com/gen2brain/webp) | no | yes | yes |
 | `webp-rust` | the Rust library this port is based on ([../webp-rust](https://github.com/mith-mmk/webp-rust)) | n/a (separate binary) | yes | yes |
+| `nativewebp` | [HugoSmits86/nativewebp](https://github.com/HugoSmits86/nativewebp), another pure-Go encoder | no | lossless only | - |
 | `x/image` | [golang.org/x/image/webp](https://pkg.go.dev/golang.org/x/image/webp), the Go project's own decoder | no | - | yes |
 
 `wasm` is the cgo-free reference point: same libwebp algorithm as `libwebp`, but
 run through wazero instead of a C toolchain. `x/image` is decode-only, so it
 appears in the decode pass alone.
+
+`nativewebp` writes VP8L and nothing else, so it has rows in the `lossless` mode
+alone and none in the two lossy ones. It appears in no decode table either: its
+`Decode` is a wrapper around `golang.org/x/image/webp`, which is already its own
+engine here, so a `nativewebp` decode row would be a second measurement of the
+same decoder. `benchmark/compat` does test that our decoder reproduces its
+output exactly, which is the one direction there is to check.
 
 ### ImageMagick
 
@@ -33,11 +41,11 @@ process-launch overhead, so it adds no new data point.
 
 Lossy quality is fixed at 90.
 
-| Mode | ours | libwebp / wasm | webp-rust |
-| --- | --- | --- | --- |
-| `lossless` | `EncodeLossless` optimize 6 | lossless preset level 6 | `encode_lossless` optimize 6 |
-| `lossy-fast` | `EncodeLossy` optimize 0 | method 0 (fastest) | `encode_lossy` optimize 0 |
-| `lossy-slow` | `EncodeLossy` optimize 9 | method 6 (slowest) | `encode_lossy` optimize 9 |
+| Mode | ours | libwebp / wasm | webp-rust | nativewebp |
+| --- | --- | --- | --- | --- |
+| `lossless` | `EncodeLossless` optimize 6 | lossless preset level 6 | `encode_lossless` optimize 6 | `BestCompression` (level 6) |
+| `lossy-fast` | `EncodeLossy` optimize 0 | method 0 (fastest) | `encode_lossy` optimize 0 | - |
+| `lossy-slow` | `EncodeLossy` optimize 9 | method 6 (slowest) | `encode_lossy` optimize 9 | - |
 
 The effort scales differ between codecs (our optimize is 0..9, libwebp method is
 0..6), so `fast`/`slow` mark each codec's own endpoints rather than an identical

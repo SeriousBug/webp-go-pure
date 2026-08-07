@@ -55,6 +55,7 @@ const (
 	engWasm    = "wasm"
 	engRust    = "webp-rust"
 	engXImage  = "x/image"
+	engNative  = "nativewebp"
 )
 
 var lossyModes = []string{"lossy-fast", "lossy-slow"}
@@ -79,13 +80,13 @@ var themes = []theme{
 		name: "light", surface: "#fcfcfb", plane: "#f9f9f7",
 		inkPrimary: "#0b0b0b", inkSecondary: "#52514e", muted: "#898781",
 		grid: "#e1e0d9", axis: "#c3c2b7",
-		series: map[string]string{engOurs: "#2a78d6", engRust: "#eb6834", engWasm: "#1baf7a", engXImage: "#8a5cd0"},
+		series: map[string]string{engOurs: "#2a78d6", engRust: "#eb6834", engWasm: "#1baf7a", engXImage: "#8a5cd0", engNative: "#c2456f"},
 	},
 	{
 		name: "dark", surface: "#1a1a19", plane: "#0d0d0d",
 		inkPrimary: "#ffffff", inkSecondary: "#c3c2b7", muted: "#898781",
 		grid: "#2c2c2a", axis: "#383835",
-		series: map[string]string{engOurs: "#3987e5", engRust: "#d95926", engWasm: "#199e70", engXImage: "#9d78e6"},
+		series: map[string]string{engOurs: "#3987e5", engRust: "#d95926", engWasm: "#199e70", engXImage: "#9d78e6", engNative: "#d95c85"},
 	},
 }
 
