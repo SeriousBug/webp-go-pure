@@ -237,7 +237,6 @@ func decodeTime(sets []dataset, th theme) string {
 		footnote: "Every engine ends at packed RGBA, so x/image and wasm pay for converting their YCbCr planes inside the measurement, as an application would. x/image is golang.org/x/image/webp, the Go project's own decoder, which has no encoder and so appears in this figure alone.",
 		modes:    decodeModes,
 		engines:  []string{engOurs, engLibwebp, engWasm, engRust, engXImage},
-		barW:     40,
 		value:    func(r row) float64 { return r.ms },
 		format:   duration,
 	})
@@ -256,9 +255,8 @@ func peakMemory(sets []dataset, th theme) string {
 type barSpec struct {
 	title, subtitle, footnote string
 	// modes and engines default to the encode pass's three modes and four
-	// engines; barW widens the bars for a figure with fewer, wider panels.
+	// engines.
 	modes, engines []string
-	barW           float64
 	value          func(row) float64
 	format         func(float64) string
 }
@@ -318,10 +316,7 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 	)
 	n := float64(len(modes))
 	colW := (figW - gutter - rightPd - (n-1)*colGap) / n
-	barW := spec.barW
-	if barW == 0 {
-		barW = 24
-	}
+	const barW = 24.0
 
 	fadeID := 0
 	c := &canvas{}

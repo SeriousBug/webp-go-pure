@@ -88,11 +88,12 @@ would:
 - **vs `x/image`, lossy: we are slightly faster**, 0.88-0.99x its time on arm64
   and 0.86-0.91x on amd64. This is the comparison to make if you are choosing
   between the two pure-Go decoders for photos.
-- **vs `x/image`, lossless: the two are level.** We run 0.78-1.15x its time on
-  arm64 and 0.76-0.87x on amd64, so amd64 is a consistent win and arm64 comes
-  down to the image: we are ahead on the two smallest files and behind by up to
-  15% on the largest. On the 5.5 MP images that is 100-121 ms against its
-  99-106 ms on arm64, and 96-126 ms against its 118-144 ms on amd64.
+- **vs `x/image`, lossless: we are slightly ahead on the mean and level per
+  image.** 0.78-1.15x its time on arm64 and 0.76-0.87x on amd64, which is 0.99x
+  and 0.82x on the geometric mean. amd64 is a consistent win; arm64 comes down to
+  the image, where we are ahead on the two smallest files and behind by up to 15%
+  on the largest. On the 5.5 MP images that is 100-121 ms against its 99-106 ms on
+  arm64, and 96-126 ms against its 118-144 ms on amd64.
 - **vs libwebp: 2.4-5.8x slower on lossy**, and 1.5-2.2x (arm64) / 1.9-2.9x
   (amd64) on lossless.
 - **vs `wasm`, the other cgo-free libwebp: we are faster on lossless**,
