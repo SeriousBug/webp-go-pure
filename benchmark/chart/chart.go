@@ -12,11 +12,14 @@
 //
 //	go run ./chart -md results.md -out charts   (from benchmark/)
 //
-// Four figures, because size/quality, encode speed, decode speed and memory are
-// different questions:
+// Five figures, because size/quality, the effort tradeoff, encode speed, decode
+// speed and memory are different questions:
 //
 //   - rate-distortion: output size and PSNR, both relative to libwebp, one point
 //     per image. Engines that are strictly better sit up and to the left.
+//   - effort sweep: every effort setting of every engine as a point in (time,
+//     size), one line per engine. This is the figure that says what an effort
+//     setting buys, and the one to read before the fixed-mode figures.
 //   - encode time: geometric mean of each engine's ms/op, grouped by mode, one
 //     panel per machine.
 //   - decode time: the same, for the decode pass, which adds the x/image engine.
@@ -37,6 +40,7 @@ import (
 
 type row struct {
 	engine, mode, file string
+	effort             int
 	bytes              int
 	psnr               float64
 	hasPSNR            bool
@@ -53,7 +57,6 @@ const (
 	engOurs    = "ours"
 	engLibwebp = "libwebp"
 	engWasm    = "wasm"
-	engRust    = "webp-rust"
 	engXImage  = "x/image"
 	engNative  = "nativewebp"
 )
@@ -66,6 +69,12 @@ var allModes = []string{"lossless", "lossy-fast", "lossy-slow"}
 const decodePrefix = "decode-"
 
 var decodeModes = []string{decodePrefix + "lossless", decodePrefix + "lossy"}
+
+// Sweep rows carry a prefix for the same reason, and an effort column the other
+// passes do not have.
+const sweepPrefix = "sweep-"
+
+var sweepModes = []string{sweepPrefix + "lossless", sweepPrefix + "lossy"}
 
 type theme struct {
 	name                            string
@@ -80,13 +89,13 @@ var themes = []theme{
 		name: "light", surface: "#fcfcfb", plane: "#f9f9f7",
 		inkPrimary: "#0b0b0b", inkSecondary: "#52514e", muted: "#898781",
 		grid: "#e1e0d9", axis: "#c3c2b7",
-		series: map[string]string{engOurs: "#2a78d6", engRust: "#eb6834", engWasm: "#1baf7a", engXImage: "#8a5cd0", engNative: "#c2456f"},
+		series: map[string]string{engOurs: "#2a78d6", engWasm: "#1baf7a", engXImage: "#8a5cd0", engNative: "#c2456f"},
 	},
 	{
 		name: "dark", surface: "#1a1a19", plane: "#0d0d0d",
 		inkPrimary: "#ffffff", inkSecondary: "#c3c2b7", muted: "#898781",
 		grid: "#2c2c2a", axis: "#383835",
-		series: map[string]string{engOurs: "#3987e5", engRust: "#d95926", engWasm: "#199e70", engXImage: "#9d78e6", engNative: "#d95c85"},
+		series: map[string]string{engOurs: "#3987e5", engWasm: "#199e70", engXImage: "#9d78e6", engNative: "#d95c85"},
 	},
 }
 
@@ -112,6 +121,7 @@ func main() {
 			"encode-time":     encodeTime(sets, th),
 			"decode-time":     decodeTime(sets, th),
 			"peak-memory":     peakMemory(sets, th),
+			"effort-sweep":    effortSweep(sets, th),
 		}
 		for name, svg := range figures {
 			path := filepath.Join(*out, fmt.Sprintf("%s-%s.svg", name, th.name))
@@ -137,7 +147,7 @@ func parseMarkdown(path string) ([]dataset, error) {
 	var sets []dataset
 	byLabel := map[string]int{}
 	var heading, caption string
-	var fenced, decode bool
+	var fenced, decode, sweep bool
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -152,13 +162,14 @@ func parseMarkdown(path string) ([]dataset, error) {
 				// The decode table has the same column count as the peak-RSS
 				// one, so the caption above it is what tells them apart.
 				decode = strings.HasPrefix(caption, "Decode")
+				sweep = strings.HasPrefix(caption, "Effort sweep")
 			}
 			// A table is described by the line above it, so the caption never
 			// carries over to the next one.
 			caption = ""
 			fenced = !fenced
 		case fenced:
-			r, ok := parseRow(line, decode)
+			r, ok := parseRow(line, decode, sweep)
 			if !ok {
 				continue
 			}
@@ -183,7 +194,7 @@ func parseMarkdown(path string) ([]dataset, error) {
 func (d *dataset) merge(r row) {
 	for i := range d.rows {
 		e := &d.rows[i]
-		if e.engine != r.engine || e.mode != r.mode || e.file != r.file {
+		if e.engine != r.engine || e.mode != r.mode || e.file != r.file || e.effort != r.effort {
 			continue
 		}
 		if r.bytes > 0 {
@@ -207,12 +218,15 @@ func (d *dataset) merge(r row) {
 // comma-separated output of webpbench/rustbench, for the timing table (9 columns)
 // and the peak-RSS table (8). A decode row is 8 columns too, but ends in ms/op
 // rather than MiB per megapixel, so the caller has to say which it is.
-func parseRow(line string, decode bool) (row, bool) {
+func parseRow(line string, decode, sweep bool) (row, bool) {
 	fields := strings.Fields(strings.ReplaceAll(line, ",", " "))
-	if len(fields) != 9 && len(fields) != 8 {
+	if len(fields) == 0 || fields[0] == "file" || fields[0] == "engine" {
 		return row{}, false
 	}
-	if fields[0] == "file" || fields[0] == "engine" {
+	if sweep {
+		return parseSweepRow(fields)
+	}
+	if len(fields) != 9 && len(fields) != 8 {
 		return row{}, false
 	}
 	// results.md orders columns file,mode,engine; the tools emit engine,mode,file.
@@ -250,6 +264,39 @@ func parseRow(line string, decode bool) (row, bool) {
 	}
 	r.bytes, r.ms = bytes, ms
 	if psnr, err := strconv.ParseFloat(fields[6], 64); err == nil {
+		r.psnr, r.hasPSNR = psnr, true
+	}
+	return r, true
+}
+
+// parseSweepRow reads a sweep line, which carries an effort column the other
+// passes do not: file,mode,engine,effort,width,height,bytes,psnr_db,iters,ms_per_op
+// in results.md, and engine,mode,effort,file,... straight out of webpbench.
+func parseSweepRow(fields []string) (row, bool) {
+	if len(fields) != 10 {
+		return row{}, false
+	}
+	// results.md orders columns file,mode,engine,effort; webpbench emits
+	// engine,mode,effort,file. Mode sits at index 1 either way, so which layout
+	// this is comes down to whether index 2 is the effort number.
+	file, mode, engine, effortStr := fields[0], fields[1], fields[2], fields[3]
+	if _, err := strconv.Atoi(fields[2]); err == nil {
+		file, mode, engine, effortStr = fields[3], fields[1], fields[0], fields[2]
+	}
+	effort, err := strconv.Atoi(effortStr)
+	if err != nil {
+		return row{}, false
+	}
+	bytes, err := strconv.Atoi(fields[6])
+	if err != nil {
+		return row{}, false
+	}
+	ms, err := strconv.ParseFloat(fields[9], 64)
+	if err != nil {
+		return row{}, false
+	}
+	r := row{engine: engine, mode: sweepPrefix + mode, file: file, effort: effort, bytes: bytes, ms: ms}
+	if psnr, err := strconv.ParseFloat(fields[7], 64); err == nil {
 		r.psnr, r.hasPSNR = psnr, true
 	}
 	return r, true

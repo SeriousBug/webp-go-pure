@@ -6,6 +6,7 @@ speed and decode speed. Re-runnable:
 ```sh
 benchmark/run.sh        [budget_ms]   # encoding, default budget 2000ms per measurement
 benchmark/run-decode.sh [budget_ms]   # decoding
+benchmark/run-sweep.sh  [budget_ms]   # encoding at every effort setting, default 1000ms
 ```
 
 ## Engines
@@ -15,7 +16,6 @@ benchmark/run-decode.sh [budget_ms]   # decoding
 | `ours` | this pure-Go library | no | yes | yes |
 | `libwebp` | the C reference, via [go-webp](https://github.com/kolesa-team/go-webp) | yes | yes | yes |
 | `wasm` | libwebp compiled to WASM, via [gen2brain/webp](https://github.com/gen2brain/webp) | no | yes | yes |
-| `webp-rust` | the Rust library this port is based on ([../webp-rust](https://github.com/mith-mmk/webp-rust)) | n/a (separate binary) | yes | yes |
 | `nativewebp` | [HugoSmits86/nativewebp](https://github.com/HugoSmits86/nativewebp), another pure-Go encoder | no | lossless only | - |
 | `x/image` | [golang.org/x/image/webp](https://pkg.go.dev/golang.org/x/image/webp), the Go project's own decoder | no | - | yes |
 
@@ -41,15 +41,15 @@ process-launch overhead, so it adds no new data point.
 
 Lossy quality is fixed at 90.
 
-| Mode | ours | libwebp / wasm | webp-rust | nativewebp |
-| --- | --- | --- | --- | --- |
-| `lossless` | `EncodeLossless` optimize 6 | lossless preset level 6 | `encode_lossless` optimize 6 | `BestCompression` (level 6) |
-| `lossy-fast` | `EncodeLossy` optimize 0 | method 0 (fastest) | `encode_lossy` optimize 0 | - |
-| `lossy-slow` | `EncodeLossy` optimize 9 | method 6 (slowest) | `encode_lossy` optimize 9 | - |
+| Mode | ours | libwebp / wasm | nativewebp |
+| --- | --- | --- | --- |
+| `lossless` | `EncodeLossless` effort 6 | lossless preset level 6 | `BestCompression` (level 6) |
+| `lossy-fast` | `EncodeLossy` effort 0 | method 0 (fastest) | - |
+| `lossy-slow` | `EncodeLossy` effort 9 | method 6 (slowest) | - |
 
-The effort scales differ between codecs (our optimize is 0..9, libwebp method is
+The effort scales differ between codecs (our effort is 0..9, libwebp method is
 0..6), so `fast`/`slow` mark each codec's own endpoints rather than an identical
-setting.
+setting. The effort sweep below covers everything in between.
 
 The decode pass has two modes, `lossless` and `lossy`, named for the file being
 decoded rather than for any decoder setting. Every engine is handed the same
@@ -58,12 +58,30 @@ quality 90 method 6. Letting each engine decode its own encoder's output would
 measure the encoder too, and libwebp is the fastest encoder here, so it is also
 the cheapest way to produce the inputs.
 
+## The effort sweep
+
+Fixed modes make an encoder look like a point when it is a curve: an encoder that
+is fast because it searches less can be made to look fast against one that was
+asked to search hard. `benchmark/run-sweep.sh` walks every effort setting each
+engine exposes, in `lossless` and `lossy` (quality 90), and reports time and
+output size at each:
+
+| Engine | knob | range |
+| --- | --- | --- |
+| `ours` | `Effort` | 0..9, both modes |
+| `libwebp` | lossy `method` / lossless preset level (`cwebp -z`) | 0..6 / 0..9 |
+| `wasm` | `Method` | 0..6, both modes: gen2brain/webp exposes no lossless level |
+| `nativewebp` | `CompressionLevel` | 0, 4, 6 — the three its `getMethodLevel` distinguishes |
+
+The numbers are each engine's own scale and do not line up across engines, which
+is why the figure plots time against size and puts the effort number on the point
+rather than on an axis: pick the tradeoff you want, then read the setting that
+gets it.
+
 ## Requirements
 
 - Go toolchain.
 - cgo + libwebp + pkg-config for the `libwebp` engine: `brew install webp pkg-config`.
-- For the `webp-rust` engine: a `cargo` toolchain and `../webp-rust` checked out
-  next to this repo. Both scripts skip it automatically if either is missing.
 
 The benchmark tooling and the cross-encoder compatibility tests live in their
 own Go module (`benchmark/`, with `webpbench/` and `compat/`), so the cgo and

@@ -17,14 +17,6 @@ echo ">> Go engines, peak RSS..." >&2
 ( cd "$SCRIPT_DIR" && go run -tags testbenchmark,nodynamic ./webpbench \
   -dir "$IMAGES_DIR" -mem ) >>"$MEM"
 
-RUST_DIR="$REPO_ROOT/../webp-rust"
-if command -v cargo >/dev/null 2>&1 && [ -d "$RUST_DIR" ]; then
-  echo ">> Rust engine, peak RSS..." >&2
-  ( cd "$SCRIPT_DIR/rustbench" && cargo build --release --quiet )
-  "$SCRIPT_DIR/rustbench/target/release/rustbench" "$IMAGES_DIR" --mem >>"$MEM"
-else
-  echo ">> Skipping webp-rust engine (need cargo and $RUST_DIR)." >&2
-fi
 
 echo
 echo "Peak RSS (one encode per process, quality 90 for lossy):"

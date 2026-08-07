@@ -3,15 +3,13 @@
 #   ours     - this pure-Go library
 #   libwebp  - the C reference, via github.com/kolesa-team/go-webp (cgo)
 #   wasm     - libwebp compiled to WASM, via github.com/gen2brain/webp (cgo-free)
-#   webp-rust- the Rust library this port is based on (../webp-rust), if present
+#   nativewebp - github.com/HugoSmits86/nativewebp, a pure-Go VP8L encoder
 #
 # Modes: lossless, lossy-fast (high speed), lossy-slow (slowest).
 # Reports output size and mean encode time; fast encoders loop until a time
 # budget is met so timings are stable.
 #
-# Requirements:
-#   - Go toolchain, cgo, libwebp + pkg-config (brew install webp pkg-config)
-#   - For the webp-rust engine: a cargo toolchain and ../webp-rust checked out
+# Requirements: Go toolchain, cgo, libwebp + pkg-config (brew install webp pkg-config).
 #
 # Usage: benchmark/run.sh [budget_ms]   (default 2000)
 set -euo pipefail
@@ -36,17 +34,6 @@ echo ">> Go engines, peak RSS..." >&2
 ( cd "$SCRIPT_DIR" && go run -tags testbenchmark,nodynamic ./webpbench \
   -dir "$IMAGES_DIR" -mem ) >>"$MEM"
 
-RUST_DIR="$REPO_ROOT/../webp-rust"
-if command -v cargo >/dev/null 2>&1 && [ -d "$RUST_DIR" ]; then
-  echo ">> Rust engine (webp-rust)..." >&2
-  ( cd "$SCRIPT_DIR/rustbench" && cargo build --release --quiet )
-  "$SCRIPT_DIR/rustbench/target/release/rustbench" "$IMAGES_DIR" "$BUDGET_MS" >>"$RESULTS"
-  echo ">> Rust engine, peak RSS..." >&2
-  "$SCRIPT_DIR/rustbench/target/release/rustbench" "$IMAGES_DIR" --mem >>"$MEM"
-else
-  echo ">> Skipping webp-rust engine (need cargo and $RUST_DIR)." >&2
-fi
-
 echo
 echo "Results (budget ${BUDGET_MS}ms/measurement, quality 90 for lossy):"
 echo
@@ -58,6 +45,7 @@ echo
 
 echo
 echo "Decoding is a separate pass: benchmark/run-decode.sh"
+echo "The effort sweep is another: benchmark/run-sweep.sh"
 
 echo
 echo "Peak RSS (one encode per process, same settings):"

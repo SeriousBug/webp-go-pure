@@ -105,9 +105,8 @@ func toRGBA(img image.Image) rgbaImage {
 }
 
 // decodePass encodes each source image with libwebp, then times every decoder on
-// those bytes. With outDir set it also writes the encoded file and libwebp's
-// decode of it, which is what the Rust engine reads for its own pass.
-func decodePass(paths []string, outDir string, budget time.Duration, minIters, maxIters int) {
+// those bytes.
+func decodePass(paths []string, budget time.Duration, minIters, maxIters int) {
 	for _, p := range paths {
 		buf, err := loadImageBuffer(p)
 		if err != nil {
@@ -131,11 +130,6 @@ func decodePass(paths []string, outDir string, budget time.Duration, minIters, m
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s %s: reference decode: %v\n", name, mode.name, err)
 				continue
-			}
-			if outDir != "" {
-				if err := writeDecodeInput(outDir, name, mode.name, data, ref); err != nil {
-					fmt.Fprintf(os.Stderr, "%s %s: write input: %v\n", name, mode.name, err)
-				}
 			}
 
 			for _, e := range decodeCases(data) {
@@ -173,12 +167,4 @@ func decodeQuality(ref, got rgbaImage) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%.2f", dB), nil
-}
-
-func writeDecodeInput(dir, name, mode string, data []byte, ref rgbaImage) error {
-	stem := filepath.Join(dir, name+"."+mode)
-	if err := os.WriteFile(stem+".webp", data, 0o644); err != nil {
-		return err
-	}
-	return os.WriteFile(stem+".rgba", ref.pix, 0o644)
 }

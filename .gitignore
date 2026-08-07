@@ -1,7 +1,6 @@
 /target/
 *.test
 .DS_Store
-benchmark/rustbench/target/
 *.prof
 /webpprofile
 
