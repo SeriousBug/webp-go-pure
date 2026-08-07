@@ -1,11 +1,14 @@
 //go:build testbenchmark
 
-// webpbench encodes images across three modes with three engines, reporting
+// webpbench encodes images across three modes with four engines, reporting
 // output size and encode time:
 //
-//	ours    - this pure-Go library
-//	libwebp - the C reference, via github.com/kolesa-team/go-webp (cgo)
-//	wasm    - libwebp compiled to WASM, via github.com/gen2brain/webp (cgo-free)
+//	ours       - this pure-Go library
+//	libwebp    - the C reference, via github.com/kolesa-team/go-webp (cgo)
+//	wasm       - libwebp compiled to WASM, via github.com/gen2brain/webp (cgo-free)
+//	nativewebp - github.com/HugoSmits86/nativewebp, a pure-Go VP8L encoder
+//
+// nativewebp writes VP8L only, so it appears in the lossless mode alone.
 //
 // It is test-only tooling: it needs cgo + libwebp + pkg-config (for the libwebp
 // engine) and is excluded from normal builds. Build/run with:
@@ -61,6 +64,7 @@ import (
 
 	webp "github.com/SeriousBug/webp-go-pure"
 
+	nativewebp "github.com/HugoSmits86/nativewebp"
 	gwebp "github.com/gen2brain/webp"
 	"github.com/kolesa-team/go-webp/encoder"
 	kwebp "github.com/kolesa-team/go-webp/webp"
@@ -97,6 +101,7 @@ func encoderCases(buf *webp.Image) []encoderCase {
 		{"wasm", "lossless", wasmEncoder(nrgba, gwebp.Options{Lossless: true, Method: libwebpSlow})},
 		{"wasm", "lossy-fast", wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: libwebpFast})},
 		{"wasm", "lossy-slow", wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: libwebpSlow})},
+		{"nativewebp", "lossless", nativeEncoder(nrgba)},
 	}
 }
 
@@ -250,6 +255,19 @@ func libwebpEncoder(img *image.NRGBA, lossless bool, quality float32, method int
 		}
 		var b bytes.Buffer
 		if err := kwebp.Encode(&b, img, opts); err != nil {
+			return nil, err
+		}
+		return b.Bytes(), nil
+	}
+}
+
+// nativeEncoder is lossless-only: nativewebp writes VP8L and nothing else, so it
+// has no row in the lossy modes.
+func nativeEncoder(img *image.NRGBA) func() ([]byte, error) {
+	return func() ([]byte, error) {
+		var b bytes.Buffer
+		opts := &nativewebp.Options{CompressionLevel: nativewebp.BestCompression}
+		if err := nativewebp.Encode(&b, img, opts); err != nil {
 			return nil, err
 		}
 		return b.Bytes(), nil

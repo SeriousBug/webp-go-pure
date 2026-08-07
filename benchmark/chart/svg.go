@@ -69,22 +69,36 @@ func header(c *canvas, th theme, h float64, title, subtitle string) {
 	c.text(40, 56, 13, th.inkSecondary, "start", "", subtitle)
 }
 
-// footnote wraps at the figure width so a long note cannot run off the edge.
-func footnote(c *canvas, th theme, x, y float64, s string) {
-	const size, maxW = 11.5, 820.0
+const (
+	footSize  = 11.5
+	footMaxW  = 820.0
+	footLineH = 16.0
+)
+
+// footnoteWrap breaks a note at the figure width so a long one cannot run off
+// the edge. Callers size the figure from the line count before drawing it.
+func footnoteWrap(s string) []string {
+	var lines []string
 	var line string
 	for _, word := range strings.Fields(s) {
 		next := strings.TrimSpace(line + " " + word)
-		if textWidth(next, size) > maxW && line != "" {
-			c.text(x, y, size, th.muted, "start", "", line)
-			y += 16
+		if textWidth(next, footSize) > footMaxW && line != "" {
+			lines = append(lines, line)
 			line = word
 			continue
 		}
 		line = next
 	}
 	if line != "" {
-		c.text(x, y, size, th.muted, "start", "", line)
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func footnote(c *canvas, th theme, x, y float64, s string) {
+	for _, line := range footnoteWrap(s) {
+		c.text(x, y, footSize, th.muted, "start", "", line)
+		y += footLineH
 	}
 }
 
@@ -221,7 +235,7 @@ func encodeTime(sets []dataset, th theme) string {
 	return barPanels(sets, th, barSpec{
 		title:    "Encode time",
 		subtitle: "Geometric mean of each engine's ms/op over the test images, at quality 90. Each panel has its own scale.",
-		footnote: "Each panel has its own scale, so compare bars within a panel and read the labels across panels. A bar that fades out with an arrow runs off the top of its panel. wasm is libwebp compiled to WebAssembly: that gap is the cost of dropping cgo.",
+		footnote: "Each panel has its own scale, so compare bars within a panel and read the labels across panels. A bar that fades out with an arrow runs off the top of its panel. wasm is libwebp compiled to WebAssembly: that gap is the cost of dropping cgo. nativewebp encodes VP8L only, so it has a bar in the lossless panel alone.",
 		value:    func(r row) float64 { return r.ms },
 		format:   duration,
 	})
@@ -246,7 +260,7 @@ func peakMemory(sets []dataset, th theme) string {
 	return barPanels(sets, th, barSpec{
 		title:    "Peak memory",
 		subtitle: "Geometric mean of each engine's peak RSS in MiB per megapixel of source image, at quality 90. Each panel has its own scale.",
-		footnote: "One encode per process: source bitmap, runtime and encoder together, which is what an application pays. A 1080p frame is 2.1 MP and a 4K frame roughly 10 MP, so multiply through to size a workload. wasm carries a WebAssembly runtime and its own linear memory, which is why it costs more than the same encoder as C.",
+		footnote: "One encode per process: source bitmap, runtime and encoder together, which is what an application pays. A 1080p frame is 2.1 MP and a 4K frame roughly 10 MP, so multiply through to size a workload. wasm carries a WebAssembly runtime and its own linear memory, which is why it costs more than the same encoder as C. nativewebp encodes VP8L only, so it has a bar in the lossless panel alone.",
 		value:    func(r row) float64 { return r.mibPerMP },
 		format:   func(v float64) string { return fmt.Sprintf("%.0f", v) },
 	})
@@ -254,7 +268,7 @@ func peakMemory(sets []dataset, th theme) string {
 
 type barSpec struct {
 	title, subtitle, footnote string
-	// modes and engines default to the encode pass's three modes and four
+	// modes and engines default to the encode pass's three modes and five
 	// engines.
 	modes, engines []string
 	value          func(row) float64
@@ -268,11 +282,14 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 	}
 	engines := spec.engines
 	if engines == nil {
-		engines = []string{engOurs, engLibwebp, engWasm, engRust}
+		// nativewebp goes last: it is lossless-only, so its slot is empty in the
+		// lossy panels, and an empty slot at the edge of the group reads as
+		// absence where one in the middle would read as a gap.
+		engines = []string{engOurs, engLibwebp, engWasm, engRust, engNative}
 	}
 	names := map[string]string{
 		engOurs: "webp-go-pure", engLibwebp: "libwebp", engWasm: "wasm", engRust: "webp-rust",
-		engXImage: "x/image",
+		engXImage: "x/image", engNative: "nativewebp",
 	}
 	color := func(eng string) string {
 		if eng == engLibwebp {
@@ -304,8 +321,12 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 		}
 	}
 
+	// The footnote wraps, so the figure grows with it rather than clipping the
+	// last line: nativewebp's note is what first pushed one past three lines.
+	const footTop = 550.0
+	h := footTop + footLineH*float64(len(footnoteWrap(spec.footnote))) - 2
+
 	const (
-		h       = 596.0
 		gutter  = 134.0
 		colGap  = 48.0
 		rightPd = 34.0
@@ -433,7 +454,7 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 		}
 	}
 
-	footnote(c, th, 40, 550, spec.footnote)
+	footnote(c, th, 40, footTop, spec.footnote)
 	c.printf(`</svg>`)
 	return c.b.String()
 }

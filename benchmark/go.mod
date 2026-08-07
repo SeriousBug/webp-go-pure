@@ -6,6 +6,7 @@ module github.com/SeriousBug/webp-go-pure/benchmark
 go 1.26
 
 require (
+	github.com/HugoSmits86/nativewebp v1.3.0
 	github.com/SeriousBug/webp-go-pure v0.0.0
 	github.com/gen2brain/webp v0.6.4
 	github.com/kolesa-team/go-webp v1.0.5
