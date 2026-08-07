@@ -2,7 +2,7 @@ package webp
 
 import "bytes"
 
-// ChunkHeader holds common metadata for a RIFF chunk.
+// chunkHeader holds common metadata for a RIFF chunk.
 type chunkHeader struct {
 	Fourcc     [4]byte
 	Offset     int
@@ -11,14 +11,14 @@ type chunkHeader struct {
 	DataOffset int
 }
 
-// Vp8xHeader is a parsed VP8X extended header.
+// vp8xHeader is a parsed VP8X extended header.
 type vp8xHeader struct {
 	Flags        uint32
 	CanvasWidth  int
 	CanvasHeight int
 }
 
-// WebpFeatures are high-level image features derived from the container and bitstream.
+// FeatureInfo holds high-level image features derived from the container and bitstream.
 type FeatureInfo struct {
 	Width        int
 	Height       int
@@ -28,7 +28,7 @@ type FeatureInfo struct {
 	vp8x         *vp8xHeader
 }
 
-// ParsedWebp is a parsed still-image WebP container with raw chunk slices.
+// parsedWebp is a parsed still-image WebP container with raw chunk slices.
 type parsedWebp struct {
 	Features    FeatureInfo
 	RiffSize    *int
@@ -39,13 +39,13 @@ type parsedWebp struct {
 	alphaHeader *alphaHeader
 }
 
-// AnimationHeader is a parsed ANIM chunk.
+// animationHeader is a parsed ANIM chunk.
 type animationHeader struct {
 	BackgroundColor uint32
 	LoopCount       uint16
 }
 
-// ParsedAnimationFrame is a parsed animation frame entry.
+// parsedAnimationFrame is a parsed animation frame entry.
 type parsedAnimationFrame struct {
 	FrameChunk          chunkHeader
 	XOffset             int
@@ -62,7 +62,7 @@ type parsedAnimationFrame struct {
 	alphaHeader         *alphaHeader
 }
 
-// ParsedAnimationWebp is a parsed animated WebP container.
+// parsedAnimationWebp is a parsed animated WebP container.
 type parsedAnimationWebp struct {
 	Features  FeatureInfo
 	RiffSize  *int
@@ -86,7 +86,11 @@ func paddedPayloadSize(size int) int {
 	return size + (size & 1)
 }
 
-func parseChunk(data []byte, offset int, riffLimit *int) (chunkHeader, error) {
+// parseChunkHeader reads a chunk header without requiring the payload it
+// describes to be present. Features needs only the first few bytes of the image
+// chunk, so demanding the whole payload would make reading a header cost as
+// much as reading the file.
+func parseChunkHeader(data []byte, offset int, riffLimit *int) (chunkHeader, error) {
 	if len(data) < offset+chunkHeaderSize {
 		return chunkHeader{}, notEnoughData("chunk header")
 	}
@@ -96,13 +100,8 @@ func parseChunk(data []byte, offset int, riffLimit *int) (chunkHeader, error) {
 	}
 
 	paddedSize := paddedPayloadSize(size)
-	totalSize := chunkHeaderSize + paddedSize
-	end := offset + totalSize
-	if riffLimit != nil && end > *riffLimit {
+	if riffLimit != nil && offset+chunkHeaderSize+paddedSize > *riffLimit {
 		return chunkHeader{}, bitstreamErr("chunk exceeds RIFF payload")
-	}
-	if len(data) < end {
-		return chunkHeader{}, notEnoughData("chunk payload")
 	}
 
 	var fourcc [4]byte
@@ -116,7 +115,21 @@ func parseChunk(data []byte, offset int, riffLimit *int) (chunkHeader, error) {
 	}, nil
 }
 
-func parseRiff(data []byte) (*int, int, error) {
+func parseChunk(data []byte, offset int, riffLimit *int) (chunkHeader, error) {
+	chunk, err := parseChunkHeader(data, offset, riffLimit)
+	if err != nil {
+		return chunkHeader{}, err
+	}
+	if len(data) < chunk.Offset+chunkHeaderSize+chunk.PaddedSize {
+		return chunkHeader{}, notEnoughData("chunk payload")
+	}
+	return chunk, nil
+}
+
+// parseRiffHeader reads the RIFF header without checking that the payload it
+// declares is actually present, so a caller that only wants the image header
+// does not have to hold the whole file.
+func parseRiffHeader(data []byte) (*int, int, error) {
 	if len(data) < riffHeaderSize {
 		return nil, 0, notEnoughData("RIFF header")
 	}
@@ -134,11 +147,19 @@ func parseRiff(data []byte) (*int, int, error) {
 	if riffSize > maxChunkPayload {
 		return nil, 0, bitstreamErr("RIFF payload is too large")
 	}
-	if riffSize > len(data)-chunkHeaderSize {
-		return nil, 0, notEnoughData("truncated RIFF payload")
-	}
 
 	return &riffSize, riffHeaderSize, nil
+}
+
+func parseRiff(data []byte) (*int, int, error) {
+	riffSize, offset, err := parseRiffHeader(data)
+	if err != nil {
+		return nil, 0, err
+	}
+	if riffSize != nil && *riffSize > len(data)-chunkHeaderSize {
+		return nil, 0, notEnoughData("truncated RIFF payload")
+	}
+	return riffSize, offset, nil
 }
 
 func parseVp8x(data []byte, offset int) (*vp8xHeader, int, error) {
@@ -179,9 +200,9 @@ func riffLimitOf(riffSize *int) *int {
 	return &limit
 }
 
-// GetFeatures returns high-level WebP features without fully decoding the image.
+// Features returns high-level WebP features without fully decoding the image.
 func Features(data []byte) (FeatureInfo, error) {
-	riffSize, offset, err := parseRiff(data)
+	riffSize, offset, err := parseRiffHeader(data)
 	if err != nil {
 		return FeatureInfo{}, err
 	}
@@ -231,11 +252,16 @@ func Features(data []byte) (FeatureInfo, error) {
 		}
 	}
 
-	chunk, err := parseChunk(data, offset, riffLimit)
+	// The image chunk's header carries the dimensions, so the payload only has
+	// to be present as far as the frame header. Reporting features on an
+	// otherwise truncated file is deliberate: it is what lets a caller size a
+	// decode before committing to reading all of it.
+	chunk, err := parseChunkHeader(data, offset, riffLimit)
 	if err != nil {
 		return FeatureInfo{}, err
 	}
-	payload := data[chunk.DataOffset : chunk.DataOffset+chunk.Size]
+	payloadEnd := min(chunk.DataOffset+chunk.Size, len(data))
+	payload := data[chunk.DataOffset:payloadEnd]
 	var format Format
 	var width, height int
 	if bytes.Equal(chunk.Fourcc[:], []byte("VP8 ")) {
@@ -271,7 +297,7 @@ func Features(data []byte) (FeatureInfo, error) {
 	}, nil
 }
 
-// ParseStillWebp parses a still-image WebP container and returns raw chunk slices.
+// parseStillWebp parses a still-image WebP container and returns raw chunk slices.
 func parseStillWebp(data []byte) (parsedWebp, error) {
 	riffSize, offset, err := parseRiff(data)
 	if err != nil {
@@ -420,7 +446,7 @@ func parseAnimationFrame(data []byte, features FeatureInfo, chunk chunkHeader, r
 	}, nil
 }
 
-// ParseAnimationWebp parses an animated WebP container and returns frame-level chunk slices.
+// parseAnimationWebp parses an animated WebP container and returns frame-level chunk slices.
 func parseAnimationWebp(data []byte) (parsedAnimationWebp, error) {
 	riffSize, offset, err := parseRiff(data)
 	if err != nil {

@@ -465,7 +465,13 @@ func TestEncodeLossyImageToWebpAcceptsOpaqueImageBuffer(t *testing.T) {
 func TestEncodeLossyRgbaToWebpRejectsAlphaInput(t *testing.T) {
 	options := elossyDefaultOptions()
 	_, err := encodeLossyRgbaToWebpWithOptions(1, 1, []byte{0, 0, 0, 0x7f}, &options)
-	assertInvalidParam(t, err, "lossy encoder does not support alpha yet")
+	var encErr *EncoderError
+	if !errors.As(err, &encErr) || encErr.Kind != EncErrAlphaUnsupported {
+		t.Fatalf("expected EncErrAlphaUnsupported, got %v", err)
+	}
+	if !errors.Is(err, ErrLossyAlpha) || !errors.Is(err, ErrInvalidParam) {
+		t.Fatalf("expected ErrLossyAlpha and ErrInvalidParam, got %v", err)
+	}
 }
 
 func TestEncodeLossyRgbaToWebpRejectsInvalidQuality(t *testing.T) {

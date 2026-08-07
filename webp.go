@@ -4,7 +4,9 @@
 // lossless VP8L, with no cgo and no external dependencies. It is a Go port of
 // the webp-rust crate by MITH@mmk (https://github.com/mith-mmk/webp-rust).
 //
-// The API is small:
+// Most callers want the std subpackage, which speaks image.Image and plugs into
+// image.Decode, image/jpeg, image/png and the rest of the standard library.
+// This package is the codec underneath it, operating on plain byte buffers:
 //
 //   - [Decode] and [DecodeFile] decode a still image into an [Image].
 //   - [DecodeAnimation] decodes an animated WebP into an [Animation].
@@ -12,7 +14,11 @@
 //   - [EncodeLossy] and [EncodeLossless] encode an [Image], configured with
 //     [LossyOptions] / [LosslessOptions] (pass nil for defaults).
 //
-// All pixel data is 8-bit RGBA in row-major order.
+// [Image] pixel data is 8-bit straight-alpha RGBA in row-major order.
+//
+// Lossy WebP is natively planar 4:2:0 YCbCr, so [Decode] and [EncodeLossy] pay
+// a colorspace conversion in each direction. [DecodeYUV] and [EncodeLossyYUV]
+// work on [YUVImage] planes directly and skip it.
 package webp
 
 import "os"
@@ -26,7 +32,7 @@ func Decode(data []byte) (Image, error) {
 		return Image{}, err
 	}
 	if features.HasAnimation {
-		return Image{}, unsupportedErr("animated WebP requires animation decoder API")
+		return Image{}, animatedErr("animated WebP requires DecodeAnimation")
 	}
 
 	var image decodedImage

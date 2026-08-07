@@ -7,4 +7,5 @@ benchmark/rustbench/target/
 
 # Extracted from the docs by glitterate, see .github/workflows/ci.yml
 /docs_readme_test.go
-/docs_image_interop_test.go
+/docs_std_test.go
+/docs_codec_api_test.go

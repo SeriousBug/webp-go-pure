@@ -5,15 +5,13 @@ Pure Go WebP decoder and encoder. No cgo, no external dependencies.
     go get github.com/SeriousBug/webp-go-pure
 
 Decodes lossy `VP8` and lossless `VP8L` still images, decodes animated WebP into
-a composited RGBA frame sequence, and encodes still images as lossy or lossless
-from RGBA. Alpha comes through `ALPH` chunks on lossy still images and on lossy
-animation frames. All pixel data in and out of the library is packed 8-bit RGBA.
+a composited frame sequence, and encodes still images as lossy or lossless.
+Alpha comes through `ALPH` chunks on lossy still images and on lossy animation
+frames.
 
-The decoders are a Go port of
-[webp-rust](https://github.com/mith-mmk/webp-rust) by MITH@mmk. The encoders
-draw on [libwebp](https://chromium.googlesource.com/webm/libwebp/), the C
-reference implementation, with arm64 NEON and amd64 SSE assembly for the hot
-paths.
+The `std` subpackage implements the standard library's codec interfaces, so
+`image.Image` goes in and comes out and `image.Decode` works. Underneath it, the
+root package is the codec itself, working on plain byte buffers.
 
 ## Performance
 
@@ -41,156 +39,188 @@ Full tables, PSNR and peak-memory figures, the test corpus and the method are in
 package webp_test
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
+	"io"
 	"os"
 
-	webp "github.com/SeriousBug/webp-go-pure"
+	"github.com/SeriousBug/webp-go-pure/std"
 )
 " -->
 
-Top-level still-image decode:
+```go
+import "github.com/SeriousBug/webp-go-pure/std"
+```
+
+`Decode`, `DecodeConfig` and `Encode` have the same signatures as the ones in
+`image/png` and `image/jpeg`:
 
 <!-- glitterate append=2 file="docs_readme_test.go" -->
 ```go
-func decodeStill(data []byte) error {
-	img, err := webp.Decode(data)
+func describe(r io.Reader) (string, error) {
+	img, err := webp.Decode(r)
 	if err != nil {
-		return err
+		return "", err
 	}
-	fmt.Printf("%dx%d\n", img.Width, img.Height)
-	return nil
+	bounds := img.Bounds()
+	return fmt.Sprintf("%dx%d %T", bounds.Dx(), bounds.Dy(), img), nil
 }
 ```
 
-`Decode` returns a `webp.Image` (packed 8-bit RGBA, plus `Width`/`Height`).
-`DecodeFile` does the same from a path, and `Features` reports dimensions and
-format without a full decode.
+The concrete type depends on the file: `*image.YCbCr` for lossy,
+`*image.NYCbCrA` for lossy with transparency, `*image.NRGBA` for lossless. All
+of them are an `image.Image`, so `At`, `Bounds` and `draw.Draw` work as usual.
+If you would rather always get the same type, `DecodeNRGBA` returns an
+`*image.NRGBA` whatever the file holds.
 
-Still-image encode takes a `*webp.Image` and an options struct; pass `nil` for
-the defaults (lossy quality 90 effort 0, lossless effort 6). `Effort` runs 0..9,
-trading speed for size:
+Encoding takes an options struct, or `nil` for the defaults (lossy, quality 90):
 
 <!-- glitterate append=3 file="docs_readme_test.go" -->
 ```go
-func encodeBoth(img webp.Image) (lossy, lossless []byte, err error) {
-	lossy, err = webp.EncodeLossy(&img, &webp.LossyOptions{Quality: 90, Effort: 4})
-	if err != nil {
-		return nil, nil, err
-	}
-	lossless, err = webp.EncodeLossless(&img, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	return lossy, lossless, nil
+func writeWebP(w io.Writer, img image.Image) error {
+	return webp.Encode(w, img, &webp.Options{Quality: 80})
 }
 ```
 
-The lossy encoder does not handle transparency yet and rejects input with any
-pixel whose alpha is not `0xff`. Lossless encoding takes alpha as it comes.
+Set `Lossless` to encode with VP8L instead, which reproduces the input exactly
+and is the only mode that keeps an alpha channel. `Effort` runs 0..9 and trades
+encode time for file size.
 
-`webp.Image` is a plain struct, so converting to and from the standard
-library's `image.Image` is up to the caller.
-[docs/image-interop.md](docs/image-interop.md) covers both directions, including
-premultiplied vs straight alpha.
+### Transcoding
 
-To embed raw EXIF metadata, set it on the options:
+JPEG to WebP is a decode and an encode, with nothing in between:
 
 <!-- glitterate append=4 file="docs_readme_test.go" -->
 ```go
-func encodeWithExif(img webp.Image, exif []byte) ([]byte, error) {
-	return webp.EncodeLossless(&img, &webp.LosslessOptions{EXIF: exif})
-}
-```
-
-Animated WebP goes through `DecodeAnimation`, which returns composited RGBA
-frames. `Decode` does not accept it, so check `Features` first to pick the entry
-point:
-
-<!-- glitterate append=5 file="docs_readme_test.go" -->
-```go
-func decodeStillOrAnimation(data []byte) error {
-	features, err := webp.Features(data)
+func jpegToWebP(dst io.Writer, src io.Reader) error {
+	img, err := jpeg.Decode(src)
 	if err != nil {
 		return err
 	}
-	if features.HasAnimation {
-		anim, err := webp.DecodeAnimation(data)
-		if err != nil {
-			return err
-		}
-		fmt.Println("animation, frames:", len(anim.Frames))
-		return nil
-	}
-	return decodeStill(data)
+	return webp.Encode(dst, img, &webp.Options{Quality: 80})
 }
 ```
 
+This path is faster and about a third lighter on memory than transcoding through
+RGBA.
+
+### image.Decode
+
+Importing the package registers WebP with `image.Decode` and
+`image.DecodeConfig`, the way `image/png` and `golang.org/x/image/webp` do:
+
+<!-- glitterate append=5 file="docs_readme_test.go" -->
+```go
+func sniffFormat(r io.Reader) (string, error) {
+	_, format, err := image.Decode(r)
+	return format, err
+}
+```
+
+To migrate from `golang.org/x/image/webp`, swapping the import path is enough:
+we support the same API, and add encoding and animations. One difference is that
+lossy colors come out with a wider range here. `x/image/webp` crushes blacks and
+whites slightly, decoding a white pixel to 235 where we give you 255.
+
+Keep only one WebP package in your binary. `image.RegisterFormat` has no way to
+unregister, and every WebP package claims the same magic bytes, so with two of
+them linked in it is import order that decides which one `image.Decode` uses.
+
+## More
+
+- [docs/std.md](docs/std.md) covers the `std` package in full: which concrete
+  types the fast paths recognize, alpha and premultiplication, animations,
+  and reusing buffers.
+- [docs/codec-api.md](docs/codec-api.md) covers the root package: the byte
+  oriented API, EXIF, raw planar YUV, and animation decoding.
+
 <!-- glitterate append=6 file="docs_readme_test.go" text="
-func opaque(w, h int) []byte {
-	pix := make([]byte, w*h*4)
-	for i := range pix {
-		pix[i] = 0xff
+func Example_describe() {
+	f, err := os.Open("testdata/sample_lossy.webp")
+	if err != nil {
+		panic(err)
 	}
-	return pix
+	defer f.Close()
+
+	line, err := describe(f)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(line)
+	// Output: 1920x1080 *image.YCbCr
 }
 
-func Example_decodeStill() {
-	data, err := os.ReadFile("testdata/sample.webp")
+func Example_writeWebP() {
+	src := image.NewNRGBA(image.Rect(0, 0, 32, 32))
+	for i := range src.Pix {
+		src.Pix[i] = 0xff
+	}
+
+	var buf bytes.Buffer
+	if err := writeWebP(&buf, src); err != nil {
+		panic(err)
+	}
+
+	config, format, err := image.DecodeConfig(bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		panic(err)
 	}
-	if err := decodeStill(data); err != nil {
-		panic(err)
-	}
-	// Output: 1920x1080
+	fmt.Println(format, config.Width, config.Height)
+	// Output: webp 32 32
 }
 
-func Example_encodeBoth() {
-	img := webp.Image{Width: 2, Height: 2, RGBA: opaque(2, 2)}
-	lossy, lossless, err := encodeBoth(img)
+func Example_jpegToWebP() {
+	want := color.RGBA{40, 90, 160, 255}
+	src := image.NewRGBA(image.Rect(0, 0, 48, 32))
+	draw.Draw(src, src.Bounds(), &image.Uniform{want}, image.Point{}, draw.Src)
+
+	var source bytes.Buffer
+	if err := jpeg.Encode(&source, src, nil); err != nil {
+		panic(err)
+	}
+
+	var out bytes.Buffer
+	if err := jpegToWebP(&out, &source); err != nil {
+		panic(err)
+	}
+
+	img, err := webp.Decode(bytes.NewReader(out.Bytes()))
 	if err != nil {
 		panic(err)
 	}
 
-	lossyFeatures, err := webp.Features(lossy)
-	if err != nil {
-		panic(err)
-	}
-	losslessFeatures, err := webp.Features(lossless)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(lossyFeatures.Format == webp.FormatLossy, losslessFeatures.Format == webp.FormatLossless)
-	// Output: true true
+	got := color.NRGBAModel.Convert(img.At(24, 16)).(color.NRGBA)
+	fmt.Println(img.Bounds(), nearNRGBA(got, color.NRGBA{want.R, want.G, want.B, want.A}, 8))
+	// Output: (0,0)-(48,32) true
 }
 
-func Example_encodeWithExif() {
-	img := webp.Image{Width: 2, Height: 2, RGBA: opaque(2, 2)}
-	data, err := encodeWithExif(img, []byte("Exif\x00\x00II*\x00\x08\x00\x00\x00\x00\x00"))
-	if err != nil {
-		panic(err)
-	}
-
-	decoded, err := webp.Decode(data)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(decoded.Width, decoded.Height)
-	// Output: 2 2
-}
-
-func Example_decodeStillOrAnimation() {
-	for _, name := range []string{"testdata/sample.webp", "testdata/sample_animation.webp"} {
-		data, err := os.ReadFile(name)
-		if err != nil {
-			panic(err)
+func nearNRGBA(a, b color.NRGBA, tolerance int) bool {
+	diff := func(x, y uint8) int {
+		if x > y {
+			return int(x - y)
 		}
-		if err := decodeStillOrAnimation(data); err != nil {
-			panic(err)
-		}
+		return int(y - x)
 	}
-	// Output:
-	// 1920x1080
-	// animation, frames: 3
+	return diff(a.R, b.R) <= tolerance && diff(a.G, b.G) <= tolerance &&
+		diff(a.B, b.B) <= tolerance && a.A == b.A
+}
+
+func Example_sniffFormat() {
+	f, err := os.Open("testdata/sample_lossless.webp")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	format, err := sniffFormat(f)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(format)
+	// Output: webp
 }
 " -->
