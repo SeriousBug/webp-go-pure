@@ -30,11 +30,11 @@ both time and memory, and webp-go-pure comes out ahead of it:
 ![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](benchmark/charts/peak-memory-light.svg#gh-light-mode-only)
 ![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](benchmark/charts/peak-memory-dark.svg#gh-dark-mode-only)
 
-Those figures are for encoding. Decoding is a different race, because
-`golang.org/x/image/webp` is already there and is decode-only. We come out
-slightly ahead of it in every mode on both machines, by 1% to 18% on the mean,
-though on arm64 lossless it comes down to the image. Against libwebp itself we
-are 2.4-5.8x slower on lossy and 1.5-2.9x on lossless.
+Those figures are for encoding. For decoding, the comparison to make is
+`golang.org/x/image/webp`, which decodes but does not encode. We are faster than
+it in every mode on both machines, by 1% to 18% on the geometric mean; on arm64
+lossless the per-image results go either way. Against libwebp we are 2.4-5.8x
+slower on lossy and 1.5-2.9x on lossless.
 
 Full tables, PSNR and peak-memory figures, the test corpus and the method are in
 [benchmark/results.md](benchmark/results.md).
