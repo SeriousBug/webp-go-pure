@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="596" viewBox="0 0 900 596" role="img">
+<rect width="900" height="596" fill="#fcfcfb"/>
+<text x="40.0" y="34.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="19" fill="#0b0b0b" text-anchor="start" font-weight="600">Decode time</text>
+<text x="40.0" y="56.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="13" fill="#52514e" text-anchor="start">Geometric mean of each engine's ms/op over the test images, decoding files libwebp encoded. Each panel has its own scale.</text>
+<circle cx="45.0" cy="80.0" r="5.0" fill="#2a78d6"/>
+<text x="56.0" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#52514e" text-anchor="start">webp-go-pure</text>
+<circle cx="169.5" cy="80.0" r="5.0" fill="#898781"/>
+<text x="180.5" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#52514e" text-anchor="start">libwebp</text>
+<circle cx="259.6" cy="80.0" r="5.0" fill="#1baf7a"/>
+<text x="270.6" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#52514e" text-anchor="start">wasm</text>
+<circle cx="329.1" cy="80.0" r="5.0" fill="#eb6834"/>
+<text x="340.1" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#52514e" text-anchor="start">webp-rust</text>
+<circle cx="433.0" cy="80.0" r="5.0" fill="#8a5cd0"/>
+<text x="444.0" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#52514e" text-anchor="start">x/image</text>
+<text x="305.0" y="128.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="14" fill="#0b0b0b" text-anchor="middle" font-weight="600">lossless</text>
+<text x="695.0" y="128.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="14" fill="#0b0b0b" text-anchor="middle" font-weight="600">lossy</text>
+<text x="116.0" y="242.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#52514e" text-anchor="end" font-weight="600">arm64</text>
+<text x="116.0" y="258.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end">Apple M4 Pro</text>
+<line x1="134.0" y1="312.0" x2="476.0" y2="312.0" stroke="#c3c2b7" stroke-width="1.0"/>
+<path d="M 241.0 312.0 L 241.0 272.3 Q 241.0 268.3 245.0 268.3 L 261.0 268.3 Q 265.0 268.3 265.0 272.3 L 265.0 312.0 Z" fill="#2a78d6"/>
+<path d="M 267.0 312.0 L 267.0 292.7 Q 267.0 288.7 271.0 288.7 L 287.0 288.7 Q 291.0 288.7 291.0 292.7 L 291.0 312.0 Z" fill="#898781"/>
+<path d="M 293.0 312.0 L 293.0 252.4 Q 293.0 248.4 297.0 248.4 L 313.0 248.4 Q 317.0 248.4 317.0 252.4 L 317.0 312.0 Z" fill="#1baf7a"/>
+<path d="M 319.0 312.0 L 319.0 192.0 Q 319.0 188.0 323.0 188.0 L 339.0 188.0 Q 343.0 188.0 343.0 192.0 L 343.0 312.0 Z" fill="#eb6834"/>
+<path d="M 345.0 312.0 L 345.0 271.9 Q 345.0 267.9 349.0 267.9 L 365.0 267.9 Q 369.0 267.9 369.0 271.9 L 369.0 312.0 Z" fill="#8a5cd0"/>
+<text x="253.0" y="261.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">65 ms</text>
+<text x="279.0" y="281.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">35 ms</text>
+<text x="305.0" y="241.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">94 ms</text>
+<text x="331.0" y="181.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">184 ms</text>
+<text x="357.0" y="260.9" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">66 ms</text>
+<line x1="524.0" y1="312.0" x2="866.0" y2="312.0" stroke="#c3c2b7" stroke-width="1.0"/>
+<path d="M 631.0 312.0 L 631.0 200.0 Q 631.0 196.0 635.0 196.0 L 651.0 196.0 Q 655.0 196.0 655.0 200.0 L 655.0 312.0 Z" fill="#2a78d6"/>
+<path d="M 657.0 312.0 L 657.0 284.0 Q 657.0 280.0 661.0 280.0 L 677.0 280.0 Q 681.0 280.0 681.0 284.0 L 681.0 312.0 Z" fill="#898781"/>
+<path d="M 683.0 312.0 L 683.0 207.0 Q 683.0 203.0 687.0 203.0 L 703.0 203.0 Q 707.0 203.0 707.0 207.0 L 707.0 312.0 Z" fill="#1baf7a"/>
+<path d="M 709.0 312.0 L 709.0 238.7 Q 709.0 234.7 713.0 234.7 L 729.0 234.7 Q 733.0 234.7 733.0 238.7 L 733.0 312.0 Z" fill="#eb6834"/>
+<path d="M 735.0 312.0 L 735.0 192.0 Q 735.0 188.0 739.0 188.0 L 755.0 188.0 Q 759.0 188.0 759.0 192.0 L 759.0 312.0 Z" fill="#8a5cd0"/>
+<text x="643.0" y="189.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">71 ms</text>
+<text x="669.0" y="273.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">20 ms</text>
+<text x="695.0" y="196.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">67 ms</text>
+<text x="721.0" y="227.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">48 ms</text>
+<text x="747.0" y="181.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">76 ms</text>
+<text x="116.0" y="452.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#52514e" text-anchor="end" font-weight="600">amd64</text>
+<text x="116.0" y="468.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end">AMD Ryzen 7 5700G</text>
+<line x1="134.0" y1="522.0" x2="476.0" y2="522.0" stroke="#c3c2b7" stroke-width="1.0"/>
+<path d="M 241.0 522.0 L 241.0 482.7 Q 241.0 478.7 245.0 478.7 L 261.0 478.7 Q 265.0 478.7 265.0 482.7 L 265.0 522.0 Z" fill="#2a78d6"/>
+<path d="M 267.0 522.0 L 267.0 506.7 Q 267.0 502.7 271.0 502.7 L 287.0 502.7 Q 291.0 502.7 291.0 506.7 L 291.0 522.0 Z" fill="#898781"/>
+<path d="M 293.0 522.0 L 293.0 430.3 Q 293.0 426.3 297.0 426.3 L 313.0 426.3 Q 317.0 426.3 317.0 430.3 L 317.0 522.0 Z" fill="#1baf7a"/>
+<path d="M 319.0 522.0 L 319.0 402.0 Q 319.0 398.0 323.0 398.0 L 339.0 398.0 Q 343.0 398.0 343.0 402.0 L 343.0 522.0 Z" fill="#eb6834"/>
+<path d="M 345.0 522.0 L 345.0 473.3 Q 345.0 469.3 349.0 469.3 L 365.0 469.3 Q 369.0 469.3 369.0 473.3 L 369.0 522.0 Z" fill="#8a5cd0"/>
+<text x="253.0" y="471.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">71 ms</text>
+<text x="279.0" y="495.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">32 ms</text>
+<text x="305.0" y="419.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">157 ms</text>
+<text x="331.0" y="391.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">204 ms</text>
+<text x="357.0" y="462.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">87 ms</text>
+<line x1="524.0" y1="522.0" x2="866.0" y2="522.0" stroke="#c3c2b7" stroke-width="1.0"/>
+<path d="M 631.0 522.0 L 631.0 424.9 Q 631.0 420.9 635.0 420.9 L 651.0 420.9 Q 655.0 420.9 655.0 424.9 L 655.0 522.0 Z" fill="#2a78d6"/>
+<path d="M 657.0 522.0 L 657.0 496.2 Q 657.0 492.2 661.0 492.2 L 677.0 492.2 Q 681.0 492.2 681.0 496.2 L 681.0 522.0 Z" fill="#898781"/>
+<path d="M 683.0 522.0 L 683.0 402.0 Q 683.0 398.0 687.0 398.0 L 703.0 398.0 Q 707.0 398.0 707.0 402.0 L 707.0 522.0 Z" fill="#1baf7a"/>
+<path d="M 709.0 522.0 L 709.0 449.1 Q 709.0 445.1 713.0 445.1 L 729.0 445.1 Q 733.0 445.1 733.0 449.1 L 733.0 522.0 Z" fill="#eb6834"/>
+<path d="M 735.0 522.0 L 735.0 412.9 Q 735.0 408.9 739.0 408.9 L 755.0 408.9 Q 759.0 408.9 759.0 412.9 L 759.0 522.0 Z" fill="#8a5cd0"/>
+<text x="643.0" y="413.9" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">91 ms</text>
+<text x="669.0" y="485.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">27 ms</text>
+<text x="695.0" y="391.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">112 ms</text>
+<text x="721.0" y="438.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">69 ms</text>
+<text x="747.0" y="401.9" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#52514e" text-anchor="middle" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">102 ms</text>
+<text x="40.0" y="550.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">Every engine ends at packed RGBA, so x/image and wasm pay for converting their YCbCr planes inside the measurement, as an</text>
+<text x="40.0" y="566.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">application would. x/image is golang.org/x/image/webp, the Go project's own decoder, which has no encoder and so appears in this</text>
+<text x="40.0" y="582.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">figure alone.</text>
+</svg>

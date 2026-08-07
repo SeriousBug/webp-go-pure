@@ -12,12 +12,14 @@
 //
 //	go run ./chart -md results.md -out charts   (from benchmark/)
 //
-// Three figures, because size/quality, speed and memory are different questions:
+// Four figures, because size/quality, encode speed, decode speed and memory are
+// different questions:
 //
 //   - rate-distortion: output size and PSNR, both relative to libwebp, one point
 //     per image. Engines that are strictly better sit up and to the left.
 //   - encode time: geometric mean of each engine's ms/op, grouped by mode, one
 //     panel per machine.
+//   - decode time: the same, for the decode pass, which adds the x/image engine.
 //   - peak memory: geometric mean of each engine's peak RSS per megapixel, laid
 //     out the same way.
 package main
@@ -52,10 +54,17 @@ const (
 	engLibwebp = "libwebp"
 	engWasm    = "wasm"
 	engRust    = "webp-rust"
+	engXImage  = "x/image"
 )
 
 var lossyModes = []string{"lossy-fast", "lossy-slow"}
 var allModes = []string{"lossless", "lossy-fast", "lossy-slow"}
+
+// Decode rows carry the prefix so they cannot collide with the encode row for
+// the same engine and image: both passes have a "lossless" mode.
+const decodePrefix = "decode-"
+
+var decodeModes = []string{decodePrefix + "lossless", decodePrefix + "lossy"}
 
 type theme struct {
 	name                            string
@@ -70,13 +79,13 @@ var themes = []theme{
 		name: "light", surface: "#fcfcfb", plane: "#f9f9f7",
 		inkPrimary: "#0b0b0b", inkSecondary: "#52514e", muted: "#898781",
 		grid: "#e1e0d9", axis: "#c3c2b7",
-		series: map[string]string{engOurs: "#2a78d6", engRust: "#eb6834", engWasm: "#1baf7a"},
+		series: map[string]string{engOurs: "#2a78d6", engRust: "#eb6834", engWasm: "#1baf7a", engXImage: "#8a5cd0"},
 	},
 	{
 		name: "dark", surface: "#1a1a19", plane: "#0d0d0d",
 		inkPrimary: "#ffffff", inkSecondary: "#c3c2b7", muted: "#898781",
 		grid: "#2c2c2a", axis: "#383835",
-		series: map[string]string{engOurs: "#3987e5", engRust: "#d95926", engWasm: "#199e70"},
+		series: map[string]string{engOurs: "#3987e5", engRust: "#d95926", engWasm: "#199e70", engXImage: "#9d78e6"},
 	},
 }
 
@@ -100,6 +109,7 @@ func main() {
 		figures := map[string]string{
 			"rate-distortion": rateDistortion(sets[0], th),
 			"encode-time":     encodeTime(sets, th),
+			"decode-time":     decodeTime(sets, th),
 			"peak-memory":     peakMemory(sets, th),
 		}
 		for name, svg := range figures {
@@ -125,8 +135,8 @@ func parseMarkdown(path string) ([]dataset, error) {
 
 	var sets []dataset
 	byLabel := map[string]int{}
-	var heading string
-	var fenced bool
+	var heading, caption string
+	var fenced, decode bool
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -135,10 +145,19 @@ func parseMarkdown(path string) ([]dataset, error) {
 		switch {
 		case strings.HasPrefix(line, "## "):
 			heading = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			caption = ""
 		case strings.HasPrefix(line, "```"):
+			if !fenced {
+				// The decode table has the same column count as the peak-RSS
+				// one, so the caption above it is what tells them apart.
+				decode = strings.HasPrefix(caption, "Decode")
+			}
+			// A table is described by the line above it, so the caption never
+			// carries over to the next one.
+			caption = ""
 			fenced = !fenced
 		case fenced:
-			r, ok := parseRow(line)
+			r, ok := parseRow(line, decode)
 			if !ok {
 				continue
 			}
@@ -149,6 +168,10 @@ func parseMarkdown(path string) ([]dataset, error) {
 				sets = append(sets, dataset{label: heading})
 			}
 			sets[i].merge(r)
+		default:
+			if line = strings.TrimSpace(line); line != "" {
+				caption = line
+			}
 		}
 	}
 	return sets, sc.Err()
@@ -181,8 +204,9 @@ func (d *dataset) merge(r row) {
 
 // parseRow accepts both the whitespace-aligned tables in results.md and the raw
 // comma-separated output of webpbench/rustbench, for the timing table (9 columns)
-// and the peak-RSS table (8).
-func parseRow(line string) (row, bool) {
+// and the peak-RSS table (8). A decode row is 8 columns too, but ends in ms/op
+// rather than MiB per megapixel, so the caller has to say which it is.
+func parseRow(line string, decode bool) (row, bool) {
 	fields := strings.Fields(strings.ReplaceAll(line, ",", " "))
 	if len(fields) != 9 && len(fields) != 8 {
 		return row{}, false
@@ -192,10 +216,21 @@ func parseRow(line string) (row, bool) {
 	}
 	// results.md orders columns file,mode,engine; the tools emit engine,mode,file.
 	file, mode, engine := fields[0], fields[1], fields[2]
-	if engine == "lossless" || engine == "lossy-fast" || engine == "lossy-slow" {
+	if strings.HasPrefix(engine, "loss") {
 		file, mode, engine = fields[2], fields[1], fields[0]
 	}
+	if decode {
+		mode = decodePrefix + mode
+	}
 	r := row{engine: engine, mode: mode, file: file}
+	if decode {
+		ms, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err != nil {
+			return row{}, false
+		}
+		r.ms = ms
+		return r, true
+	}
 	if len(fields) == 8 {
 		mibPerMP, err := strconv.ParseFloat(fields[7], 64)
 		if err != nil {

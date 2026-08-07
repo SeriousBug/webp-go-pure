@@ -1,21 +1,31 @@
 # Benchmark results
 
-Captured run of `benchmark/run.sh` on two machines. Timings are machine-dependent;
-regenerate locally for your own hardware.
+Captured runs of `benchmark/run.sh` and `benchmark/run-decode.sh` on two
+machines. Timings are machine-dependent; regenerate locally for your own
+hardware.
 
 | | arm64 | amd64 |
 | --- | --- | --- |
 | **CPU** | Apple M4 Pro (14 cores) | AMD Ryzen 7 5700G (16 threads) |
 | **OS** | macOS 26.5.1 | Arch Linux, kernel 7.1.3 |
 | **Go** | go1.26.5 | go1.26.5 |
-| **Rust** | 1.97.1 | 1.97.1 |
+| **Rust** | 1.97.1 encode, 1.96.0 decode | 1.97.1 |
 
-- **libwebp:** 1.6.0 on both (also used by the `wasm` engine, via WASM) · **webp-rust:** v0.2.1
-- **Library commit:** 0009929 · **Date:** 2026-07-26
+- **libwebp:** 1.6.0 on both (also used by the `wasm` engine, via WASM)
+- **Encoding:** webp-rust v0.2.1 · library commit 0009929 · 2026-07-26
+- **Decoding:** webp-rust v0.2.0 · library commit bcab3e6 · 2026-08-07
 - **Budget:** 2000 ms/measurement, lossy quality 90
 
 Engines: `ours` (pure Go), `libwebp` (C, cgo), `wasm` (libwebp via WASM, cgo-free),
-`webp-rust` (the Rust original). See `README.md` for the exact mode settings.
+`webp-rust` (the Rust original), and in the decode tables `x/image`
+(golang.org/x/image/webp, decode only). See `README.md` for the exact mode
+settings.
+
+The two passes were captured on different dates, so the encode and decode tables
+are not one run of one commit. Encoder output is unchanged between those two
+commits (verified by hashing every mode of every test image), and the decode
+pass adds a `webp-rust` version bump downwards: v0.2.1 is not tagged upstream, so
+the decode capture uses the v0.2.0 tag on both machines.
 
 `psnr_db` decodes each encoder's own output and scores it against the pixels that
 encoder was handed, over RGB. Higher is better, and quality 90 lands near 40 dB.
@@ -70,6 +80,31 @@ On memory:
   is spread over fewer pixels: in the lossy modes Lena at 0.81 MP reads about twice
   the per-megapixel cost of the 5.5 MP images.
 
+On decoding. Every engine decodes the same libwebp-encoded file and has to end at
+packed RGBA, so the YCbCr-returning engines (`x/image` on lossy, `wasm` on
+everything) pay for that conversion inside the measurement, as an application
+would:
+
+- **vs `x/image`, lossy: we are slightly faster**, 0.88-0.99x its time on arm64
+  and 0.86-0.91x on amd64. This is the comparison to make if you are choosing
+  between the two pure-Go decoders for photos.
+- **vs `x/image`, lossless: we are slightly ahead on the mean and level per
+  image.** 0.78-1.15x its time on arm64 and 0.76-0.87x on amd64, which is 0.99x
+  and 0.82x on the geometric mean. amd64 is a consistent win; arm64 comes down to
+  the image, where we are ahead on the two smallest files and behind by up to 15%
+  on the largest. On the 5.5 MP images that is 100-121 ms against its 99-106 ms on
+  arm64, and 96-126 ms against its 118-144 ms on amd64.
+- **vs libwebp: 2.4-5.8x slower on lossy**, and 1.5-2.2x (arm64) / 1.9-2.9x
+  (amd64) on lossless.
+- **vs `wasm`, the other cgo-free libwebp: we are faster on lossless**,
+  0.37-0.81x its time; lossy is a wash on arm64 (0.93-1.16x) and ours on amd64
+  (0.74-0.85x).
+- **vs `webp-rust`, the original this decoder was ported from: we are 1.3-1.6x
+  slower on lossy and 1.4-3.7x faster on lossless** (0.27-0.69x its time). The
+  lossy gap is ported code that lost ground, not an algorithmic difference; the
+  lossless lead is the table-driven VP8L rewrite, which the Rust original does
+  not have.
+
 ## Charts
 
 ![Size and quality against libwebp: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-light.svg#gh-light-mode-only)
@@ -77,6 +112,9 @@ On memory:
 
 ![Encode time per image for each engine, one panel per mode and machine, with bars that run off the panel drawn fading out under an arrow](charts/encode-time-light.svg#gh-light-mode-only)
 ![Encode time per image for each engine, one panel per mode and machine, with bars that run off the panel drawn fading out under an arrow](charts/encode-time-dark.svg#gh-dark-mode-only)
+
+![Decode time per image for each engine, one panel per mode and machine, on the same bar layout as the encode time figure, with x/image added](charts/decode-time-light.svg#gh-light-mode-only)
+![Decode time per image for each engine, one panel per mode and machine, on the same bar layout as the encode time figure, with x/image added](charts/decode-time-dark.svg#gh-dark-mode-only)
 
 ![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](charts/peak-memory-light.svg#gh-light-mode-only)
 ![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](charts/peak-memory-dark.svg#gh-dark-mode-only)
@@ -292,6 +330,82 @@ pexels-toulouse-10807703.jpg                    lossy-slow  wasm       1400   21
 pexels-toulouse-10807703.jpg                    lossy-slow  webp-rust  1400   2100    2.94        45.2          15.4
 ```
 
+Decode, one file per mode encoded by libwebp:
+
+```
+file                                            mode      engine     width  height  bytes    iters  ms_per_op
+Lena_512.png                                    lossless  libwebp    900    900     627632   195    10.299
+Lena_512.png                                    lossless  ours       900    900     627632   105    19.133
+Lena_512.png                                    lossless  wasm       900    900     627632   81     24.773
+Lena_512.png                                    lossless  webp-rust  900    900     627632   36     56.835
+Lena_512.png                                    lossless  x/image    900    900     627632   106    18.998
+Lena_512.png                                    lossy     libwebp    900    900     89968    407    4.916
+Lena_512.png                                    lossy     ours       900    900     89968    116    17.341
+Lena_512.png                                    lossy     wasm       900    900     89968    126    15.911
+Lena_512.png                                    lossy     webp-rust  900    900     89968    180    11.164
+Lena_512.png                                    lossy     x/image    900    900     89968    110    18.346
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  libwebp    2025   2700    3241976  36     55.652
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours       2025   2700    3241976  17     121.314
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  wasm       2025   2700    3241976  14     149.590
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  webp-rust  2025   2700    3241976  7      318.183
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  x/image    2025   2700    3241976  19     105.726
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     libwebp    2025   2700    610518   58     34.626
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours       2025   2700    610518   17     124.246
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     wasm       2025   2700    610518   18     116.024
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     webp-rust  2025   2700    610518   24     86.365
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     x/image    2025   2700    610518   16     131.437
+pexels-martin-alargent-1165956-5665465.jpg      lossless  libwebp    2025   2700    2943528  36     55.637
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours       2025   2700    2943528  19     110.110
+pexels-martin-alargent-1165956-5665465.jpg      lossless  wasm       2025   2700    2943528  14     146.953
+pexels-martin-alargent-1165956-5665465.jpg      lossless  webp-rust  2025   2700    2943528  7      320.205
+pexels-martin-alargent-1165956-5665465.jpg      lossless  x/image    2025   2700    2943528  20     101.312
+pexels-martin-alargent-1165956-5665465.jpg      lossy     libwebp    2025   2700    603264   61     32.986
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours       2025   2700    603264   18     113.610
+pexels-martin-alargent-1165956-5665465.jpg      lossy     wasm       2025   2700    603264   19     107.279
+pexels-martin-alargent-1165956-5665465.jpg      lossy     webp-rust  2025   2700    603264   26     78.075
+pexels-martin-alargent-1165956-5665465.jpg      lossy     x/image    2025   2700    603264   17     122.982
+pexels-mavihnt-38213559.jpg                     lossless  libwebp    2560   1706    3482480  40     50.293
+pexels-mavihnt-38213559.jpg                     lossless  ours       2560   1706    3482480  20     100.147
+pexels-mavihnt-38213559.jpg                     lossless  wasm       2560   1706    3482480  16     128.166
+pexels-mavihnt-38213559.jpg                     lossless  webp-rust  2560   1706    3482480  7      304.858
+pexels-mavihnt-38213559.jpg                     lossless  x/image    2560   1706    3482480  21     98.758
+pexels-mavihnt-38213559.jpg                     lossy     libwebp    2560   1706    925032   48     42.135
+pexels-mavihnt-38213559.jpg                     lossy     ours       2560   1706    925032   18     113.236
+pexels-mavihnt-38213559.jpg                     lossy     wasm       2560   1706    925032   20     100.201
+pexels-mavihnt-38213559.jpg                     lossy     webp-rust  2560   1706    925032   27     75.344
+pexels-mavihnt-38213559.jpg                     lossy     x/image    2560   1706    925032   16     128.026
+pexels-steve-15267299.jpg                       lossless  libwebp    2095   3000    2104690  36     56.624
+pexels-steve-15267299.jpg                       lossless  ours       2095   3000    2104690  20     103.508
+pexels-steve-15267299.jpg                       lossless  wasm       2095   3000    2104690  13     156.757
+pexels-steve-15267299.jpg                       lossless  webp-rust  2095   3000    2104690  8      270.135
+pexels-steve-15267299.jpg                       lossless  x/image    2095   3000    2104690  20     102.349
+pexels-steve-15267299.jpg                       lossy     libwebp    2095   3000    247610   98     20.533
+pexels-steve-15267299.jpg                       lossy     ours       2095   3000    247610   21     97.708
+pexels-steve-15267299.jpg                       lossy     wasm       2095   3000    247610   21     95.333
+pexels-steve-15267299.jpg                       lossy     webp-rust  2095   3000    247610   31     65.035
+pexels-steve-15267299.jpg                       lossy     x/image    2095   3000    247610   21     98.499
+pexels-steve-29626041.jpg                       lossless  libwebp    2560   1440    283988   111    18.045
+pexels-steve-29626041.jpg                       lossless  ours       2560   1440    283988   74     27.061
+pexels-steve-29626041.jpg                       lossless  wasm       2560   1440    283988   29     69.194
+pexels-steve-29626041.jpg                       lossless  webp-rust  2560   1440    283988   30     68.091
+pexels-steve-29626041.jpg                       lossless  x/image    2560   1440    283988   58     34.549
+pexels-steve-29626041.jpg                       lossy     libwebp    2560   1440    38252    281    7.136
+pexels-steve-29626041.jpg                       lossy     ours       2560   1440    38252    49     41.070
+pexels-steve-29626041.jpg                       lossy     wasm       2560   1440    38252    46     43.989
+pexels-steve-29626041.jpg                       lossy     webp-rust  2560   1440    38252    77     26.294
+pexels-steve-29626041.jpg                       lossy     x/image    2560   1440    38252    48     41.906
+pexels-toulouse-10807703.jpg                    lossless  libwebp    1400   2100    2688812  56     36.064
+pexels-toulouse-10807703.jpg                    lossless  ours       1400   2100    2688812  30     67.248
+pexels-toulouse-10807703.jpg                    lossless  wasm       1400   2100    2688812  23     88.447
+pexels-toulouse-10807703.jpg                    lossless  webp-rust  1400   2100    2688812  10     220.875
+pexels-toulouse-10807703.jpg                    lossless  x/image    1400   2100    2688812  28     73.078
+pexels-toulouse-10807703.jpg                    lossy     libwebp    1400   2100    758466   61     33.112
+pexels-toulouse-10807703.jpg                    lossy     ours       1400   2100    758466   24     85.657
+pexels-toulouse-10807703.jpg                    lossy     wasm       1400   2100    758466   28     73.887
+pexels-toulouse-10807703.jpg                    lossy     webp-rust  1400   2100    758466   35     57.144
+pexels-toulouse-10807703.jpg                    lossy     x/image    1400   2100    758466   21     97.053
+```
+
 ## amd64 (AMD Ryzen 7 5700G)
 
 ```
@@ -470,4 +584,80 @@ pexels-toulouse-10807703.jpg                    lossy-slow  libwebp    1400   21
 pexels-toulouse-10807703.jpg                    lossy-slow  ours       1400   2100    2.94        42.2          14.4
 pexels-toulouse-10807703.jpg                    lossy-slow  wasm       1400   2100    2.94        153.4         52.2
 pexels-toulouse-10807703.jpg                    lossy-slow  webp-rust  1400   2100    2.94        35.1          11.9
+```
+
+Decode, one file per mode encoded by libwebp:
+
+```
+file                                            mode      engine     width  height  bytes    iters  ms_per_op
+Lena_512.png                                    lossless  libwebp    900    900     627632   208    9.649
+Lena_512.png                                    lossless  ours       900    900     627632   105    19.199
+Lena_512.png                                    lossless  wasm       900    900     627632   51     39.455
+Lena_512.png                                    lossless  webp-rust  900    900     627632   31     65.620
+Lena_512.png                                    lossless  x/image    900    900     627632   87     23.081
+Lena_512.png                                    lossy     libwebp    900    900     89968    309    6.474
+Lena_512.png                                    lossy     ours       900    900     89968    92     21.758
+Lena_512.png                                    lossy     wasm       900    900     89968    77     26.053
+Lena_512.png                                    lossy     webp-rust  900    900     89968    123    16.352
+Lena_512.png                                    lossy     x/image    900    900     89968    83     24.258
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  libwebp    2025   2700    3241976  40     50.876
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours       2025   2700    3241976  17     117.651
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  wasm       2025   2700    3241976  8      251.238
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  webp-rust  2025   2700    3241976  6      362.250
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  x/image    2025   2700    3241976  15     135.414
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     libwebp    2025   2700    610518   44     46.006
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours       2025   2700    610518   14     150.958
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     wasm       2025   2700    610518   11     183.466
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     webp-rust  2025   2700    610518   17     118.118
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     x/image    2025   2700    610518   12     168.832
+pexels-martin-alargent-1165956-5665465.jpg      lossless  libwebp    2025   2700    2943528  40     50.437
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours       2025   2700    2943528  19     110.706
+pexels-martin-alargent-1165956-5665465.jpg      lossless  wasm       2025   2700    2943528  9      247.181
+pexels-martin-alargent-1165956-5665465.jpg      lossless  webp-rust  2025   2700    2943528  6      354.380
+pexels-martin-alargent-1165956-5665465.jpg      lossless  x/image    2025   2700    2943528  16     131.572
+pexels-martin-alargent-1165956-5665465.jpg      lossy     libwebp    2025   2700    603264   45     45.084
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours       2025   2700    603264   14     147.439
+pexels-martin-alargent-1165956-5665465.jpg      lossy     wasm       2025   2700    603264   12     176.742
+pexels-martin-alargent-1165956-5665465.jpg      lossy     webp-rust  2025   2700    603264   18     112.955
+pexels-martin-alargent-1165956-5665465.jpg      lossy     x/image    2025   2700    603264   13     162.343
+pexels-mavihnt-38213559.jpg                     lossless  libwebp    2560   1706    3482480  43     46.721
+pexels-mavihnt-38213559.jpg                     lossless  ours       2560   1706    3482480  21     95.888
+pexels-mavihnt-38213559.jpg                     lossless  wasm       2560   1706    3482480  10     210.976
+pexels-mavihnt-38213559.jpg                     lossless  webp-rust  2560   1706    3482480  6      353.600
+pexels-mavihnt-38213559.jpg                     lossless  x/image    2560   1706    3482480  18     117.567
+pexels-mavihnt-38213559.jpg                     lossy     libwebp    2560   1706    925032   39     51.930
+pexels-mavihnt-38213559.jpg                     lossy     ours       2560   1706    925032   16     130.746
+pexels-mavihnt-38213559.jpg                     lossy     wasm       2560   1706    925032   13     157.976
+pexels-mavihnt-38213559.jpg                     lossy     webp-rust  2560   1706    925032   20     101.008
+pexels-mavihnt-38213559.jpg                     lossy     x/image    2560   1706    925032   14     146.848
+pexels-steve-15267299.jpg                       lossless  libwebp    2095   3000    2104690  40     50.988
+pexels-steve-15267299.jpg                       lossless  ours       2095   3000    2104690  16     125.463
+pexels-steve-15267299.jpg                       lossless  wasm       2095   3000    2104690  8      264.620
+pexels-steve-15267299.jpg                       lossless  webp-rust  2095   3000    2104690  7      296.554
+pexels-steve-15267299.jpg                       lossless  x/image    2095   3000    2104690  14     144.306
+pexels-steve-15267299.jpg                       lossy     libwebp    2095   3000    247610   65     30.796
+pexels-steve-15267299.jpg                       lossy     ours       2095   3000    247610   15     136.235
+pexels-steve-15267299.jpg                       lossy     wasm       2095   3000    247610   12     169.643
+pexels-steve-15267299.jpg                       lossy     webp-rust  2095   3000    247610   20     102.209
+pexels-steve-15267299.jpg                       lossy     x/image    2095   3000    247610   14     151.540
+pexels-steve-29626041.jpg                       lossless  libwebp    2560   1440    283988   130    15.468
+pexels-steve-29626041.jpg                       lossless  ours       2560   1440    283988   45     45.285
+pexels-steve-29626041.jpg                       lossless  wasm       2560   1440    283988   17     121.297
+pexels-steve-29626041.jpg                       lossless  webp-rust  2560   1440    283988   31     65.619
+pexels-steve-29626041.jpg                       lossless  x/image    2560   1440    283988   34     59.657
+pexels-steve-29626041.jpg                       lossy     libwebp    2560   1440    38252    179    11.228
+pexels-steve-29626041.jpg                       lossy     ours       2560   1440    38252    34     60.229
+pexels-steve-29626041.jpg                       lossy     wasm       2560   1440    38252    25     81.710
+pexels-steve-29626041.jpg                       lossy     webp-rust  2560   1440    38252    46     44.188
+pexels-steve-29626041.jpg                       lossy     x/image    2560   1440    38252    29     69.925
+pexels-toulouse-10807703.jpg                    lossless  libwebp    1400   2100    2688812  56     35.880
+pexels-toulouse-10807703.jpg                    lossless  ours       1400   2100    2688812  29     69.151
+pexels-toulouse-10807703.jpg                    lossless  wasm       1400   2100    2688812  14     144.787
+pexels-toulouse-10807703.jpg                    lossless  webp-rust  1400   2100    2688812  8      254.969
+pexels-toulouse-10807703.jpg                    lossless  x/image    1400   2100    2688812  23     88.610
+pexels-toulouse-10807703.jpg                    lossy     libwebp    1400   2100    758466   48     41.737
+pexels-toulouse-10807703.jpg                    lossy     ours       1400   2100    758466   21     99.752
+pexels-toulouse-10807703.jpg                    lossy     wasm       1400   2100    758466   18     116.677
+pexels-toulouse-10807703.jpg                    lossy     webp-rust  1400   2100    758466   27     76.411
+pexels-toulouse-10807703.jpg                    lossy     x/image    1400   2100    758466   19     109.494
 ```
