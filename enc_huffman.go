@@ -219,10 +219,20 @@ func elosslessCodeRepeatedZeros(repetitions int, tokens []elosslessHuffmanTreeTo
 	return tokens
 }
 
-type elosslessHuffmanLeaf struct {
-	count uint32
-	value int32
+// elosslessHuffmanLeaf packs a leaf as count<<32 | ^value so that sorting the
+// raw uint64 keys ascending orders leaves by ascending count and, within equal
+// counts, by descending symbol value. Sorting plain integers avoids the
+// comparison callback of a struct sort, which this hot path pays a thousand
+// times per encode.
+type elosslessHuffmanLeaf uint64
+
+func elosslessMakeHuffmanLeaf(count uint32, value int) elosslessHuffmanLeaf {
+	return elosslessHuffmanLeaf(uint64(count)<<32 | uint64(^uint32(value)))
 }
+
+func (l elosslessHuffmanLeaf) count() uint32 { return uint32(l >> 32) }
+
+func (l elosslessHuffmanLeaf) value() int { return int(^uint32(l)) }
 
 // elosslessHuffmanScratch holds the working buffers of
 // elosslessGenerateCodeLengths. The function runs over a thousand times per
@@ -272,27 +282,18 @@ func elosslessGenerateCodeLengths(histogram []uint32, treeDepthLimit int) ([]uin
 				if count < countMin {
 					count = countMin
 				}
-				leaves = append(leaves, elosslessHuffmanLeaf{count: count, value: int32(value)})
+				leaves = append(leaves, elosslessMakeHuffmanLeaf(count, value))
 			}
 		}
 		scratch.leaves = leaves
 
-		// Ascending by count, ties by descending symbol value: this is the order
-		// in which the reference implementation's descending-sorted array is
-		// consumed from its tail.
-		slices.SortFunc(leaves, func(a, b elosslessHuffmanLeaf) int {
-			if a.count != b.count {
-				if a.count < b.count {
-					return -1
-				}
-				return 1
-			}
-			return int(b.value - a.value)
-		})
+		// The packed key sorts into the order in which the reference
+		// implementation's descending-sorted array is consumed from its tail.
+		slices.Sort(leaves)
 
 		maxDepth := 0
 		if len(leaves) == 1 {
-			codeLengths[leaves[0].value] = 1
+			codeLengths[leaves[0].value()] = 1
 			maxDepth = 1
 		} else {
 			maxDepth = elosslessBuildCodeLengths(scratch, codeLengths)
@@ -327,8 +328,8 @@ func elosslessBuildCodeLengths(scratch *elosslessHuffmanScratch, codeLengths []u
 		var pair [2]int32
 		total := uint32(0)
 		for k := 0; k < 2; k++ {
-			if leafNext < n && (nodeNext >= len(nodes) || leaves[leafNext].count <= nodes[nodeNext]) {
-				total += leaves[leafNext].count
+			if leafNext < n && (nodeNext >= len(nodes) || leaves[leafNext].count() <= nodes[nodeNext]) {
+				total += leaves[leafNext].count()
 				pair[k] = elosslessChildLeaf(leafNext)
 				leafNext++
 			} else {
@@ -358,7 +359,7 @@ func elosslessBuildCodeLengths(scratch *elosslessHuffmanScratch, codeLengths []u
 		childDepth := depths[i] + 1
 		for _, child := range children[i] {
 			if child < 0 {
-				value := leaves[^child].value
+				value := leaves[^child].value()
 				codeLengths[value] = uint8(childDepth)
 				if int(childDepth) > maxDepth {
 					maxDepth = int(childDepth)
