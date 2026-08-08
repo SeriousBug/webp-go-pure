@@ -187,16 +187,18 @@ func effortSweep(sets []dataset, th theme) string {
 			var yAxis []float64
 			if panel.logY {
 				yLo, yHi := math.Log10(yMin)-0.06, math.Log10(yMax)+0.06
+				yAxis = axisTicks(math.Pow(10, yLo), math.Pow(10, yHi))
+				yLo, yAxis = snapBottom(yLo, yHi, math.Log10(yMin), yAxis, math.Log10, rowH)
 				sy = func(v float64) float64 {
 					y := rowBot - (math.Log10(v)-yLo)/(yHi-yLo)*rowH
 					return math.Max(y, rowTop)
 				}
-				yAxis = axisTicks(math.Pow(10, yLo), math.Pow(10, yHi))
 			} else {
 				pad := math.Max((yMax-yMin)*0.1, 0.2)
 				yLo, yHi := yMin-pad, yMax+pad
-				sy = func(v float64) float64 { return rowBot - (v-yLo)/(yHi-yLo)*rowH }
 				yAxis = evenTicks(yLo, yHi)
+				yLo, yAxis = snapBottom(yLo, yHi, yMin, yAxis, func(v float64) float64 { return v }, rowH)
+				sy = func(v float64) float64 { return rowBot - (v-yLo)/(yHi-yLo)*rowH }
 			}
 
 			for _, t := range yAxis {
@@ -378,6 +380,42 @@ func movingSettings(pts []sweepPoint, value func(sweepPoint) float64, step func(
 		out[p.effort] = true
 	}
 	return out
+}
+
+// snapBottom pulls a panel's floor down onto the lowest gridline the data
+// clears, so the bottom of the frame is a labelled line rather than a blank
+// strip under one. It returns the new floor and the gridlines still inside the
+// panel. axis maps a tick to the space the panel is drawn in, which is the
+// identity for a linear panel and log10 for a logarithmic one.
+//
+// The lowest point keeps a marker's clearance above the frame: landing a curve
+// exactly on the axis line cuts its markers in half, so a value sitting on a
+// gridline drops the floor one line further.
+func snapBottom(lo, hi, dataMin float64, ticks []float64, axis func(float64) float64, rowH float64) (float64, []float64) {
+	const clearance = markerR + 4
+	floor := lo
+	for i, t := range ticks {
+		at := axis(t)
+		if at > dataMin {
+			break
+		}
+		if (dataMin-at)/(hi-at)*rowH < clearance {
+			if i == 0 {
+				break
+			}
+			at = axis(ticks[i-1])
+		}
+		if at > floor {
+			floor = at
+		}
+	}
+	kept := ticks[:0:0]
+	for _, t := range ticks {
+		if axis(t) >= floor-1e-9 {
+			kept = append(kept, t)
+		}
+	}
+	return floor, kept
 }
 
 // clipOutlierTop finds where a panel's values stop being a spread and become a
