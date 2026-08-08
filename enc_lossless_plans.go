@@ -744,15 +744,19 @@ func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *eloss
 			return elosslessBuildSubtractGreenPlan(subtractGreen)
 		}})
 	}
-	// The low-effort profiles skip the transform search entirely, so they get one
-	// pre-picked predictor plan rather than none: spatial prediction is worth far
-	// more than everything else the search would find.
-	if profile.transformSearchLevel < 2 {
+	// Every profile gets a tiled predictor plan on the input it is most likely to
+	// want. Spatial prediction is worth more than anything else the transform
+	// search finds, so even the profiles that run no search get one. The levels
+	// that cover both inputs below are excluded here to avoid building the same
+	// plan twice.
+	if profile.transformSearchLevel < 5 || (subtractIsDistinct && profile.transformSearchLevel < 6) {
 		input, useSubtractGreen := argb, false
+		family := elosslessPlanFamilyTiledPredictor
 		if subtractIsDistinct {
 			input, useSubtractGreen = subtractGreen, true
+			family = elosslessPlanFamilyTiledPredictorSubtractGreen
 		}
-		builders = append(builders, elosslessTiledPredictorBuilders(input, useSubtractGreen, profile.predictorTileBits, elosslessPlanFamilyTiledPredictor)...)
+		builders = append(builders, elosslessTiledPredictorBuilders(input, useSubtractGreen, profile.predictorTileBits, family)...)
 	}
 	if profile.transformSearchLevel >= 2 {
 		builders = append(builders,

@@ -146,8 +146,8 @@ type elosslessLosslessSearchProfile struct {
 	earlyStopRatioPercent int
 	// fixedColorCacheBits, when non-zero, uses a color cache of exactly this
 	// many bits instead of running elosslessSelectBestColorCacheBits. The search
-	// costs one estimate pass per candidate size, which dominates the encode at
-	// the low-effort settings; a fixed cache captures most of the win for free.
+	// costs one estimate pass per candidate size and, up to effort 5, picks a
+	// size no better than the largest one for the time it spends.
 	fixedColorCacheBits int
 	// predictorTileBits lists the tile sizes to build tiled predictor plans at.
 	// The lowest profiles use it for the one pre-picked plan that stands in for
@@ -156,11 +156,18 @@ type elosslessLosslessSearchProfile struct {
 	predictorTileBits []int
 }
 
-var (
-	elosslessCheapPredictorTileBits    = []int{6}
-	elosslessDefaultPredictorTileBits  = []int{elosslessPredictorTransformBits}
-	elosslessSearchedPredictorTileBits = []int{3, 4, 5}
-)
+// Predictor tile sizes each effort tries. Sharing one scorer makes each extra
+// size cheap to score, and only the best-scoring size is encoded, so the higher
+// efforts widen the range rather than replacing it.
+var elosslessPredictorTileBitsByEffort = [][]int{
+	{6},
+	{5, 6},
+	{5, 6},
+	{5, 6},
+	{5, 6},
+	{4, 5, 6},
+	{3, 4, 5, 6},
+}
 
 func elosslessDefaultOptions() LosslessOptions {
 	return LosslessOptions{Effort: elosslessDefaultOptimizationLevel}
@@ -228,19 +235,19 @@ func elosslessValidateOptions(options *LosslessOptions) error {
 func elosslessSearchProfile(optimizationLevel uint8) elosslessLosslessSearchProfile {
 	switch optimizationLevel {
 	case 0:
-		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100, elosslessMaxCacheBits, elosslessCheapPredictorTileBits}
+		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 1:
-		return elosslessLosslessSearchProfile{1, 1, 0, false, 2, 100, elosslessMaxCacheBits, elosslessCheapPredictorTileBits}
+		return elosslessLosslessSearchProfile{1, 0, 0, false, 2, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 2:
-		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 100, 0, elosslessDefaultPredictorTileBits}
+		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 3:
-		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101, 0, elosslessDefaultPredictorTileBits}
+		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 4:
-		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101, 0, elosslessDefaultPredictorTileBits}
+		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 5:
-		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101, 0, elosslessDefaultPredictorTileBits}
+		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	default:
-		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101, 0, elosslessSearchedPredictorTileBits}
+		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101, 0, elosslessPredictorTileBitsByEffort[elosslessMaxOptimizationLevel]}
 	}
 }
 
