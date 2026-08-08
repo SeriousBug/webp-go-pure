@@ -224,18 +224,59 @@ func elosslessBuildHistograms(tokens []elosslessToken, width, colorCacheBits int
 	return histograms, nil
 }
 
-func elosslessNewHistograms(colorCacheBits int) elosslessHistogramSet {
+// elosslessHistogramChannelSizes returns the length of each of the five
+// per-channel histograms.
+func elosslessHistogramChannelSizes(colorCacheBits int) [5]int {
 	cacheEntries := 0
 	if colorCacheBits > 0 {
 		cacheEntries = 1 << colorCacheBits
 	}
-	return elosslessHistogramSet{
-		make([]uint32, elosslessNumLiteralCodes+elosslessNumLengthCodes+cacheEntries),
-		make([]uint32, elosslessNumLiteralCodes),
-		make([]uint32, elosslessNumLiteralCodes),
-		make([]uint32, elosslessNumLiteralCodes),
-		make([]uint32, elosslessNumDistanceCodes),
+	return [5]int{
+		elosslessNumLiteralCodes + elosslessNumLengthCodes + cacheEntries,
+		elosslessNumLiteralCodes,
+		elosslessNumLiteralCodes,
+		elosslessNumLiteralCodes,
+		elosslessNumDistanceCodes,
 	}
+}
+
+func elosslessNewHistograms(colorCacheBits int) elosslessHistogramSet {
+	sizes := elosslessHistogramChannelSizes(colorCacheBits)
+	total := 0
+	for _, n := range sizes {
+		total += n
+	}
+	return elosslessCarveHistogramSet(make([]uint32, total), sizes)
+}
+
+// elosslessCarveHistogramSet splits one backing array into the five channel
+// histograms. The five slices are allocated together because a histogram set is
+// created per tile and the separate allocations dominate the encoder's object
+// count otherwise.
+func elosslessCarveHistogramSet(buf []uint32, sizes [5]int) elosslessHistogramSet {
+	var set elosslessHistogramSet
+	offset := 0
+	for c, n := range sizes {
+		set[c] = buf[offset : offset+n : offset+n]
+		offset += n
+	}
+	return set
+}
+
+// elosslessNewHistogramSets returns count histogram sets carved out of a single
+// allocation.
+func elosslessNewHistogramSets(count, colorCacheBits int) []elosslessHistogramSet {
+	sizes := elosslessHistogramChannelSizes(colorCacheBits)
+	perSet := 0
+	for _, n := range sizes {
+		perSet += n
+	}
+	buf := make([]uint32, count*perSet)
+	sets := make([]elosslessHistogramSet, count)
+	for i := range sets {
+		sets[i] = elosslessCarveHistogramSet(buf[i*perSet:(i+1)*perSet], sizes)
+	}
+	return sets
 }
 
 func elosslessAddTokenToHistograms(histograms *elosslessHistogramSet, width int, token elosslessToken) error {
@@ -353,32 +394,61 @@ func elosslessHistogramCost(histograms *elosslessHistogramSet, codes *elosslessH
 // distinct residual values), so evaluating the assignment cost against a group's
 // Huffman code lengths over just the non-zeros is far cheaper than scanning the
 // full dense arrays, while producing identical totals.
-type elosslessSparseHist struct {
-	sym [5][]uint16
-	cnt [5][]uint32
+type elosslessSparseEntry struct {
+	count  uint32
+	symbol uint16
 }
 
-func elosslessMakeSparseHist(h *elosslessHistogramSet) elosslessSparseHist {
-	var s elosslessSparseHist
+type elosslessSparseHist struct {
+	entries []elosslessSparseEntry
+	// ends[c] is where channel c's entries stop within entries; channel 0
+	// starts at zero and each later channel starts where the previous ended.
+	ends [5]int32
+}
+
+func (s *elosslessSparseHist) channel(c int) []elosslessSparseEntry {
+	start := int32(0)
+	if c > 0 {
+		start = s.ends[c-1]
+	}
+	return s.entries[start:s.ends[c]]
+}
+
+func elosslessCountNonZeros(h *elosslessHistogramSet) int {
+	n := 0
 	for c := 0; c < 5; c++ {
-		hist := h[c]
-		for i, v := range hist {
+		for _, v := range h[c] {
 			if v != 0 {
-				s.sym[c] = append(s.sym[c], uint16(i))
-				s.cnt[c] = append(s.cnt[c], v)
+				n++
 			}
 		}
 	}
-	return s
+	return n
+}
+
+// elosslessMakeSparseHist appends the non-zero entries of h to arena and
+// returns a sparse histogram viewing them. The caller sizes arena for every
+// tile up front so that the per-tile views share one allocation.
+func elosslessMakeSparseHist(h *elosslessHistogramSet, arena []elosslessSparseEntry) (elosslessSparseHist, []elosslessSparseEntry) {
+	start := len(arena)
+	var s elosslessSparseHist
+	for c := 0; c < 5; c++ {
+		for i, v := range h[c] {
+			if v != 0 {
+				arena = append(arena, elosslessSparseEntry{count: v, symbol: uint16(i)})
+			}
+		}
+		s.ends[c] = int32(len(arena) - start)
+	}
+	s.entries = arena[start:len(arena):len(arena)]
+	return s, arena
 }
 
 func elosslessMergeSparseInto(dst *elosslessHistogramSet, s *elosslessSparseHist) {
 	for c := 0; c < 5; c++ {
 		d := dst[c]
-		sym := s.sym[c]
-		cnt := s.cnt[c]
-		for k, symbol := range sym {
-			d[symbol] += cnt[k]
+		for _, e := range s.channel(c) {
+			d[e.symbol] += e.count
 		}
 	}
 }
@@ -389,11 +459,9 @@ func elosslessSparseHistCost(s *elosslessSparseHist, codes *elosslessHuffmanGrou
 	for c := 0; c < 5; c++ {
 		lengths := channelCodes[c].getCodeLengths()
 		nLen := len(lengths)
-		sym := s.sym[c]
-		cnt := s.cnt[c]
-		for k, symbol := range sym {
-			if int(symbol) < nLen {
-				total += int(cnt[k]) * int(lengths[symbol])
+		for _, e := range s.channel(c) {
+			if int(e.symbol) < nLen {
+				total += int(e.count) * int(lengths[e.symbol])
 			}
 		}
 	}
@@ -774,11 +842,8 @@ func elosslessRefineMetaHuffmanPlan(tileCount, colorCacheBits int, nonEmptyTiles
 	for iter := 0; iter < 4; iter++ {
 		elosslessAssignTilesToGroups(nonEmptyTiles, tileSparse, groupCodes, assignments)
 
-		accum := make([]elosslessHistogramSet, len(groupCodes))
+		accum := elosslessNewHistogramSets(len(groupCodes), colorCacheBits)
 		used := make([]bool, len(groupCodes))
-		for i := range accum {
-			accum[i] = elosslessNewHistograms(colorCacheBits)
-		}
 		for _, t := range nonEmptyTiles {
 			tile := t[0]
 			g := assignments[tile]
@@ -904,8 +969,13 @@ func (t *elosslessTileHistograms) finish() {
 		return t.nonEmptyTiles[j][1] < t.nonEmptyTiles[i][1]
 	})
 	t.sparse = make([]elosslessSparseHist, t.tileCount())
+	nonZeros := 0
 	for _, tile := range t.nonEmptyTiles {
-		t.sparse[tile[0]] = elosslessMakeSparseHist(&t.histograms[tile[0]])
+		nonZeros += elosslessCountNonZeros(&t.histograms[tile[0]])
+	}
+	arena := make([]elosslessSparseEntry, 0, nonZeros)
+	for _, tile := range t.nonEmptyTiles {
+		t.sparse[tile[0]], arena = elosslessMakeSparseHist(&t.histograms[tile[0]], arena)
 	}
 }
 
@@ -916,10 +986,7 @@ func elosslessScanTileHistograms(width, height int, tokens []elosslessToken, col
 		huffmanYsize: elosslessSubsampleSize(height, huffmanBits),
 	}
 	tileCount := level.tileCount()
-	level.histograms = make([]elosslessHistogramSet, tileCount)
-	for i := range level.histograms {
-		level.histograms[i] = elosslessNewHistograms(colorCacheBits)
-	}
+	level.histograms = elosslessNewHistogramSets(tileCount, colorCacheBits)
 	level.weights = make([]int, tileCount)
 
 	pos := 0
@@ -946,10 +1013,7 @@ func elosslessCoarsenTileHistograms(fine *elosslessTileHistograms, width, height
 		huffmanYsize: elosslessSubsampleSize(height, huffmanBits),
 	}
 	tileCount := coarse.tileCount()
-	coarse.histograms = make([]elosslessHistogramSet, tileCount)
-	for i := range coarse.histograms {
-		coarse.histograms[i] = elosslessNewHistograms(colorCacheBits)
-	}
+	coarse.histograms = elosslessNewHistogramSets(tileCount, colorCacheBits)
 	coarse.weights = make([]int, tileCount)
 
 	for y := 0; y < fine.huffmanYsize; y++ {

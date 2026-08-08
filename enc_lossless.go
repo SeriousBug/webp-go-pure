@@ -144,6 +144,11 @@ type elosslessLosslessSearchProfile struct {
 	useColorCache         bool
 	shortlistKeep         int
 	earlyStopRatioPercent int
+	// fixedColorCacheBits, when non-zero, uses a color cache of exactly this
+	// many bits instead of running elosslessSelectBestColorCacheBits. The search
+	// costs one estimate pass per candidate size, which dominates the encode at
+	// the low-effort settings; a fixed cache captures most of the win for free.
+	fixedColorCacheBits int
 }
 
 func elosslessDefaultOptions() LosslessOptions {
@@ -212,19 +217,19 @@ func elosslessValidateOptions(options *LosslessOptions) error {
 func elosslessSearchProfile(optimizationLevel uint8) elosslessLosslessSearchProfile {
 	switch optimizationLevel {
 	case 0:
-		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100}
+		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100, elosslessMaxCacheBits}
 	case 1:
-		return elosslessLosslessSearchProfile{1, 1, 0, false, 2, 100}
+		return elosslessLosslessSearchProfile{1, 1, 0, false, 2, 100, elosslessMaxCacheBits}
 	case 2:
-		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 100}
+		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 100, 0}
 	case 3:
-		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101}
+		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101, 0}
 	case 4:
-		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101}
+		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101, 0}
 	case 5:
-		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101}
+		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101, 0}
 	default:
-		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101}
+		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101, 0}
 	}
 }
 

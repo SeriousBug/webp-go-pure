@@ -806,6 +806,14 @@ func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *el
 		return nil, err
 	}
 
+	if profile.fixedColorCacheBits > 0 && len(plan.predicted) >= 64 {
+		cacheBits := profile.fixedColorCacheBits
+		if err := elosslessApplyColorCacheToTokens(baseTokens, plan.predicted, baseTokens, cacheBits); err != nil {
+			return nil, err
+		}
+		return elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, cacheBits, profile.entropySearchLevel)
+	}
+
 	best, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, 0, profile.entropySearchLevel)
 	if err != nil {
 		return nil, err
@@ -906,7 +914,9 @@ func elosslessEncodePaletteCandidateToVp8l(width, height int, rgba []byte, candi
 	transformOptions := elosslessTokenBuildOptions{}
 	noCacheOptions := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, 0)
 	tokenOptions := noCacheOptions
-	if profile.useColorCache && len(candidate.packedIndices) >= 64 {
+	if profile.fixedColorCacheBits > 0 && len(candidate.packedIndices) >= 64 {
+		tokenOptions = elosslessTokenBuildOptionsFor(profile.matchSearchLevel, profile.fixedColorCacheBits)
+	} else if profile.useColorCache && len(candidate.packedIndices) >= 64 {
 		baseTokens, err := elosslessBuildTokens(candidate.packedWidth, candidate.packedIndices, noCacheOptions)
 		if err != nil {
 			return nil, err
