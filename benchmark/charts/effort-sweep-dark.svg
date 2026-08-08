@@ -311,21 +311,21 @@
 <text x="289.2" y="704.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">50 s</text>
 <line x1="324.7" y1="490.0" x2="324.7" y2="686.0" stroke="#2c2c2a" stroke-width="1.0"/>
 <line x1="74.0" y1="686.0" x2="340.3" y2="686.0" stroke="#383835" stroke-width="1.0"/>
-<path d="M 111.3 507.1 L 178.2 529.5 L 210.7 632.5 L 210.9 658.0 L 228.6 658.8 L 241.7 659.5 L 253.0 664.2" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
-<circle cx="111.3" cy="507.1" r="5.5" fill="#1a1a19"/>
-<circle cx="111.3" cy="507.1" r="3.5" fill="#3987e5"/>
-<circle cx="178.2" cy="529.5" r="5.5" fill="#1a1a19"/>
-<circle cx="178.2" cy="529.5" r="3.5" fill="#3987e5"/>
-<circle cx="210.7" cy="632.5" r="5.5" fill="#1a1a19"/>
-<circle cx="210.7" cy="632.5" r="3.5" fill="#3987e5"/>
-<circle cx="210.9" cy="658.0" r="5.5" fill="#1a1a19"/>
-<circle cx="210.9" cy="658.0" r="3.5" fill="#3987e5"/>
-<circle cx="228.6" cy="658.8" r="5.5" fill="#1a1a19"/>
-<circle cx="228.6" cy="658.8" r="3.5" fill="#3987e5"/>
-<circle cx="241.7" cy="659.5" r="5.5" fill="#1a1a19"/>
-<circle cx="241.7" cy="659.5" r="3.5" fill="#3987e5"/>
-<circle cx="253.0" cy="664.2" r="5.5" fill="#1a1a19"/>
-<circle cx="253.0" cy="664.2" r="3.5" fill="#3987e5"/>
+<path d="M 107.7 507.1 L 174.9 529.5 L 209.1 632.5 L 209.6 658.0 L 226.6 658.8 L 240.4 659.5 L 252.0 664.2" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
+<circle cx="107.7" cy="507.1" r="5.5" fill="#1a1a19"/>
+<circle cx="107.7" cy="507.1" r="3.5" fill="#3987e5"/>
+<circle cx="174.9" cy="529.5" r="5.5" fill="#1a1a19"/>
+<circle cx="174.9" cy="529.5" r="3.5" fill="#3987e5"/>
+<circle cx="209.1" cy="632.5" r="5.5" fill="#1a1a19"/>
+<circle cx="209.1" cy="632.5" r="3.5" fill="#3987e5"/>
+<circle cx="209.6" cy="658.0" r="5.5" fill="#1a1a19"/>
+<circle cx="209.6" cy="658.0" r="3.5" fill="#3987e5"/>
+<circle cx="226.6" cy="658.8" r="5.5" fill="#1a1a19"/>
+<circle cx="226.6" cy="658.8" r="3.5" fill="#3987e5"/>
+<circle cx="240.4" cy="659.5" r="5.5" fill="#1a1a19"/>
+<circle cx="240.4" cy="659.5" r="3.5" fill="#3987e5"/>
+<circle cx="252.0" cy="664.2" r="5.5" fill="#1a1a19"/>
+<circle cx="252.0" cy="664.2" r="3.5" fill="#3987e5"/>
 <path d="M 88.2 645.4 L 160.9 650.2 L 169.8 651.0 L 180.4 668.4 L 185.4 668.5 L 189.9 668.6 L 207.7 668.7 L 225.0 668.9 L 236.4 668.6 L 326.1 668.7" fill="none" stroke="#898781" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
 <circle cx="88.2" cy="645.4" r="5.5" fill="#1a1a19"/>
 <circle cx="88.2" cy="645.4" r="3.5" fill="#898781"/>
@@ -369,12 +369,12 @@
 <circle cx="217.2" cy="647.5" r="3.5" fill="#d95c85"/>
 <circle cx="222.9" cy="647.6" r="5.5" fill="#1a1a19"/>
 <circle cx="222.9" cy="647.6" r="3.5" fill="#d95c85"/>
-<text x="111.3" y="523.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
-<text x="178.2" y="520.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
-<text x="210.7" y="623.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">2</text>
-<text x="210.9" y="649.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
-<text x="241.7" y="650.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
-<text x="253.0" y="655.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
+<text x="107.7" y="523.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
+<text x="174.9" y="520.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
+<text x="209.1" y="623.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">2</text>
+<text x="209.6" y="649.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
+<text x="240.4" y="650.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
+<text x="252.0" y="655.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
 <text x="88.2" y="636.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
 <text x="160.9" y="641.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
 <text x="180.4" y="659.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
@@ -383,20 +383,20 @@
 <text x="215.9" y="663.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#d95c85" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
 <text x="504.7" y="468.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="13" fill="#ffffff" text-anchor="middle" font-weight="600">lossy</text>
 <text x="504.7" y="482.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle">total size (MiB)</text>
-<line x1="402.3" y1="665.9" x2="607.2" y2="665.9" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="393.3" y="669.9" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">2.5</text>
-<line x1="402.3" y1="633.4" x2="607.2" y2="633.4" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="393.3" y="637.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">2.8</text>
-<line x1="402.3" y1="603.8" x2="607.2" y2="603.8" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="393.3" y="607.8" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.0</text>
-<line x1="402.3" y1="576.5" x2="607.2" y2="576.5" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="393.3" y="580.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.2</text>
-<line x1="402.3" y1="551.2" x2="607.2" y2="551.2" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="393.3" y="555.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.5</text>
-<line x1="402.3" y1="527.7" x2="607.2" y2="527.7" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="393.3" y="531.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.8</text>
-<line x1="402.3" y1="505.7" x2="607.2" y2="505.7" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="393.3" y="509.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">4.0</text>
+<line x1="402.3" y1="672.6" x2="607.2" y2="672.6" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="393.3" y="676.6" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">2.8</text>
+<line x1="402.3" y1="641.3" x2="607.2" y2="641.3" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="393.3" y="645.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.0</text>
+<line x1="402.3" y1="612.1" x2="607.2" y2="612.1" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="393.3" y="616.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.2</text>
+<line x1="402.3" y1="584.6" x2="607.2" y2="584.6" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="393.3" y="588.6" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.4</text>
+<line x1="402.3" y1="558.7" x2="607.2" y2="558.7" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="393.3" y="562.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.6</text>
+<line x1="402.3" y1="534.2" x2="607.2" y2="534.2" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="393.3" y="538.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">3.8</text>
+<line x1="402.3" y1="510.9" x2="607.2" y2="510.9" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="393.3" y="514.9" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">4.0</text>
 <line x1="406.0" y1="490.0" x2="406.0" y2="686.0" stroke="#2c2c2a" stroke-width="1.0"/>
 <text x="406.0" y="704.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">0.5 s</text>
 <line x1="445.1" y1="490.0" x2="445.1" y2="686.0" stroke="#2c2c2a" stroke-width="1.0"/>
@@ -406,92 +406,89 @@
 <text x="535.8" y="704.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">5 s</text>
 <line x1="574.9" y1="490.0" x2="574.9" y2="686.0" stroke="#2c2c2a" stroke-width="1.0"/>
 <line x1="402.3" y1="686.0" x2="607.2" y2="686.0" stroke="#383835" stroke-width="1.0"/>
-<path d="M 446.0 537.1 L 463.8 585.1 L 464.0 585.1 L 486.7 604.5 L 486.8 604.5 L 488.3 612.5 L 493.8 634.8 L 493.8 634.8 L 521.6 638.9 L 556.6 592.0" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
-<circle cx="446.0" cy="537.1" r="5.5" fill="#1a1a19"/>
-<circle cx="446.0" cy="537.1" r="3.5" fill="#3987e5"/>
-<circle cx="463.8" cy="585.1" r="5.5" fill="#1a1a19"/>
-<circle cx="463.8" cy="585.1" r="3.5" fill="#3987e5"/>
-<circle cx="464.0" cy="585.1" r="5.5" fill="#1a1a19"/>
-<circle cx="464.0" cy="585.1" r="3.5" fill="#3987e5"/>
-<circle cx="486.7" cy="604.5" r="5.5" fill="#1a1a19"/>
-<circle cx="486.7" cy="604.5" r="3.5" fill="#3987e5"/>
-<circle cx="486.8" cy="604.5" r="5.5" fill="#1a1a19"/>
-<circle cx="486.8" cy="604.5" r="3.5" fill="#3987e5"/>
-<circle cx="488.3" cy="612.5" r="5.5" fill="#1a1a19"/>
-<circle cx="488.3" cy="612.5" r="3.5" fill="#3987e5"/>
-<circle cx="493.8" cy="634.8" r="5.5" fill="#1a1a19"/>
-<circle cx="493.8" cy="634.8" r="3.5" fill="#3987e5"/>
-<circle cx="493.8" cy="634.8" r="5.5" fill="#1a1a19"/>
-<circle cx="493.8" cy="634.8" r="3.5" fill="#3987e5"/>
-<circle cx="521.6" cy="638.9" r="5.5" fill="#1a1a19"/>
-<circle cx="521.6" cy="638.9" r="3.5" fill="#3987e5"/>
-<circle cx="556.6" cy="592.0" r="5.5" fill="#1a1a19"/>
-<circle cx="556.6" cy="592.0" r="3.5" fill="#3987e5"/>
-<path d="M 417.9 557.7 L 433.4 570.6 L 437.0 580.4 L 481.9 582.8 L 481.4 581.5 L 488.4 584.7 L 526.3 590.2" fill="none" stroke="#898781" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
-<circle cx="417.9" cy="557.7" r="5.5" fill="#1a1a19"/>
-<circle cx="417.9" cy="557.7" r="3.5" fill="#898781"/>
-<circle cx="433.4" cy="570.6" r="5.5" fill="#1a1a19"/>
-<circle cx="433.4" cy="570.6" r="3.5" fill="#898781"/>
-<circle cx="437.0" cy="580.4" r="5.5" fill="#1a1a19"/>
-<circle cx="437.0" cy="580.4" r="3.5" fill="#898781"/>
-<circle cx="481.9" cy="582.8" r="5.5" fill="#1a1a19"/>
-<circle cx="481.9" cy="582.8" r="3.5" fill="#898781"/>
-<circle cx="481.4" cy="581.5" r="5.5" fill="#1a1a19"/>
-<circle cx="481.4" cy="581.5" r="3.5" fill="#898781"/>
-<circle cx="488.4" cy="584.7" r="5.5" fill="#1a1a19"/>
-<circle cx="488.4" cy="584.7" r="3.5" fill="#898781"/>
-<circle cx="526.3" cy="590.2" r="5.5" fill="#1a1a19"/>
-<circle cx="526.3" cy="590.2" r="3.5" fill="#898781"/>
-<path d="M 494.1 557.7 L 513.9 570.6 L 517.0 580.4 L 575.1 582.8 L 575.4 581.5 L 580.0 584.7 L 591.6 590.2" fill="none" stroke="#199e70" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
-<circle cx="494.1" cy="557.7" r="5.5" fill="#1a1a19"/>
-<circle cx="494.1" cy="557.7" r="3.5" fill="#199e70"/>
-<circle cx="513.9" cy="570.6" r="5.5" fill="#1a1a19"/>
-<circle cx="513.9" cy="570.6" r="3.5" fill="#199e70"/>
-<circle cx="517.0" cy="580.4" r="5.5" fill="#1a1a19"/>
-<circle cx="517.0" cy="580.4" r="3.5" fill="#199e70"/>
-<circle cx="575.1" cy="582.8" r="5.5" fill="#1a1a19"/>
-<circle cx="575.1" cy="582.8" r="3.5" fill="#199e70"/>
-<circle cx="575.4" cy="581.5" r="5.5" fill="#1a1a19"/>
-<circle cx="575.4" cy="581.5" r="3.5" fill="#199e70"/>
-<circle cx="580.0" cy="584.7" r="5.5" fill="#1a1a19"/>
-<circle cx="580.0" cy="584.7" r="3.5" fill="#199e70"/>
-<circle cx="591.6" cy="590.2" r="5.5" fill="#1a1a19"/>
-<circle cx="591.6" cy="590.2" r="3.5" fill="#199e70"/>
-<text x="446.0" y="528.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
-<text x="463.8" y="576.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
-<text x="486.7" y="595.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
-<text x="488.3" y="628.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
-<text x="493.8" y="650.8" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
-<text x="521.6" y="629.9" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">8</text>
-<text x="556.6" y="583.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">9</text>
-<text x="417.9" y="548.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
-<text x="433.4" y="561.6" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
-<text x="437.0" y="596.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">2</text>
-<text x="488.4" y="575.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
-<text x="526.3" y="581.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
-<text x="494.1" y="548.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
-<text x="513.9" y="561.6" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
-<text x="517.0" y="596.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">2</text>
-<text x="580.0" y="575.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
-<text x="591.6" y="581.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
+<path d="M 445.6 552.7 L 463.8 562.5 L 463.5 562.5 L 489.9 586.0 L 489.9 586.0 L 489.4 586.0 L 496.3 613.2 L 496.6 613.2 L 527.6 615.5 L 556.0 615.5" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
+<circle cx="445.6" cy="552.7" r="5.5" fill="#1a1a19"/>
+<circle cx="445.6" cy="552.7" r="3.5" fill="#3987e5"/>
+<circle cx="463.8" cy="562.5" r="5.5" fill="#1a1a19"/>
+<circle cx="463.8" cy="562.5" r="3.5" fill="#3987e5"/>
+<circle cx="463.5" cy="562.5" r="5.5" fill="#1a1a19"/>
+<circle cx="463.5" cy="562.5" r="3.5" fill="#3987e5"/>
+<circle cx="489.9" cy="586.0" r="5.5" fill="#1a1a19"/>
+<circle cx="489.9" cy="586.0" r="3.5" fill="#3987e5"/>
+<circle cx="489.9" cy="586.0" r="5.5" fill="#1a1a19"/>
+<circle cx="489.9" cy="586.0" r="3.5" fill="#3987e5"/>
+<circle cx="489.4" cy="586.0" r="5.5" fill="#1a1a19"/>
+<circle cx="489.4" cy="586.0" r="3.5" fill="#3987e5"/>
+<circle cx="496.3" cy="613.2" r="5.5" fill="#1a1a19"/>
+<circle cx="496.3" cy="613.2" r="3.5" fill="#3987e5"/>
+<circle cx="496.6" cy="613.2" r="5.5" fill="#1a1a19"/>
+<circle cx="496.6" cy="613.2" r="3.5" fill="#3987e5"/>
+<circle cx="527.6" cy="615.5" r="5.5" fill="#1a1a19"/>
+<circle cx="527.6" cy="615.5" r="3.5" fill="#3987e5"/>
+<circle cx="556.0" cy="615.5" r="5.5" fill="#1a1a19"/>
+<circle cx="556.0" cy="615.5" r="3.5" fill="#3987e5"/>
+<path d="M 417.9 580.0 L 433.4 597.2 L 437.0 610.2 L 481.9 613.5 L 481.4 611.7 L 488.4 616.0 L 526.3 623.3" fill="none" stroke="#898781" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
+<circle cx="417.9" cy="580.0" r="5.5" fill="#1a1a19"/>
+<circle cx="417.9" cy="580.0" r="3.5" fill="#898781"/>
+<circle cx="433.4" cy="597.2" r="5.5" fill="#1a1a19"/>
+<circle cx="433.4" cy="597.2" r="3.5" fill="#898781"/>
+<circle cx="437.0" cy="610.2" r="5.5" fill="#1a1a19"/>
+<circle cx="437.0" cy="610.2" r="3.5" fill="#898781"/>
+<circle cx="481.9" cy="613.5" r="5.5" fill="#1a1a19"/>
+<circle cx="481.9" cy="613.5" r="3.5" fill="#898781"/>
+<circle cx="481.4" cy="611.7" r="5.5" fill="#1a1a19"/>
+<circle cx="481.4" cy="611.7" r="3.5" fill="#898781"/>
+<circle cx="488.4" cy="616.0" r="5.5" fill="#1a1a19"/>
+<circle cx="488.4" cy="616.0" r="3.5" fill="#898781"/>
+<circle cx="526.3" cy="623.3" r="5.5" fill="#1a1a19"/>
+<circle cx="526.3" cy="623.3" r="3.5" fill="#898781"/>
+<path d="M 494.1 580.0 L 513.9 597.2 L 517.0 610.2 L 575.1 613.5 L 575.4 611.7 L 580.0 616.0 L 591.6 623.3" fill="none" stroke="#199e70" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
+<circle cx="494.1" cy="580.0" r="5.5" fill="#1a1a19"/>
+<circle cx="494.1" cy="580.0" r="3.5" fill="#199e70"/>
+<circle cx="513.9" cy="597.2" r="5.5" fill="#1a1a19"/>
+<circle cx="513.9" cy="597.2" r="3.5" fill="#199e70"/>
+<circle cx="517.0" cy="610.2" r="5.5" fill="#1a1a19"/>
+<circle cx="517.0" cy="610.2" r="3.5" fill="#199e70"/>
+<circle cx="575.1" cy="613.5" r="5.5" fill="#1a1a19"/>
+<circle cx="575.1" cy="613.5" r="3.5" fill="#199e70"/>
+<circle cx="575.4" cy="611.7" r="5.5" fill="#1a1a19"/>
+<circle cx="575.4" cy="611.7" r="3.5" fill="#199e70"/>
+<circle cx="580.0" cy="616.0" r="5.5" fill="#1a1a19"/>
+<circle cx="580.0" cy="616.0" r="3.5" fill="#199e70"/>
+<circle cx="591.6" cy="623.3" r="5.5" fill="#1a1a19"/>
+<circle cx="591.6" cy="623.3" r="3.5" fill="#199e70"/>
+<text x="445.6" y="543.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
+<text x="463.8" y="553.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
+<text x="489.9" y="577.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
+<text x="496.3" y="604.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
+<text x="417.9" y="571.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
+<text x="433.4" y="588.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
+<text x="437.0" y="601.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">2</text>
+<text x="488.4" y="607.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
+<text x="526.3" y="614.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
+<text x="494.1" y="558.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
+<text x="513.9" y="588.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
+<text x="517.0" y="601.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">2</text>
+<text x="580.0" y="607.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
+<text x="591.6" y="614.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
 <text x="771.6" y="468.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="13" fill="#ffffff" text-anchor="middle" font-weight="600">lossy</text>
 <text x="771.6" y="482.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="middle">mean PSNR (dB)</text>
-<line x1="669.2" y1="672.7" x2="874.0" y2="672.7" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="660.2" y="676.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">41.5</text>
-<line x1="669.2" y1="647.4" x2="874.0" y2="647.4" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="660.2" y="651.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">41.8</text>
-<line x1="669.2" y1="622.1" x2="874.0" y2="622.1" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="660.2" y="626.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">42.0</text>
-<line x1="669.2" y1="596.8" x2="874.0" y2="596.8" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="660.2" y="600.8" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">42.2</text>
-<line x1="669.2" y1="571.4" x2="874.0" y2="571.4" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="660.2" y="575.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">42.5</text>
-<line x1="669.2" y1="546.1" x2="874.0" y2="546.1" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="660.2" y="550.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">42.8</text>
-<line x1="669.2" y1="520.8" x2="874.0" y2="520.8" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="660.2" y="524.8" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">43.0</text>
-<line x1="669.2" y1="495.5" x2="874.0" y2="495.5" stroke="#2c2c2a" stroke-width="1.0"/>
-<text x="660.2" y="499.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">43.2</text>
+<line x1="669.2" y1="671.0" x2="874.0" y2="671.0" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="660.2" y="675.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">42.6</text>
+<line x1="669.2" y1="645.5" x2="874.0" y2="645.5" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="660.2" y="649.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">42.7</text>
+<line x1="669.2" y1="619.9" x2="874.0" y2="619.9" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="660.2" y="623.9" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">42.8</text>
+<line x1="669.2" y1="594.4" x2="874.0" y2="594.4" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="660.2" y="598.4" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">42.9</text>
+<line x1="669.2" y1="568.8" x2="874.0" y2="568.8" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="660.2" y="572.8" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">43.0</text>
+<line x1="669.2" y1="543.3" x2="874.0" y2="543.3" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="660.2" y="547.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">43.1</text>
+<line x1="669.2" y1="517.7" x2="874.0" y2="517.7" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="660.2" y="521.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">43.2</text>
+<line x1="669.2" y1="492.2" x2="874.0" y2="492.2" stroke="#2c2c2a" stroke-width="1.0"/>
+<text x="660.2" y="496.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="end" style="font-variant-numeric:tabular-nums">43.3</text>
 <line x1="672.9" y1="490.0" x2="672.9" y2="686.0" stroke="#2c2c2a" stroke-width="1.0"/>
 <text x="672.9" y="704.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">0.5 s</text>
 <line x1="711.9" y1="490.0" x2="711.9" y2="686.0" stroke="#2c2c2a" stroke-width="1.0"/>
@@ -501,68 +498,67 @@
 <text x="802.6" y="704.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11" fill="#898781" text-anchor="middle" style="font-variant-numeric:tabular-nums">5 s</text>
 <line x1="841.7" y1="490.0" x2="841.7" y2="686.0" stroke="#2c2c2a" stroke-width="1.0"/>
 <line x1="669.2" y1="686.0" x2="874.0" y2="686.0" stroke="#383835" stroke-width="1.0"/>
-<path d="M 712.8 541.5 L 730.7 644.1 L 730.8 644.1 L 753.5 627.1 L 753.7 627.1 L 755.1 657.1 L 760.7 665.7 L 760.7 665.7 L 788.4 653.6 L 823.4 546.3" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
-<circle cx="712.8" cy="541.5" r="5.5" fill="#1a1a19"/>
-<circle cx="712.8" cy="541.5" r="3.5" fill="#3987e5"/>
-<circle cx="730.7" cy="644.1" r="5.5" fill="#1a1a19"/>
-<circle cx="730.7" cy="644.1" r="3.5" fill="#3987e5"/>
-<circle cx="730.8" cy="644.1" r="5.5" fill="#1a1a19"/>
-<circle cx="730.8" cy="644.1" r="3.5" fill="#3987e5"/>
-<circle cx="753.5" cy="627.1" r="5.5" fill="#1a1a19"/>
-<circle cx="753.5" cy="627.1" r="3.5" fill="#3987e5"/>
-<circle cx="753.7" cy="627.1" r="5.5" fill="#1a1a19"/>
-<circle cx="753.7" cy="627.1" r="3.5" fill="#3987e5"/>
-<circle cx="755.1" cy="657.1" r="5.5" fill="#1a1a19"/>
-<circle cx="755.1" cy="657.1" r="3.5" fill="#3987e5"/>
-<circle cx="760.7" cy="665.7" r="5.5" fill="#1a1a19"/>
-<circle cx="760.7" cy="665.7" r="3.5" fill="#3987e5"/>
-<circle cx="760.7" cy="665.7" r="5.5" fill="#1a1a19"/>
-<circle cx="760.7" cy="665.7" r="3.5" fill="#3987e5"/>
-<circle cx="788.4" cy="653.6" r="5.5" fill="#1a1a19"/>
-<circle cx="788.4" cy="653.6" r="3.5" fill="#3987e5"/>
-<circle cx="823.4" cy="546.3" r="5.5" fill="#1a1a19"/>
-<circle cx="823.4" cy="546.3" r="3.5" fill="#3987e5"/>
-<path d="M 684.7 539.2 L 700.2 538.0 L 703.8 547.0 L 748.8 510.3 L 748.2 511.6 L 755.2 522.1 L 793.2 515.0" fill="none" stroke="#898781" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
-<circle cx="684.7" cy="539.2" r="5.5" fill="#1a1a19"/>
-<circle cx="684.7" cy="539.2" r="3.5" fill="#898781"/>
-<circle cx="700.2" cy="538.0" r="5.5" fill="#1a1a19"/>
-<circle cx="700.2" cy="538.0" r="3.5" fill="#898781"/>
-<circle cx="703.8" cy="547.0" r="5.5" fill="#1a1a19"/>
-<circle cx="703.8" cy="547.0" r="3.5" fill="#898781"/>
-<circle cx="748.8" cy="510.3" r="5.5" fill="#1a1a19"/>
-<circle cx="748.8" cy="510.3" r="3.5" fill="#898781"/>
-<circle cx="748.2" cy="511.6" r="5.5" fill="#1a1a19"/>
-<circle cx="748.2" cy="511.6" r="3.5" fill="#898781"/>
-<circle cx="755.2" cy="522.1" r="5.5" fill="#1a1a19"/>
-<circle cx="755.2" cy="522.1" r="3.5" fill="#898781"/>
-<circle cx="793.2" cy="515.0" r="5.5" fill="#1a1a19"/>
-<circle cx="793.2" cy="515.0" r="3.5" fill="#898781"/>
-<path d="M 761.0 539.2 L 780.8 538.0 L 783.9 547.0 L 841.9 510.3 L 842.2 511.6 L 846.9 522.1 L 858.4 515.0" fill="none" stroke="#199e70" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
-<circle cx="761.0" cy="539.2" r="5.5" fill="#1a1a19"/>
-<circle cx="761.0" cy="539.2" r="3.5" fill="#199e70"/>
-<circle cx="780.8" cy="538.0" r="5.5" fill="#1a1a19"/>
-<circle cx="780.8" cy="538.0" r="3.5" fill="#199e70"/>
-<circle cx="783.9" cy="547.0" r="5.5" fill="#1a1a19"/>
-<circle cx="783.9" cy="547.0" r="3.5" fill="#199e70"/>
-<circle cx="841.9" cy="510.3" r="5.5" fill="#1a1a19"/>
-<circle cx="841.9" cy="510.3" r="3.5" fill="#199e70"/>
-<circle cx="842.2" cy="511.6" r="5.5" fill="#1a1a19"/>
-<circle cx="842.2" cy="511.6" r="3.5" fill="#199e70"/>
-<circle cx="846.9" cy="522.1" r="5.5" fill="#1a1a19"/>
-<circle cx="846.9" cy="522.1" r="3.5" fill="#199e70"/>
-<circle cx="858.4" cy="515.0" r="5.5" fill="#1a1a19"/>
-<circle cx="858.4" cy="515.0" r="3.5" fill="#199e70"/>
-<text x="712.8" y="532.5" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
-<text x="730.7" y="635.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">1</text>
-<text x="753.5" y="618.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
-<text x="755.1" y="648.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
-<text x="823.4" y="537.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">9</text>
-<text x="684.7" y="530.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
-<text x="748.8" y="501.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
-<text x="755.2" y="513.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
-<text x="761.0" y="530.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
-<text x="841.9" y="501.3" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
-<text x="846.9" y="513.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
+<path d="M 712.4 621.0 L 730.7 606.1 L 730.4 606.1 L 756.7 575.8 L 756.7 575.8 L 756.3 575.8 L 763.1 603.1 L 763.5 603.1 L 794.4 557.9 L 822.9 541.1" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
+<circle cx="712.4" cy="621.0" r="5.5" fill="#1a1a19"/>
+<circle cx="712.4" cy="621.0" r="3.5" fill="#3987e5"/>
+<circle cx="730.7" cy="606.1" r="5.5" fill="#1a1a19"/>
+<circle cx="730.7" cy="606.1" r="3.5" fill="#3987e5"/>
+<circle cx="730.4" cy="606.1" r="5.5" fill="#1a1a19"/>
+<circle cx="730.4" cy="606.1" r="3.5" fill="#3987e5"/>
+<circle cx="756.7" cy="575.8" r="5.5" fill="#1a1a19"/>
+<circle cx="756.7" cy="575.8" r="3.5" fill="#3987e5"/>
+<circle cx="756.7" cy="575.8" r="5.5" fill="#1a1a19"/>
+<circle cx="756.7" cy="575.8" r="3.5" fill="#3987e5"/>
+<circle cx="756.3" cy="575.8" r="5.5" fill="#1a1a19"/>
+<circle cx="756.3" cy="575.8" r="3.5" fill="#3987e5"/>
+<circle cx="763.1" cy="603.1" r="5.5" fill="#1a1a19"/>
+<circle cx="763.1" cy="603.1" r="3.5" fill="#3987e5"/>
+<circle cx="763.5" cy="603.1" r="5.5" fill="#1a1a19"/>
+<circle cx="763.5" cy="603.1" r="3.5" fill="#3987e5"/>
+<circle cx="794.4" cy="557.9" r="5.5" fill="#1a1a19"/>
+<circle cx="794.4" cy="557.9" r="3.5" fill="#3987e5"/>
+<circle cx="822.9" cy="541.1" r="5.5" fill="#1a1a19"/>
+<circle cx="822.9" cy="541.1" r="3.5" fill="#3987e5"/>
+<path d="M 684.7 615.2 L 700.2 612.3 L 703.8 634.9 L 748.8 542.2 L 748.2 545.5 L 755.2 572.1 L 793.2 554.2" fill="none" stroke="#898781" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
+<circle cx="684.7" cy="615.2" r="5.5" fill="#1a1a19"/>
+<circle cx="684.7" cy="615.2" r="3.5" fill="#898781"/>
+<circle cx="700.2" cy="612.3" r="5.5" fill="#1a1a19"/>
+<circle cx="700.2" cy="612.3" r="3.5" fill="#898781"/>
+<circle cx="703.8" cy="634.9" r="5.5" fill="#1a1a19"/>
+<circle cx="703.8" cy="634.9" r="3.5" fill="#898781"/>
+<circle cx="748.8" cy="542.2" r="5.5" fill="#1a1a19"/>
+<circle cx="748.8" cy="542.2" r="3.5" fill="#898781"/>
+<circle cx="748.2" cy="545.5" r="5.5" fill="#1a1a19"/>
+<circle cx="748.2" cy="545.5" r="3.5" fill="#898781"/>
+<circle cx="755.2" cy="572.1" r="5.5" fill="#1a1a19"/>
+<circle cx="755.2" cy="572.1" r="3.5" fill="#898781"/>
+<circle cx="793.2" cy="554.2" r="5.5" fill="#1a1a19"/>
+<circle cx="793.2" cy="554.2" r="3.5" fill="#898781"/>
+<path d="M 761.0 615.2 L 780.8 612.3 L 783.9 634.9 L 841.9 542.2 L 842.2 545.5 L 846.9 572.1 L 858.4 554.2" fill="none" stroke="#199e70" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>
+<circle cx="761.0" cy="615.2" r="5.5" fill="#1a1a19"/>
+<circle cx="761.0" cy="615.2" r="3.5" fill="#199e70"/>
+<circle cx="780.8" cy="612.3" r="5.5" fill="#1a1a19"/>
+<circle cx="780.8" cy="612.3" r="3.5" fill="#199e70"/>
+<circle cx="783.9" cy="634.9" r="5.5" fill="#1a1a19"/>
+<circle cx="783.9" cy="634.9" r="3.5" fill="#199e70"/>
+<circle cx="841.9" cy="542.2" r="5.5" fill="#1a1a19"/>
+<circle cx="841.9" cy="542.2" r="3.5" fill="#199e70"/>
+<circle cx="842.2" cy="545.5" r="5.5" fill="#1a1a19"/>
+<circle cx="842.2" cy="545.5" r="3.5" fill="#199e70"/>
+<circle cx="846.9" cy="572.1" r="5.5" fill="#1a1a19"/>
+<circle cx="846.9" cy="572.1" r="3.5" fill="#199e70"/>
+<circle cx="858.4" cy="554.2" r="5.5" fill="#1a1a19"/>
+<circle cx="858.4" cy="554.2" r="3.5" fill="#199e70"/>
+<text x="712.4" y="612.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
+<text x="756.7" y="566.8" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
+<text x="763.1" y="594.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">6</text>
+<text x="794.4" y="548.9" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#3987e5" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">8</text>
+<text x="684.7" y="606.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
+<text x="748.8" y="533.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
+<text x="755.2" y="588.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#898781" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
+<text x="761.0" y="606.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">0</text>
+<text x="841.9" y="533.2" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">3</text>
+<text x="846.9" y="563.1" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="10" fill="#199e70" text-anchor="middle" stroke="#1a1a19" stroke-width="3" paint-order="stroke" style="font-variant-numeric:tabular-nums">5</text>
 <text x="450.0" y="732.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#c3c2b7" text-anchor="middle">encode time for the whole corpus, log scale (left = faster)</text>
 <text x="40.0" y="778.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless</text>
 <text x="40.0" y="794.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">preset level 0-9, and nativewebp's three compression levels. Time and size are totals over the whole corpus and PSNR is the mean</text>
