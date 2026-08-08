@@ -590,18 +590,25 @@ func elosslessBuildGlobalPredictorPlan(width, height int, input []uint32, useSub
 	}
 }
 
+// elosslessBuildGlobalTransformPlan predicts first and fits the cross-color
+// transform on the prediction residual. Fitting it on the source instead and
+// predicting the recolored image, as this used to do, decorrelates channels that
+// prediction has already decorrelated and inflates the residual by about 20%,
+// which is why no combined plan ever won the ranking.
 func elosslessBuildGlobalTransformPlan(width, height int, input []uint32, useSubtractGreen bool) elosslessTransformPlan {
-	crossPlan := elosslessBuildGlobalCrossPlan(width, height, input, useSubtractGreen)
-	crossColored := crossPlan.predicted
 	predictorWidth, _, predictorModes, predictorImage := elosslessMakeUniformPredictorTransformImage(width, height, elosslessGlobalPredictorTransformBits, elosslessGlobalPredictorMode)
-	predicted := elosslessApplyPredictorTransform(width, height, crossColored, elosslessGlobalPredictorTransformBits, predictorModes)
+	residual := elosslessApplyPredictorTransform(width, height, input, elosslessGlobalPredictorTransformBits, predictorModes)
+
+	crossTransform := elosslessEstimateCrossColorTransform(residual)
+	crossWidth, _, crossTransforms, crossImage := elosslessMakeUniformCrossColorTransformImage(width, height, elosslessGlobalCrossColorTransformBits, crossTransform)
+	predicted := elosslessApplyCrossColorTransform(width, height, residual, elosslessGlobalCrossColorTransformBits, crossTransforms)
 
 	return elosslessTransformPlan{
 		useSubtractGreen: useSubtractGreen,
-		crossBits:        crossPlan.crossBits,
-		crossBitsSet:     crossPlan.crossBitsSet,
-		crossWidth:       crossPlan.crossWidth,
-		crossImage:       crossPlan.crossImage,
+		crossBits:        elosslessGlobalCrossColorTransformBits,
+		crossBitsSet:     true,
+		crossWidth:       crossWidth,
+		crossImage:       crossImage,
 		predictorBits:    elosslessGlobalPredictorTransformBits,
 		predictorBitsSet: true,
 		predictorWidth:   predictorWidth,
@@ -722,6 +729,8 @@ const (
 	elosslessPlanFamilyNone = iota
 	elosslessPlanFamilyTiledPredictor
 	elosslessPlanFamilyTiledPredictorSubtractGreen
+	elosslessPlanFamilyGlobalPredictor
+	elosslessPlanFamilyGlobalPredictorSubtractGreen
 )
 
 func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []elosslessPlanBuilder {
@@ -748,20 +757,20 @@ func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *eloss
 	if profile.transformSearchLevel >= 2 {
 		builders = append(builders,
 			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, argb, false) }},
-			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalPredictorPlan(w, h, argb, false) }})
+			elosslessPlanBuilder{family: elosslessPlanFamilyGlobalPredictor, build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalPredictorPlan(w, h, argb, false) }})
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 3 {
 		builders = append(builders,
 			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, subtractGreen, true) }},
-			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan {
+			elosslessPlanBuilder{family: elosslessPlanFamilyGlobalPredictorSubtractGreen, build: func(w, h int) elosslessTransformPlan {
 				return elosslessBuildGlobalPredictorPlan(w, h, subtractGreen, true)
 			}})
 	}
 	if profile.transformSearchLevel >= 4 {
 		builders = append(builders,
-			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalTransformPlan(w, h, argb, false) }})
+			elosslessPlanBuilder{family: elosslessPlanFamilyGlobalPredictor, build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalTransformPlan(w, h, argb, false) }})
 		if subtractIsDistinct {
-			builders = append(builders, elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan {
+			builders = append(builders, elosslessPlanBuilder{family: elosslessPlanFamilyGlobalPredictorSubtractGreen, build: func(w, h int) elosslessTransformPlan {
 				return elosslessBuildGlobalTransformPlan(w, h, subtractGreen, true)
 			}})
 		}
@@ -849,6 +858,15 @@ func elosslessRematerializePlan(width, height int, argb, subtractGreen []uint32,
 	}
 	owned := false
 
+	if plan.predictorBitsSet {
+		modes := make([]uint8, len(plan.predictorImage))
+		for i, packed := range plan.predictorImage {
+			modes[i] = uint8((packed >> 8) & 0xff)
+		}
+		input = elosslessApplyPredictorTransform(width, height, input, plan.predictorBits, modes)
+		owned = true
+	}
+
 	if plan.crossBitsSet {
 		transforms := make([]elosslessCrossColorTransform, len(plan.crossImage))
 		for i, packed := range plan.crossImage {
@@ -859,15 +877,6 @@ func elosslessRematerializePlan(width, height int, argb, subtractGreen []uint32,
 			}
 		}
 		input = elosslessApplyCrossColorTransform(width, height, input, plan.crossBits, transforms)
-		owned = true
-	}
-
-	if plan.predictorBitsSet {
-		modes := make([]uint8, len(plan.predictorImage))
-		for i, packed := range plan.predictorImage {
-			modes[i] = uint8((packed >> 8) & 0xff)
-		}
-		input = elosslessApplyPredictorTransform(width, height, input, plan.predictorBits, modes)
 		owned = true
 	}
 
@@ -971,20 +980,6 @@ func elosslessEncodeTransformPlanToVp8lWithTokens(width, height int, rgba []byte
 			return nil, err
 		}
 	}
-	if plan.crossBitsSet {
-		if err := bw.putBits(1, 1); err != nil {
-			return nil, err
-		}
-		if err := bw.putBits(1, 2); err != nil {
-			return nil, err
-		}
-		if err := bw.putBits(uint32(plan.crossBits-elosslessMinTransformBits), 3); err != nil {
-			return nil, err
-		}
-		if err := elosslessWriteImageStream(bw, plan.crossWidth, plan.crossImage, false, 0, transformOptions); err != nil {
-			return nil, err
-		}
-	}
 	if plan.predictorBitsSet {
 		if err := bw.putBits(1, 1); err != nil {
 			return nil, err
@@ -996,6 +991,20 @@ func elosslessEncodeTransformPlanToVp8lWithTokens(width, height int, rgba []byte
 			return nil, err
 		}
 		if err := elosslessWriteImageStream(bw, plan.predictorWidth, plan.predictorImage, false, 0, transformOptions); err != nil {
+			return nil, err
+		}
+	}
+	if plan.crossBitsSet {
+		if err := bw.putBits(1, 1); err != nil {
+			return nil, err
+		}
+		if err := bw.putBits(1, 2); err != nil {
+			return nil, err
+		}
+		if err := bw.putBits(uint32(plan.crossBits-elosslessMinTransformBits), 3); err != nil {
+			return nil, err
+		}
+		if err := elosslessWriteImageStream(bw, plan.crossWidth, plan.crossImage, false, 0, transformOptions); err != nil {
 			return nil, err
 		}
 	}
