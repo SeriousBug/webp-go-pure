@@ -1309,12 +1309,19 @@ func elosslessEstimateMetaHuffmanImageStreamSize(width int, tokens []elosslessTo
 	return (bw.bitPos + tokenBits + 7) / 8, nil
 }
 
-func elosslessEstimateImageStreamSize(width, height int, tokens []elosslessToken, colorCacheBits int, emitMetaHuffmanFlag bool, entropySearchLevel uint8) (int, error) {
-	bw := newBitWriter()
-	if err := elosslessWriteImageStreamFromTokens(bw, width, height, tokens, emitMetaHuffmanFlag, entropySearchLevel, colorCacheBits); err != nil {
+// elosslessEstimateSingleGroupSizeForTokens builds the one-group Huffman codes
+// for tokens and returns the byte size of the image stream they would produce,
+// counting the token bits instead of emitting them.
+func elosslessEstimateSingleGroupSizeForTokens(width int, tokens []elosslessToken, colorCacheBits int) (int, error) {
+	histograms, err := elosslessBuildHistograms(tokens, width, colorCacheBits)
+	if err != nil {
 		return 0, err
 	}
-	return len(bw.intoBytes()), nil
+	group, err := elosslessBuildGroupCodes(&histograms)
+	if err != nil {
+		return 0, err
+	}
+	return elosslessEstimateSingleGroupImageStreamSize(width, tokens, colorCacheBits, false, &group)
 }
 
 func elosslessEstimateCacheCandidateCost(width int, tokens []elosslessToken, colorCacheBits int) (int, error) {
@@ -1444,7 +1451,7 @@ func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTok
 		}
 		var size int
 		if cacheBits == 0 {
-			size, err = elosslessEstimateImageStreamSize(width, height, baseTokens, 0, false, 0)
+			size, err = elosslessEstimateSingleGroupSizeForTokens(width, baseTokens, 0)
 			if err != nil {
 				return 0, err
 			}
@@ -1455,7 +1462,7 @@ func elosslessSelectBestColorCacheBits(width, height int, argb []uint32, baseTok
 			if err := elosslessApplyColorCacheToTokens(scratch, argb, baseTokens, cacheBits); err != nil {
 				return 0, err
 			}
-			size, err = elosslessEstimateImageStreamSize(width, height, scratch, cacheBits, false, 0)
+			size, err = elosslessEstimateSingleGroupSizeForTokens(width, scratch, cacheBits)
 			if err != nil {
 				return 0, err
 			}
