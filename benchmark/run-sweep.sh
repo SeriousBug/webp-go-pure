@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sweep every effort setting each engine exposes, in both modes:
-#   ours       - this pure-Go library, Effort 0..9
+#   ours       - this pure-Go library, Effort 0..9 lossy, 0..6 lossless
 #   libwebp    - the C reference (cgo): lossy method 0..6, lossless preset level 0..9
 #   wasm       - libwebp via WASM, cgo-free: method 0..6 in both modes
 #   nativewebp - the other pure-Go encoder: compression level 0, 4, 6; lossless only

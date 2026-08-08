@@ -44,7 +44,7 @@ func encode(args []string) error {
 	out := fs.String("out", "", "output WebP file")
 	lossless := fs.Bool("lossless", false, "encode lossless (VP8L) instead of lossy")
 	quality := fs.Int("quality", 90, "lossy quality 0..100")
-	optimize := fs.Int("optimize", 4, "optimization level 0..9")
+	optimize := fs.Int("optimize", 4, "optimization level 0..9 for lossy, 0..6 for lossless")
 	fs.Parse(args)
 	if *in == "" || *out == "" {
 		return fmt.Errorf("encode requires -in and -out")

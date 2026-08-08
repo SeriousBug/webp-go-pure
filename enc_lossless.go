@@ -14,7 +14,7 @@ const (
 	elosslessGlobalPredictorMode           uint8  = 11
 	elosslessCrossColorTransformBits              = 5
 	elosslessPredictorTransformBits               = 5
-	elosslessMaxOptimizationLevel          uint8  = 9
+	elosslessMaxOptimizationLevel          uint8  = 6
 	elosslessDefaultOptimizationLevel      uint8  = 6
 	elosslessNumPredictorModes             uint8  = 14
 	elosslessNumLiteralCodes                      = 256
@@ -31,9 +31,6 @@ const (
 	elosslessMatchChainDepthLevel2                = 8
 	elosslessMatchChainDepthLevel3                = 16
 	elosslessMatchChainDepthLevel4                = 32
-	elosslessMatchChainDepthLevel5                = 64
-	elosslessMatchChainDepthLevel6                = 128
-	elosslessMatchChainDepthLevel7                = 192
 	elosslessMaxFallbackDistance                  = (1 << 20) - 120
 	elosslessApproxLiteralCostBits                = 32
 	elosslessApproxCacheCostBits                  = 8
@@ -110,36 +107,11 @@ type elosslessPaletteCandidate struct {
 }
 
 type elosslessTokenBuildOptions struct {
-	colorCacheBits         int
-	matchChainDepth        int
-	useWindowOffsets       bool
-	windowOffsetLimit      int
-	lazyMatching           bool
-	useTraceback           bool
-	tracebackMaxCandidates int
-}
-
-const (
-	elosslessStepNone = iota
-	elosslessStepLiteral
-	elosslessStepCache
-	elosslessStepCopy
-)
-
-type elosslessTracebackStep struct {
-	kind     int
-	key      int
-	distance int
-	length   int
-}
-
-type elosslessTracebackCostModel struct {
-	literal             []int
-	red                 []int
-	blue                []int
-	alpha               []int
-	distance            []int
-	lengthCostIntervals [][3]int
+	colorCacheBits    int
+	matchChainDepth   int
+	useWindowOffsets  bool
+	windowOffsetLimit int
+	lazyMatching      bool
 }
 
 // elosslessHistogramSet mirrors the Rust [Vec<u32>; 5].
@@ -220,8 +192,18 @@ func elosslessValidateRgba(width, height int, rgba []byte) error {
 	return nil
 }
 
+// Effort 7..=9 are accepted for API compatibility with the lossy encoder's
+// 0..=9 range, but clamp to 6: the extra search tiers they used to select cost
+// upwards of 25x the encode time of effort 6 for ~1% smaller output.
+func elosslessEffectiveEffort(effort uint8) uint8 {
+	if effort > elosslessMaxOptimizationLevel {
+		return elosslessMaxOptimizationLevel
+	}
+	return effort
+}
+
 func elosslessValidateOptions(options *LosslessOptions) error {
-	if options.Effort > elosslessMaxOptimizationLevel {
+	if options.Effort > 9 {
 		return encInvalidParam("lossless optimization level must be in 0..=9")
 	}
 	return nil
@@ -241,26 +223,13 @@ func elosslessSearchProfile(optimizationLevel uint8) elosslessLosslessSearchProf
 		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101}
 	case 5:
 		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101}
-	case 6:
-		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101}
-	case 7:
-		return elosslessLosslessSearchProfile{7, 5, 4, true, 5, 106}
-	case 8:
-		return elosslessLosslessSearchProfile{7, 6, 5, true, 6, 112}
 	default:
-		return elosslessLosslessSearchProfile{7, 7, 6, true, 8, 120}
+		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101}
 	}
 }
 
 func elosslessCandidateProfiles(optimizationLevel uint8) []elosslessLosslessSearchProfile {
-	switch optimizationLevel {
-	case 8:
-		return []elosslessLosslessSearchProfile{elosslessSearchProfile(7)}
-	case 9:
-		return []elosslessLosslessSearchProfile{elosslessSearchProfile(7)}
-	default:
-		return []elosslessLosslessSearchProfile{elosslessSearchProfile(optimizationLevel)}
-	}
+	return []elosslessLosslessSearchProfile{elosslessSearchProfile(elosslessEffectiveEffort(optimizationLevel))}
 }
 
 func elosslessRgbaHasAlpha(rgba []byte) bool {

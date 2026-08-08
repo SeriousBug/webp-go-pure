@@ -68,7 +68,7 @@ output size at each:
 
 | Engine | knob | range |
 | --- | --- | --- |
-| `ours` | `Effort` | 0..9, both modes |
+| `ours` | `Effort` | lossy 0..9, lossless 0..6 |
 | `libwebp` | lossy `method` / lossless preset level (`cwebp -z`) | 0..6 / 0..9 |
 | `wasm` | `Method` | 0..6, both modes: gen2brain/webp exposes no lossless level |
 | `nativewebp` | `CompressionLevel` | 0, 4, 6: the three its `getMethodLevel` distinguishes |

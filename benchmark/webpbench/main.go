@@ -85,7 +85,8 @@ const (
 	libwebpSlow  = 6 // libwebp method 6 = slowest
 	libwebpLL    = 6 // lossless preset level
 
-	oursMaxEffort    = 9 // our Effort is 0..9 in both modes
+	oursMaxEffort    = 9 // our lossy Effort is 0..9
+	oursMaxEffortLL  = 6 // our lossless Effort is 0..6; 7..9 behave as 6
 	libwebpMaxMethod = 6 // libwebp method (the lossy knob, and wasm's only knob)
 	libwebpMaxLevel  = 9 // libwebp lossless preset level, cwebp's -z
 )
@@ -127,7 +128,7 @@ type sweepCase struct {
 }
 
 // sweepCases walks each engine's own effort knob end to end, in both modes. The
-// scales are not the same knob: ours is Effort 0..9, libwebp's lossy knob is
+// scales are not the same knob: ours is Effort 0..9 lossy and 0..6 lossless, libwebp's lossy knob is
 // method 0..6 and its lossless one is the preset level 0..9 (cwebp's -z), and
 // gen2brain/webp exposes only method, so the "wasm" engine sweeps method in both
 // modes. The point of the pass is each engine's reachable time-for-size curve,
@@ -138,14 +139,14 @@ func sweepCases(buf *webp.Image) []sweepCase {
 	var cases []sweepCase
 	for e := 0; e <= oursMaxEffort; e++ {
 		effort := uint8(e)
-		cases = append(cases,
-			sweepCase{"ours", "lossless", e, func() ([]byte, error) {
+		if e <= oursMaxEffortLL {
+			cases = append(cases, sweepCase{"ours", "lossless", e, func() ([]byte, error) {
 				return webp.EncodeLossless(buf, &webp.LosslessOptions{Effort: effort})
-			}},
-			sweepCase{"ours", "lossy", e, func() ([]byte, error) {
-				return webp.EncodeLossy(buf, &webp.LossyOptions{Quality: lossyQuality, Effort: effort})
-			}},
-		)
+			}})
+		}
+		cases = append(cases, sweepCase{"ours", "lossy", e, func() ([]byte, error) {
+			return webp.EncodeLossy(buf, &webp.LossyOptions{Quality: lossyQuality, Effort: effort})
+		}})
 	}
 	for z := 0; z <= libwebpMaxLevel; z++ {
 		cases = append(cases, sweepCase{"libwebp", "lossless", z, libwebpEncoder(nrgba, true, 0, z)})
