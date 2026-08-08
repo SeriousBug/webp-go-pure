@@ -757,6 +757,20 @@ func elossyBuildSegmentCandidates(source *elossyPlanes, mbWidth, mbHeight int, b
 		return candidates
 	}
 
+	// Frames this large used to get a single hard-coded segmentation here,
+	// returned without ever being compared against the unsegmented baseline. It
+	// raised the quantizer index by 12 on the flattest 65% of the frame, which at
+	// quality 90 is a 1.9x coarser step over two thirds of the image: 1.0 to 2.1 dB
+	// of PSNR for 5 to 30% fewer bytes, and 1.5 to 10% worse BD-rate. Effort 9 was
+	// the only tier that got to RD-compare it, and it rejected it on every image in
+	// the corpus, which is what made effort 9 both slower and larger than effort 8.
+	// Searching the presets here instead costs 15 to 25% more time and the
+	// frame-level ranking still picks the segmented candidate on images where it
+	// loses, so efforts below 9 skip segmentation on large frames entirely.
+	if !elossyUseExhaustiveSegmentSearch(optimizationLevel) && mbCount >= 1024 {
+		return candidates
+	}
+
 	activities := make([]uint32, 0, mbCount)
 	for mbY := 0; mbY < mbHeight; mbY++ {
 		for mbX := 0; mbX < mbWidth; mbX++ {
@@ -766,13 +780,6 @@ func elossyBuildSegmentCandidates(source *elossyPlanes, mbWidth, mbHeight int, b
 	sorted := make([]uint32, len(activities))
 	copy(sorted, activities)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-
-	if !elossyUseExhaustiveSegmentSearch(optimizationLevel) && mbCount >= 1024 {
-		if config, ok := elossyBuildSegmentConfig(activities, sorted, 65, 12, -2, baseQuant); ok {
-			return []elossySegmentConfig{config}
-		}
-		return candidates
-	}
 
 	type twoSegmentPreset struct {
 		flatPercent int
