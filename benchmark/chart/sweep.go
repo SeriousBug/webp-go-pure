@@ -31,13 +31,20 @@ var sweepPanels = []struct {
 	value     func(sweepPoint) float64
 	labelStep func(prev float64) float64
 	logY      bool
-	format    func(float64) string
+	// clipTop ends the axis below a run of far-out points rather than scaling to
+	// them, for a panel where one engine's first settings are several times
+	// everything else and would otherwise leave the rest in a band too thin to
+	// read. Clipped points are drawn on the top edge with their value, so the
+	// panel still says they exist and how far out they are.
+	clipTop bool
+	format  func(float64) string
 }{
 	{
 		mode: sweepPrefix + "lossless", title: "lossless", unit: "total size (MiB)", width: 1.3,
 		value:     func(p sweepPoint) float64 { return p.mib },
 		labelStep: func(prev float64) float64 { return prev * 0.01 },
 		logY:      true,
+		clipTop:   true,
 		format:    formatMiB,
 	},
 	{
@@ -71,7 +78,7 @@ func effortSweep(sets []dataset, th theme) string {
 		padL     = 74.0
 		padR     = 26.0
 		colGap   = 62.0
-		rowH     = 196.0
+		rowH     = 250.0
 		row0Top  = 186.0
 		rowStrid = rowH + 108
 	)
@@ -88,7 +95,7 @@ func effortSweep(sets []dataset, th theme) string {
 		x += panelWs[i] + colGap
 	}
 
-	note := "Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless preset level 0-9, and nativewebp's three compression levels. Time and size are totals over the whole corpus and PSNR is the mean over it; time and size are on log scales. Faster is left, smaller is down, higher quality is up. A setting is labelled only where it moves the panel's value (1% of size, 0.1 dB of PSNR), so an unlabelled point is a setting that costs time and changes nothing: read the nearest label to its left. " +
+	note := "Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless preset level 0-9, and nativewebp's three compression levels. Time and size are totals over the whole corpus and PSNR is the mean over it; time and size are on log scales. Faster is left, smaller is down, higher quality is up. Both machines share each panel's axes, so a curve sitting further right is that machine being slower, not a different scale. A triangle on a panel's top edge is a setting whose value is off the axis, labelled setting and value and reached by a dashed segment: our lossless efforts 0 and 1 write 54 and 45 MiB, and scaling the panel to them would flatten every other engine into one band. A setting is labelled only where it moves the panel's value (1% of size, 0.1 dB of PSNR), so an unlabelled point is a setting that costs time and changes nothing: read the nearest label to its left. " +
 		"The lossy panels have to be read together, since an encoder can spend effort on either one: the same quality 90 request lands between 39 and 43 dB depending on engine and setting."
 	footTop := row0Top + rowStrid + rowH + 92
 	h := footTop + footLineH*float64(len(footnoteWrap(note))) - 2
@@ -104,6 +111,36 @@ func effortSweep(sets []dataset, th theme) string {
 	c.text(40, 112, 12.5, th.muted, "start", "",
 		"Lossy is quality 90 throughout, which each encoder hits differently; lossless is exact, so size is its only axis.")
 
+	// Both rows share each panel's axes. The two machines encode the same corpus
+	// to the same bytes, so a per-row range would rescale identical size and
+	// quality data differently and make the rows look like different results;
+	// shared, the only thing that moves between them is time, which is the one
+	// thing the machine actually changes.
+	type axisRange struct{ xMin, xMax, yMin, yMax float64 }
+	panelRange := make([]axisRange, len(sweepPanels))
+	for pi, panel := range sweepPanels {
+		var xs, ys []float64
+		for _, d := range sets {
+			for _, eng := range engines {
+				for _, p := range sweepCurve(d, panel.mode, eng) {
+					if v := panel.value(p); v > 0 {
+						xs = append(xs, p.seconds)
+						ys = append(ys, v)
+					}
+				}
+			}
+		}
+		if len(xs) == 0 {
+			continue
+		}
+		xMin, xMax := minMax(xs)
+		yMin, yMax := minMax(ys)
+		if panel.clipTop {
+			yMax = clipOutlierTop(ys)
+		}
+		panelRange[pi] = axisRange{xMin, xMax, yMin, yMax}
+	}
+
 	for ri, d := range sets {
 		rowTop := row0Top + float64(ri)*rowStrid
 		rowBot := rowTop + rowH
@@ -113,34 +150,26 @@ func effortSweep(sets []dataset, th theme) string {
 		for pi, panel := range sweepPanels {
 			px, panelW := panelX[pi], panelWs[pi]
 			curves := map[string][]sweepPoint{}
-			var xs, ys []float64
 			for _, eng := range engines {
-				pts := sweepCurve(d, panel.mode, eng)
-				if len(pts) == 0 {
-					continue
-				}
 				var kept []sweepPoint
-				for _, p := range pts {
-					v := panel.value(p)
-					if v <= 0 {
-						continue
+				for _, p := range sweepCurve(d, panel.mode, eng) {
+					if panel.value(p) > 0 {
+						kept = append(kept, p)
 					}
-					kept = append(kept, p)
-					xs = append(xs, p.seconds)
-					ys = append(ys, v)
 				}
 				if len(kept) > 0 {
 					curves[eng] = kept
 				}
 			}
-			if len(xs) == 0 {
+			rng := panelRange[pi]
+			if rng.xMax == 0 {
 				continue
 			}
 			c.text(px+panelW/2, rowTop-22, 13, th.inkPrimary, "middle", "600", panel.title)
 			c.text(px+panelW/2, rowTop-8, 11.5, th.muted, "middle", "", panel.unit)
 
-			xMin, xMax := minMax(xs)
-			yMin, yMax := minMax(ys)
+			xMin, xMax := rng.xMin, rng.xMax
+			yMin, yMax := rng.yMin, rng.yMax
 			// Time and size are logarithmic, padded so the outermost points are
 			// not on the frame. Size needs it as much as time does: our two
 			// fastest lossless settings write files several times the size of
@@ -152,7 +181,10 @@ func effortSweep(sets []dataset, th theme) string {
 			var yAxis []float64
 			if panel.logY {
 				yLo, yHi := math.Log10(yMin)-0.06, math.Log10(yMax)+0.06
-				sy = func(v float64) float64 { return rowBot - (math.Log10(v)-yLo)/(yHi-yLo)*rowH }
+				sy = func(v float64) float64 {
+					y := rowBot - (math.Log10(v)-yLo)/(yHi-yLo)*rowH
+					return math.Max(y, rowTop)
+				}
 				yAxis = axisTicks(math.Pow(10, yLo), math.Pow(10, yHi))
 			} else {
 				pad := math.Max((yMax-yMin)*0.1, 0.2)
@@ -186,22 +218,59 @@ func effortSweep(sets []dataset, th theme) string {
 				if len(pts) == 0 {
 					continue
 				}
-				var d strings.Builder
-				for i, p := range pts {
-					verb := "L"
-					if i == 0 {
-						verb = "M"
+				// Segments that touch a clipped point are drawn dashed. Their
+				// endpoint sits on the top edge rather than where the value is, so
+				// a solid line there would draw a slope the data does not have.
+				var onScale, offScale strings.Builder
+				for i := 1; i < len(pts); i++ {
+					a, b := pts[i-1], pts[i]
+					target := &onScale
+					if panel.value(a) > yMax || panel.value(b) > yMax {
+						target = &offScale
 					}
-					fmt.Fprintf(&d, "%s %.1f %.1f ", verb, sx(p.seconds), sy(panel.value(p)))
+					fmt.Fprintf(target, "M %.1f %.1f L %.1f %.1f ",
+						sx(a.seconds), sy(panel.value(a)), sx(b.seconds), sy(panel.value(b)))
 				}
-				c.printf(`<path d="%s" fill="none" stroke="%s" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>`,
-					strings.TrimSpace(d.String()), color(eng))
+				if onScale.Len() > 0 {
+					c.printf(`<path d="%s" fill="none" stroke="%s" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity="0.85"/>`,
+						strings.TrimSpace(onScale.String()), color(eng))
+				}
+				if offScale.Len() > 0 {
+					c.printf(`<path d="%s" fill="none" stroke="%s" stroke-width="1.5" stroke-dasharray="3 3" stroke-linecap="round" opacity="0.45"/>`,
+						strings.TrimSpace(offScale.String()), color(eng))
+				}
+				labels := effortLabels(pts, panel.value, panel.labelStep, sx, sy)
+				moved := map[int]bool{}
+				for _, l := range labels {
+					moved[l.effort] = true
+				}
+				// A setting that does not move the panel's value is drawn as a
+				// smaller dot with no ring. Several engines hold one size across
+				// most of their range, and at full weight those runs read as a
+				// row of choices rather than as one choice repeated.
 				for _, p := range pts {
-					c.circle(sx(p.seconds), sy(panel.value(p)), 3.5, color(eng), th.surface)
+					x, v := sx(p.seconds), panel.value(p)
+					if v > yMax {
+						// Labelled with the setting and its value: every other label
+						// in the panel is a setting number, so a bare value here
+						// would read as one.
+						c.printf(`<path d="M %.1f %.1f l 4.5 6 l -9 0 Z" fill="%s"/>`, x, rowTop+1, color(eng))
+						c.haloText(x, rowTop+20, labelSize, color(eng), th.surface,
+							fmt.Sprintf("%d: %s", p.effort, panel.format(v)))
+						continue
+					}
+					if moved[p.effort] {
+						c.circle(x, sy(v), 3.5, color(eng), th.surface)
+					} else {
+						c.circle(x, sy(v), 2, color(eng), "")
+					}
 				}
-				for _, l := range effortLabels(pts, panel.value, panel.labelStep, sx, sy) {
+				for _, l := range labels {
+					if l.value > yMax {
+						continue
+					}
 					l.color = color(eng)
-					placed = append(placed, place(l, placed, rowTop+9, rowBot-5))
+					placed = append(placed, place(l, placed, rowTop+30, rowBot-5))
 				}
 			}
 			// Labels go on after every curve in the panel, so one engine's line
@@ -281,9 +350,11 @@ func sweepCurve(d dataset, mode, engine string) []sweepPoint {
 const labelSize = 10.0
 
 type label struct {
-	x, y  float64
-	text  string
-	color string
+	x, y   float64
+	text   string
+	color  string
+	effort int
+	value  float64
 	// anchor is the point the label belongs to, so a label pushed aside can be
 	// tested for overlap without drifting away from its own point.
 	anchorY float64
@@ -331,9 +402,47 @@ func effortLabels(pts []sweepPoint, value func(sweepPoint) float64, step func(fl
 		}
 		last = v
 		y := sy(v)
-		out = append(out, label{x: sx(p.seconds), y: y - 9, text: fmt.Sprintf("%d", p.effort), anchorY: y})
+		out = append(out, label{x: sx(p.seconds), y: y - 9, text: fmt.Sprintf("%d", p.effort), anchorY: y, effort: p.effort, value: v})
 	}
 	return out
+}
+
+// clipOutlierTop finds where a panel's values stop being a spread and become a
+// jump. It sorts them on the log axis they are drawn on, takes the largest gap
+// between neighbours, and if that gap is both wide in absolute terms and several
+// times wider than any other, returns the value just below it. Everything above
+// is drawn on the top edge instead of setting the scale. With no such gap it
+// returns the largest value and the axis is unchanged.
+func clipOutlierTop(vs []float64) float64 {
+	logs := append([]float64(nil), vs...)
+	for i := range logs {
+		logs[i] = math.Log10(logs[i])
+	}
+	sort.Float64s(logs)
+	uniq := logs[:0]
+	for i, v := range logs {
+		if i == 0 || v-uniq[len(uniq)-1] > 1e-9 {
+			uniq = append(uniq, v)
+		}
+	}
+	if len(uniq) < 4 {
+		return math.Pow(10, logs[len(logs)-1])
+	}
+	widest, widestAt, runnerUp := 0.0, -1, 0.0
+	for i := 1; i < len(uniq); i++ {
+		gap := uniq[i] - uniq[i-1]
+		if gap > widest {
+			widest, widestAt, runnerUp = gap, i, widest
+		} else if gap > runnerUp {
+			runnerUp = gap
+		}
+	}
+	// A quarter decade of empty axis, three times any other gap, and not so low
+	// that clipping would hide most of the data.
+	if widest < 0.25 || widest < 3*runnerUp || widestAt < len(uniq)/2 {
+		return math.Pow(10, uniq[len(uniq)-1])
+	}
+	return math.Pow(10, uniq[widestAt-1])
 }
 
 func minMax(vs []float64) (float64, float64) {
@@ -344,28 +453,35 @@ func minMax(vs []float64) (float64, float64) {
 	return lo, hi
 }
 
-// axisTicks picks gridlines for a log axis. Over a wide range the 1-2-5 decade
-// steps are the readable choice; over a narrow one they can leave a single line
-// on the panel, so a range under a decade falls back to even steps, which are
-// unevenly spaced on a log scale but still land on round numbers.
+// axisTicks picks gridlines for a log axis, using whichever set of round
+// multiples lands 4 to 9 lines in the range. Evenly spaced values are wrong
+// here: the lossless panel runs 13 to 62 MiB, where a step of 10 puts one line
+// under 20 and leaves the band every engine but ours sits in unlabelled, while
+// 1-1.5-2-3-5-7 spaces the lines the way the axis does.
 func axisTicks(lo, hi float64) []float64 {
-	if hi/lo >= 8 {
-		return logTicks(lo, hi)
+	for _, mult := range [][]float64{{1, 2, 5}, {1, 2, 3, 5, 7}, {1, 1.5, 2, 3, 5, 7}} {
+		if t := logTicks(lo, hi, mult); len(t) >= 4 && len(t) <= 9 {
+			return t
+		}
+	}
+	if t := logTicks(lo, hi, []float64{1, 1.5, 2, 3, 5, 7}); len(t) >= 4 {
+		return t
 	}
 	return evenTicks(lo, hi)
 }
 
-// logTicks returns the 1-2-5 decade steps inside a range.
-func logTicks(lo, hi float64) []float64 {
+// logTicks returns the given decade multiples inside a range.
+func logTicks(lo, hi float64, mult []float64) []float64 {
 	var out []float64
 	for e := math.Floor(math.Log10(lo)); e <= math.Ceil(math.Log10(hi)); e++ {
-		for _, m := range []float64{1, 2, 5} {
+		for _, m := range mult {
 			v := m * math.Pow(10, e)
 			if v >= lo && v <= hi {
 				out = append(out, v)
 			}
 		}
 	}
+	sort.Float64s(out)
 	return out
 }
 
