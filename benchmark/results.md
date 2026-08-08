@@ -14,8 +14,8 @@ hardware.
 - **Encoding:** library commit 0009929 · 2026-07-26
 - **nativewebp rows:** v1.3.0 · library commit 6e35fbe · 2026-08-07
 - **Effort sweep:** library commit a622eb2 · 2026-08-07. The `ours` rows in the
-  arm64 sweep were re-measured at commit b0f6bd1 · 2026-08-07, after the lossy
-  segmentation fix; the amd64 ones still predate it.
+  arm64 sweep were re-measured after the lossy segmentation and chroma-trellis
+  fixes · 2026-08-08; the amd64 ones still predate both.
 - **Decoding:** library commit bcab3e6 · 2026-08-07
 - **Budget:** 2000 ms/measurement, lossy quality 90
 
@@ -103,12 +103,15 @@ first and amd64 second, and the effort numbers are each engine's own scale.
   quantizer over two thirds of every large frame without an RD check. Effort 9
   was the only tier that compared it against the unsegmented baseline, and it
   rejected it on every image, which is why it read as both slower and larger than
-  effort 8. Commit b0f6bd1 removed it. On arm64 the range is now 3.10 to 3.65 MiB
-  at 42.38-42.97 dB, within 0.35 dB of libwebp everywhere, and monotone in size.
-  The amd64 rows still show the old behavior.
-- **Effort 9 no longer buys much.** Arm64 effort 8 is 3.10 MiB at 42.54 dB in
-  3.5 s; effort 9 is 3.11 MiB at 42.75 dB in 5.8 s. It is 0.21 dB for 1.7x the
-  time, against libwebp method 6's 3.12 MiB at 43.06 dB in 2.9 s.
+  effort 8. A second dip, at efforts 5 to 8, was the chroma trellis, which
+  libwebp also disables (`#define DO_TRELLIS_UV 0`, "risky, not worth"). Removing
+  both, the arm64 range is 3.18 to 3.65 MiB at 42.80-43.11 dB, inside libwebp's
+  own 42.74-43.10 dB band at every setting. The amd64 rows still show the old
+  behavior.
+- **We are close to libwebp on lossy now, and slightly behind.** Arm64 effort 8
+  is 3.18 MiB at 43.04 dB in 3.4 s against libwebp method 6's 3.12 MiB at
+  43.06 dB in 2.9 s: 2% larger for the same quality at 1.2x the time. Effort 9
+  adds 0.07 dB at the same size for 5.6 s.
 - **Several of our settings are aliases.** Lossy 1 and 2, 3 and 4, and 6 and 7
   each write identical output in identical time, as do lossless 7, 8 and 9.
 - **`wasm` is libwebp's curve shifted right**, 2-3x on lossy and 1.5-3x on
@@ -407,13 +410,13 @@ Lena_512.png                                    lossless  libwebp     9       90
 Lena_512.png                                    lossless  nativewebp  0       900    900     741562    -        7      152.418
 Lena_512.png                                    lossless  nativewebp  4       900    900     739400    -        7      157.531
 Lena_512.png                                    lossless  nativewebp  6       900    900     738176    -        6      171.620
-Lena_512.png                                    lossless  ours        0       900    900     1707902   -        64     31.334
-Lena_512.png                                    lossless  ours        1       900    900     1481022   -        47     42.683
-Lena_512.png                                    lossless  ours        2       900    900     754084    -        11     184.832
-Lena_512.png                                    lossless  ours        3       900    900     698252    -        11     191.263
-Lena_512.png                                    lossless  ours        4       900    900     697206    -        8      279.142
-Lena_512.png                                    lossless  ours        5       900    900     697926    -        6      351.419
-Lena_512.png                                    lossless  ours        6       900    900     651634    -        5      476.307
+Lena_512.png                                    lossless  ours        0       900    900     1707902   -        70     28.685
+Lena_512.png                                    lossless  ours        1       900    900     1481022   -        53     38.376
+Lena_512.png                                    lossless  ours        2       900    900     754084    -        12     178.142
+Lena_512.png                                    lossless  ours        3       900    900     698252    -        11     186.372
+Lena_512.png                                    lossless  ours        4       900    900     697206    -        8      269.209
+Lena_512.png                                    lossless  ours        5       900    900     697926    -        6      336.902
+Lena_512.png                                    lossless  ours        6       900    900     651634    -        5      460.231
 Lena_512.png                                    lossless  wasm        0       900    900     731954    -        10     105.953
 Lena_512.png                                    lossless  wasm        1       900    900     639584    -        3      402.340
 Lena_512.png                                    lossless  wasm        2       900    900     627632    -        3      444.960
@@ -428,16 +431,16 @@ Lena_512.png                                    lossy     libwebp     3       90
 Lena_512.png                                    lossy     libwebp     4       900    900     92124     40.97    24     43.022
 Lena_512.png                                    lossy     libwebp     5       900    900     91586     40.91    21     47.676
 Lena_512.png                                    lossy     libwebp     6       900    900     89968     40.94    13     77.061
-Lena_512.png                                    lossy     ours        0       900    900     113182    41.02    85     23.601
-Lena_512.png                                    lossy     ours        1       900    900     111048    41.05    64     31.507
-Lena_512.png                                    lossy     ours        2       900    900     111048    41.05    64     31.329
-Lena_512.png                                    lossy     ours        3       900    900     101404    41.15    43     47.452
-Lena_512.png                                    lossy     ours        4       900    900     101404    41.15    43     47.585
-Lena_512.png                                    lossy     ours        5       900    900     94494     40.25    41     49.204
-Lena_512.png                                    lossy     ours        6       900    900     89652     40.19    38     53.522
-Lena_512.png                                    lossy     ours        7       900    900     89652     40.19    38     53.693
-Lena_512.png                                    lossy     ours        8       900    900     88890     40.29    22     93.423
-Lena_512.png                                    lossy     ours        9       900    900     88890     40.16    13     157.929
+Lena_512.png                                    lossy     ours        0       900    900     113182    41.02    87     23.190
+Lena_512.png                                    lossy     ours        1       900    900     111048    41.05    64     31.254
+Lena_512.png                                    lossy     ours        2       900    900     111048    41.05    65     31.031
+Lena_512.png                                    lossy     ours        3       900    900     101404    41.15    43     46.714
+Lena_512.png                                    lossy     ours        4       900    900     101404    41.15    43     46.813
+Lena_512.png                                    lossy     ours        5       900    900     101404    41.15    43     47.165
+Lena_512.png                                    lossy     ours        6       900    900     96566     41.08    39     51.435
+Lena_512.png                                    lossy     ours        7       900    900     96566     41.08    39     51.734
+Lena_512.png                                    lossy     ours        8       900    900     95710     41.21    22     92.183
+Lena_512.png                                    lossy     ours        9       900    900     95710     41.13    14     152.046
 Lena_512.png                                    lossy     wasm        0       900    900     103980    41.04    27     38.354
 Lena_512.png                                    lossy     wasm        1       900    900     102500    41.05    19     53.612
 Lena_512.png                                    lossy     wasm        2       900    900     94342     40.70    18     56.368
@@ -458,13 +461,13 @@ pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  libwebp     9       20
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  nativewebp  0       2025   2700    3944492   -        1      1605.586
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  nativewebp  4       2025   2700    3938686   -        1      1608.950
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  nativewebp  6       2025   2700    3926412   -        1      1721.519
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        0       2025   2700    13935672  -        9      225.575
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        1       2025   2700    11352054  -        3      927.871
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        2       2025   2700    3977946   -        1      2082.749
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        3       2025   2700    3359674   -        1      2048.964
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        4       2025   2700    3359902   -        1      3094.534
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        5       2025   2700    3365290   -        1      4554.113
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        6       2025   2700    3355646   -        1      5036.221
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        0       2025   2700    13935672  -        10     217.334
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        1       2025   2700    11352054  -        3      761.441
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        2       2025   2700    3977946   -        2      1896.332
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        3       2025   2700    3359674   -        2      1792.655
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        4       2025   2700    3359902   -        1      2757.711
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        5       2025   2700    3365290   -        1      3676.530
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  ours        6       2025   2700    3355646   -        1      4170.771
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  wasm        0       2025   2700    3961206   -        1      1432.509
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  wasm        1       2025   2700    3244586   -        1      3114.771
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossless  wasm        2       2025   2700    3244586   -        1      3137.413
@@ -479,16 +482,16 @@ pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     libwebp     3       20
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     libwebp     4       2025   2700    632636    42.42    4      326.044
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     libwebp     5       2025   2700    625540    42.27    3      370.356
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     libwebp     6       2025   2700    610518    42.58    2      671.386
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        0       2025   2700    723064    42.02    13     155.653
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        1       2025   2700    694902    42.09    10     212.779
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        2       2025   2700    694902    42.09    10     212.903
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        3       2025   2700    686064    42.28    6      397.909
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        4       2025   2700    686064    42.28    6      395.495
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        5       2025   2700    675068    42.22    5      401.521
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        6       2025   2700    600704    42.01    5      442.472
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        7       2025   2700    600704    42.01    5      440.637
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        8       2025   2700    592722    42.26    3      782.934
-pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        9       2025   2700    592722    42.26    2      1367.853
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        0       2025   2700    723064    42.02    14     152.960
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        1       2025   2700    694902    42.09    10     212.723
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        2       2025   2700    694902    42.09    10     210.810
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        3       2025   2700    686064    42.28    6      388.061
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        4       2025   2700    686064    42.28    6      390.393
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        5       2025   2700    686064    42.28    6      389.347
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        6       2025   2700    611704    42.07    5      432.349
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        7       2025   2700    611704    42.07    5      428.012
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        8       2025   2700    603030    42.33    3      755.497
+pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     ours        9       2025   2700    603030    42.33    2      1339.521
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     wasm        0       2025   2700    598034    41.96    5      249.034
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     wasm        1       2025   2700    588954    41.97    3      347.769
 pexels-abubakar-mamman-2148132108-38602599.jpg  lossy     wasm        2       2025   2700    614528    42.20    3      401.980
@@ -509,13 +512,13 @@ pexels-martin-alargent-1165956-5665465.jpg      lossless  libwebp     9       20
 pexels-martin-alargent-1165956-5665465.jpg      lossless  nativewebp  0       2025   2700    3554880   -        1      1399.699
 pexels-martin-alargent-1165956-5665465.jpg      lossless  nativewebp  4       2025   2700    3559008   -        1      1401.866
 pexels-martin-alargent-1165956-5665465.jpg      lossless  nativewebp  6       2025   2700    3563584   -        1      1485.056
-pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        0       2025   2700    13256232  -        10     201.902
-pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        1       2025   2700    10676794  -        3      771.909
-pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        2       2025   2700    4054172   -        2      1673.174
-pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        3       2025   2700    3341756   -        2      1694.097
-pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        4       2025   2700    3318656   -        1      2378.164
-pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        5       2025   2700    3287048   -        1      3257.339
-pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        6       2025   2700    3058988   -        1      3800.410
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        0       2025   2700    13256232  -        11     198.683
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        1       2025   2700    10676794  -        4      634.626
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        2       2025   2700    4054172   -        2      1491.708
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        3       2025   2700    3341756   -        2      1486.026
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        4       2025   2700    3318656   -        1      2101.561
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        5       2025   2700    3287048   -        1      2881.473
+pexels-martin-alargent-1165956-5665465.jpg      lossless  ours        6       2025   2700    3058988   -        1      3428.412
 pexels-martin-alargent-1165956-5665465.jpg      lossless  wasm        0       2025   2700    3625218   -        1      1307.295
 pexels-martin-alargent-1165956-5665465.jpg      lossless  wasm        1       2025   2700    2948150   -        1      3132.164
 pexels-martin-alargent-1165956-5665465.jpg      lossless  wasm        2       2025   2700    2948150   -        1      3094.038
@@ -530,16 +533,16 @@ pexels-martin-alargent-1165956-5665465.jpg      lossy     libwebp     3       20
 pexels-martin-alargent-1165956-5665465.jpg      lossy     libwebp     4       2025   2700    618856    42.83    4      305.154
 pexels-martin-alargent-1165956-5665465.jpg      lossy     libwebp     5       2025   2700    615274    42.71    3      340.819
 pexels-martin-alargent-1165956-5665465.jpg      lossy     libwebp     6       2025   2700    603264    42.75    2      578.330
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        0       2025   2700    756806    42.39    13     154.839
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        1       2025   2700    740538    42.48    10     210.721
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        2       2025   2700    740538    42.48    10     212.196
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        3       2025   2700    662858    42.65    6      360.240
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        4       2025   2700    662858    42.65    6      361.892
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        5       2025   2700    646350    42.51    6      368.083
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        6       2025   2700    605740    42.38    5      401.968
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        7       2025   2700    605740    42.38    5      402.468
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        8       2025   2700    601454    42.57    3      697.906
-pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        9       2025   2700    601454    42.73    2      1095.070
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        0       2025   2700    756806    42.39    14     152.802
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        1       2025   2700    740538    42.48    10     208.331
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        2       2025   2700    740538    42.48    10     210.419
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        3       2025   2700    662858    42.65    6      352.086
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        4       2025   2700    662858    42.65    6      354.933
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        5       2025   2700    662858    42.65    6      354.490
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        6       2025   2700    622244    42.52    6      386.348
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        7       2025   2700    622244    42.52    6      386.556
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        8       2025   2700    616898    42.71    3      687.189
+pexels-martin-alargent-1165956-5665465.jpg      lossy     ours        9       2025   2700    616898    42.97    2      1057.775
 pexels-martin-alargent-1165956-5665465.jpg      lossy     wasm        0       2025   2700    726824    42.63    4      250.852
 pexels-martin-alargent-1165956-5665465.jpg      lossy     wasm        1       2025   2700    664274    42.64    3      353.988
 pexels-martin-alargent-1165956-5665465.jpg      lossy     wasm        2       2025   2700    626708    42.42    3      397.729
@@ -560,13 +563,13 @@ pexels-mavihnt-38213559.jpg                     lossless  libwebp     9       25
 pexels-mavihnt-38213559.jpg                     lossless  nativewebp  0       2560   1706    4004276   -        1      1141.420
 pexels-mavihnt-38213559.jpg                     lossless  nativewebp  4       2560   1706    4007402   -        1      1174.897
 pexels-mavihnt-38213559.jpg                     lossless  nativewebp  6       2560   1706    4009534   -        1      1219.116
-pexels-mavihnt-38213559.jpg                     lossless  ours        0       2560   1706    11064720  -        11     191.074
-pexels-mavihnt-38213559.jpg                     lossless  ours        1       2560   1706    9463456   -        4      651.612
-pexels-mavihnt-38213559.jpg                     lossless  ours        2       2560   1706    4986210   -        2      1737.407
-pexels-mavihnt-38213559.jpg                     lossless  ours        3       2560   1706    3768140   -        2      1734.308
-pexels-mavihnt-38213559.jpg                     lossless  ours        4       2560   1706    3730772   -        1      2456.573
-pexels-mavihnt-38213559.jpg                     lossless  ours        5       2560   1706    3733318   -        1      3284.287
-pexels-mavihnt-38213559.jpg                     lossless  ours        6       2560   1706    3585610   -        1      3617.026
+pexels-mavihnt-38213559.jpg                     lossless  ours        0       2560   1706    11064720  -        12     179.244
+pexels-mavihnt-38213559.jpg                     lossless  ours        1       2560   1706    9463456   -        4      513.017
+pexels-mavihnt-38213559.jpg                     lossless  ours        2       2560   1706    4986210   -        2      1483.497
+pexels-mavihnt-38213559.jpg                     lossless  ours        3       2560   1706    3768140   -        2      1450.771
+pexels-mavihnt-38213559.jpg                     lossless  ours        4       2560   1706    3730772   -        1      2011.752
+pexels-mavihnt-38213559.jpg                     lossless  ours        5       2560   1706    3733318   -        1      2658.575
+pexels-mavihnt-38213559.jpg                     lossless  ours        6       2560   1706    3585610   -        1      3196.140
 pexels-mavihnt-38213559.jpg                     lossless  wasm        0       2560   1706    4116810   -        1      1014.886
 pexels-mavihnt-38213559.jpg                     lossless  wasm        1       2560   1706    3484606   -        1      2463.986
 pexels-mavihnt-38213559.jpg                     lossless  wasm        2       2560   1706    3484606   -        1      2475.875
@@ -581,16 +584,16 @@ pexels-mavihnt-38213559.jpg                     lossy     libwebp     3       25
 pexels-mavihnt-38213559.jpg                     lossy     libwebp     4       2560   1706    934782    41.17    4      286.583
 pexels-mavihnt-38213559.jpg                     lossy     libwebp     5       2560   1706    933892    41.05    4      325.691
 pexels-mavihnt-38213559.jpg                     lossy     libwebp     6       2560   1706    925032    41.14    2      681.911
-pexels-mavihnt-38213559.jpg                     lossy     ours        0       2560   1706    1037210   40.99    12     175.121
-pexels-mavihnt-38213559.jpg                     lossy     ours        1       2560   1706    1019438   41.05    9      227.924
-pexels-mavihnt-38213559.jpg                     lossy     ours        2       2560   1706    1019438   41.05    9      231.466
-pexels-mavihnt-38213559.jpg                     lossy     ours        3       2560   1706    987826    41.15    6      382.834
-pexels-mavihnt-38213559.jpg                     lossy     ours        4       2560   1706    987826    41.15    6      383.223
-pexels-mavihnt-38213559.jpg                     lossy     ours        5       2560   1706    973996    40.91    6      392.650
-pexels-mavihnt-38213559.jpg                     lossy     ours        6       2560   1706    938572    40.78    5      441.635
-pexels-mavihnt-38213559.jpg                     lossy     ours        7       2560   1706    938572    40.78    5      443.430
-pexels-mavihnt-38213559.jpg                     lossy     ours        8       2560   1706    935652    41.05    3      766.548
-pexels-mavihnt-38213559.jpg                     lossy     ours        9       2560   1706    935652    41.05    2      1352.147
+pexels-mavihnt-38213559.jpg                     lossy     ours        0       2560   1706    1037210   40.99    12     170.949
+pexels-mavihnt-38213559.jpg                     lossy     ours        1       2560   1706    1019438   41.05    9      227.835
+pexels-mavihnt-38213559.jpg                     lossy     ours        2       2560   1706    1019438   41.05    9      227.638
+pexels-mavihnt-38213559.jpg                     lossy     ours        3       2560   1706    987826    41.15    6      372.143
+pexels-mavihnt-38213559.jpg                     lossy     ours        4       2560   1706    987826    41.15    6      373.829
+pexels-mavihnt-38213559.jpg                     lossy     ours        5       2560   1706    987826    41.15    6      374.857
+pexels-mavihnt-38213559.jpg                     lossy     ours        6       2560   1706    952402    41.01    5      424.648
+pexels-mavihnt-38213559.jpg                     lossy     ours        7       2560   1706    952402    41.01    5      429.568
+pexels-mavihnt-38213559.jpg                     lossy     ours        8       2560   1706    948446    41.27    3      743.837
+pexels-mavihnt-38213559.jpg                     lossy     ours        9       2560   1706    948446    41.27    2      1320.915
 pexels-mavihnt-38213559.jpg                     lossy     wasm        0       2560   1706    983360    40.87    5      248.874
 pexels-mavihnt-38213559.jpg                     lossy     wasm        1       2560   1706    976610    40.88    3      334.769
 pexels-mavihnt-38213559.jpg                     lossy     wasm        2       2560   1706    935824    40.67    3      376.402
@@ -611,13 +614,13 @@ pexels-steve-15267299.jpg                       lossless  libwebp     9       20
 pexels-steve-15267299.jpg                       lossless  nativewebp  0       2095   3000    2635282   -        1      1458.404
 pexels-steve-15267299.jpg                       lossless  nativewebp  4       2095   3000    2627962   -        1      1515.004
 pexels-steve-15267299.jpg                       lossless  nativewebp  6       2095   3000    2622528   -        1      1606.103
-pexels-steve-15267299.jpg                       lossless  ours        0       2095   3000    8710684   -        11     183.929
-pexels-steve-15267299.jpg                       lossless  ours        1       2095   3000    7739368   -        4      516.081
-pexels-steve-15267299.jpg                       lossless  ours        2       2095   3000    2499600   -        2      1238.426
-pexels-steve-15267299.jpg                       lossless  ours        3       2095   3000    2316408   -        2      1374.964
-pexels-steve-15267299.jpg                       lossless  ours        4       2095   3000    2309372   -        2      1938.276
-pexels-steve-15267299.jpg                       lossless  ours        5       2095   3000    2253044   -        1      2862.588
-pexels-steve-15267299.jpg                       lossless  ours        6       2095   3000    2218786   -        1      3468.505
+pexels-steve-15267299.jpg                       lossless  ours        0       2095   3000    8710684   -        12     175.423
+pexels-steve-15267299.jpg                       lossless  ours        1       2095   3000    7739368   -        5      432.935
+pexels-steve-15267299.jpg                       lossless  ours        2       2095   3000    2499600   -        2      1149.187
+pexels-steve-15267299.jpg                       lossless  ours        3       2095   3000    2316408   -        2      1289.337
+pexels-steve-15267299.jpg                       lossless  ours        4       2095   3000    2309372   -        2      1811.555
+pexels-steve-15267299.jpg                       lossless  ours        5       2095   3000    2253044   -        1      2658.530
+pexels-steve-15267299.jpg                       lossless  ours        6       2095   3000    2218786   -        1      3258.010
 pexels-steve-15267299.jpg                       lossless  wasm        0       2095   3000    2546112   -        1      1089.347
 pexels-steve-15267299.jpg                       lossless  wasm        1       2095   3000    2103668   -        1      3139.217
 pexels-steve-15267299.jpg                       lossless  wasm        2       2095   3000    2103668   -        1      3140.243
@@ -632,16 +635,16 @@ pexels-steve-15267299.jpg                       lossy     libwebp     3       20
 pexels-steve-15267299.jpg                       lossy     libwebp     4       2095   3000    256038    44.58    4      261.033
 pexels-steve-15267299.jpg                       lossy     libwebp     5       2095   3000    253192    44.51    4      282.044
 pexels-steve-15267299.jpg                       lossy     libwebp     6       2095   3000    247610    44.50    3      341.255
-pexels-steve-15267299.jpg                       lossy     ours        0       2095   3000    294606    43.91    18     112.126
-pexels-steve-15267299.jpg                       lossy     ours        1       2095   3000    287430    44.01    13     155.682
-pexels-steve-15267299.jpg                       lossy     ours        2       2095   3000    287430    44.01    13     154.273
-pexels-steve-15267299.jpg                       lossy     ours        3       2095   3000    264092    44.12    10     214.946
-pexels-steve-15267299.jpg                       lossy     ours        4       2095   3000    264092    44.12    10     217.176
-pexels-steve-15267299.jpg                       lossy     ours        5       2095   3000    243542    43.86    9      225.231
-pexels-steve-15267299.jpg                       lossy     ours        6       2095   3000    227186    43.83    9      237.800
-pexels-steve-15267299.jpg                       lossy     ours        7       2095   3000    227186    43.83    9      238.239
-pexels-steve-15267299.jpg                       lossy     ours        8       2095   3000    233446    43.96    5      470.931
-pexels-steve-15267299.jpg                       lossy     ours        9       2095   3000    233446    44.04    3      842.600
+pexels-steve-15267299.jpg                       lossy     ours        0       2095   3000    294606    43.91    19     110.682
+pexels-steve-15267299.jpg                       lossy     ours        1       2095   3000    287430    44.01    13     157.405
+pexels-steve-15267299.jpg                       lossy     ours        2       2095   3000    287430    44.01    14     153.579
+pexels-steve-15267299.jpg                       lossy     ours        3       2095   3000    264092    44.12    10     214.275
+pexels-steve-15267299.jpg                       lossy     ours        4       2095   3000    264092    44.12    10     218.810
+pexels-steve-15267299.jpg                       lossy     ours        5       2095   3000    264092    44.12    10     219.288
+pexels-steve-15267299.jpg                       lossy     ours        6       2095   3000    247744    44.09    9      227.731
+pexels-steve-15267299.jpg                       lossy     ours        7       2095   3000    247744    44.09    9      229.753
+pexels-steve-15267299.jpg                       lossy     ours        8       2095   3000    252782    44.23    5      461.184
+pexels-steve-15267299.jpg                       lossy     ours        9       2095   3000    252782    44.41    3      811.714
 pexels-steve-15267299.jpg                       lossy     wasm        0       2095   3000    284570    44.34    5      236.453
 pexels-steve-15267299.jpg                       lossy     wasm        1       2095   3000    275444    44.38    3      336.586
 pexels-steve-15267299.jpg                       lossy     wasm        2       2095   3000    261602    44.30    3      339.400
@@ -662,13 +665,13 @@ pexels-steve-29626041.jpg                       lossless  libwebp     9       25
 pexels-steve-29626041.jpg                       lossless  nativewebp  0       2560   1440    378544    -        2      592.266
 pexels-steve-29626041.jpg                       lossless  nativewebp  4       2560   1440    378536    -        2      615.710
 pexels-steve-29626041.jpg                       lossless  nativewebp  6       2560   1440    379050    -        2      665.652
-pexels-steve-29626041.jpg                       lossless  ours        0       2560   1440    827088    -        42     47.836
-pexels-steve-29626041.jpg                       lossless  ours        1       2560   1440    532928    -        30     67.186
-pexels-steve-29626041.jpg                       lossless  ours        2       2560   1440    356676    -        7      305.145
-pexels-steve-29626041.jpg                       lossless  ours        3       2560   1440    335034    -        6      345.575
-pexels-steve-29626041.jpg                       lossless  ours        4       2560   1440    327568    -        5      499.460
-pexels-steve-29626041.jpg                       lossless  ours        5       2560   1440    309738    -        3      715.237
-pexels-steve-29626041.jpg                       lossless  ours        6       2560   1440    309370    -        3      960.360
+pexels-steve-29626041.jpg                       lossless  ours        0       2560   1440    827088    -        43     46.999
+pexels-steve-29626041.jpg                       lossless  ours        1       2560   1440    532928    -        32     63.618
+pexels-steve-29626041.jpg                       lossless  ours        2       2560   1440    356676    -        7      297.764
+pexels-steve-29626041.jpg                       lossless  ours        3       2560   1440    335034    -        6      341.535
+pexels-steve-29626041.jpg                       lossless  ours        4       2560   1440    327568    -        5      491.973
+pexels-steve-29626041.jpg                       lossless  ours        5       2560   1440    309738    -        3      723.195
+pexels-steve-29626041.jpg                       lossless  ours        6       2560   1440    309370    -        3      942.473
 pexels-steve-29626041.jpg                       lossless  wasm        0       2560   1440    346824    -        5      230.188
 pexels-steve-29626041.jpg                       lossless  wasm        1       2560   1440    283552    -        1      1262.277
 pexels-steve-29626041.jpg                       lossless  wasm        2       2560   1440    283552    -        1      1256.373
@@ -683,16 +686,16 @@ pexels-steve-29626041.jpg                       lossy     libwebp     3       25
 pexels-steve-29626041.jpg                       lossy     libwebp     4       2560   1440    39310     49.71    9      113.781
 pexels-steve-29626041.jpg                       lossy     libwebp     5       2560   1440    38754     49.65    9      121.347
 pexels-steve-29626041.jpg                       lossy     libwebp     6       2560   1440    38252     49.65    8      131.940
-pexels-steve-29626041.jpg                       lossy     ours        0       2560   1440    45686     49.31    42     48.390
-pexels-steve-29626041.jpg                       lossy     ours        1       2560   1440    44820     49.35    30     67.226
-pexels-steve-29626041.jpg                       lossy     ours        2       2560   1440    44820     49.35    30     66.715
-pexels-steve-29626041.jpg                       lossy     ours        3       2560   1440    39426     49.40    30     68.639
-pexels-steve-29626041.jpg                       lossy     ours        4       2560   1440    39426     49.40    29     69.048
-pexels-steve-29626041.jpg                       lossy     ours        5       2560   1440    36070     47.93    28     72.286
-pexels-steve-29626041.jpg                       lossy     ours        6       2560   1440    34200     47.91    26     78.492
-pexels-steve-29626041.jpg                       lossy     ours        7       2560   1440    34200     47.91    26     78.039
-pexels-steve-29626041.jpg                       lossy     ours        8       2560   1440    33070     47.93    17     122.395
-pexels-steve-29626041.jpg                       lossy     ours        9       2560   1440    42614     49.25    8      256.938
+pexels-steve-29626041.jpg                       lossy     ours        0       2560   1440    45686     49.31    42     48.630
+pexels-steve-29626041.jpg                       lossy     ours        1       2560   1440    44820     49.35    30     67.191
+pexels-steve-29626041.jpg                       lossy     ours        2       2560   1440    44820     49.35    31     65.455
+pexels-steve-29626041.jpg                       lossy     ours        3       2560   1440    39426     49.40    30     68.227
+pexels-steve-29626041.jpg                       lossy     ours        4       2560   1440    39426     49.40    30     68.031
+pexels-steve-29626041.jpg                       lossy     ours        5       2560   1440    39426     49.40    29     70.502
+pexels-steve-29626041.jpg                       lossy     ours        6       2560   1440    37562     49.37    27     75.687
+pexels-steve-29626041.jpg                       lossy     ours        7       2560   1440    37562     49.37    27     74.301
+pexels-steve-29626041.jpg                       lossy     ours        8       2560   1440    36254     49.45    17     120.861
+pexels-steve-29626041.jpg                       lossy     ours        9       2560   1440    36254     49.62    9      237.295
 pexels-steve-29626041.jpg                       lossy     wasm        0       2560   1440    47614     49.05    8      125.809
 pexels-steve-29626041.jpg                       lossy     wasm        1       2560   1440    47302     49.05    6      182.301
 pexels-steve-29626041.jpg                       lossy     wasm        2       2560   1440    39488     49.30    7      163.209
@@ -713,13 +716,13 @@ pexels-toulouse-10807703.jpg                    lossless  libwebp     9       14
 pexels-toulouse-10807703.jpg                    lossless  nativewebp  0       1400   2100    2989804   -        2      594.630
 pexels-toulouse-10807703.jpg                    lossless  nativewebp  4       1400   2100    2992710   -        2      610.494
 pexels-toulouse-10807703.jpg                    lossless  nativewebp  6       1400   2100    2996214   -        2      680.585
-pexels-toulouse-10807703.jpg                    lossless  ours        0       1400   2100    7375806   -        18     114.091
-pexels-toulouse-10807703.jpg                    lossless  ours        1       1400   2100    6193432   -        7      297.540
-pexels-toulouse-10807703.jpg                    lossless  ours        2       1400   2100    3973924   -        3      968.761
-pexels-toulouse-10807703.jpg                    lossless  ours        3       1400   2100    2942470   -        3      969.839
-pexels-toulouse-10807703.jpg                    lossless  ours        4       1400   2100    2912778   -        2      1291.390
-pexels-toulouse-10807703.jpg                    lossless  ours        5       1400   2100    2912610   -        2      1523.717
-pexels-toulouse-10807703.jpg                    lossless  ours        6       1400   2100    2765508   -        2      1941.435
+pexels-toulouse-10807703.jpg                    lossless  ours        0       1400   2100    7375806   -        19     108.886
+pexels-toulouse-10807703.jpg                    lossless  ours        1       1400   2100    6193432   -        9      244.840
+pexels-toulouse-10807703.jpg                    lossless  ours        2       1400   2100    3973924   -        3      855.847
+pexels-toulouse-10807703.jpg                    lossless  ours        3       1400   2100    2942470   -        3      892.264
+pexels-toulouse-10807703.jpg                    lossless  ours        4       1400   2100    2912778   -        2      1140.197
+pexels-toulouse-10807703.jpg                    lossless  ours        5       1400   2100    2912610   -        2      1421.007
+pexels-toulouse-10807703.jpg                    lossless  ours        6       1400   2100    2765508   -        2      1791.936
 pexels-toulouse-10807703.jpg                    lossless  wasm        0       1400   2100    3029106   -        3      483.340
 pexels-toulouse-10807703.jpg                    lossless  wasm        1       1400   2100    2690886   -        1      1731.236
 pexels-toulouse-10807703.jpg                    lossless  wasm        2       1400   2100    2690886   -        1      1728.253
@@ -734,16 +737,16 @@ pexels-toulouse-10807703.jpg                    lossy     libwebp     3       14
 pexels-toulouse-10807703.jpg                    lossy     libwebp     4       1400   2100    784734    39.96    6      194.807
 pexels-toulouse-10807703.jpg                    lossy     libwebp     5       1400   2100    768426    39.81    5      227.010
 pexels-toulouse-10807703.jpg                    lossy     libwebp     6       1400   2100    758466    39.84    3      453.061
-pexels-toulouse-10807703.jpg                    lossy     ours        0       1400   2100    854742    39.93    15     136.046
-pexels-toulouse-10807703.jpg                    lossy     ours        1       1400   2100    844538    39.95    12     174.884
-pexels-toulouse-10807703.jpg                    lossy     ours        2       1400   2100    844538    39.95    12     174.834
-pexels-toulouse-10807703.jpg                    lossy     ours        3       1400   2100    812788    40.06    8      266.286
-pexels-toulouse-10807703.jpg                    lossy     ours        4       1400   2100    812788    40.06    8      265.866
-pexels-toulouse-10807703.jpg                    lossy     ours        5       1400   2100    796734    39.69    8      272.090
-pexels-toulouse-10807703.jpg                    lossy     ours        6       1400   2100    762900    39.56    7      308.027
-pexels-toulouse-10807703.jpg                    lossy     ours        7       1400   2100    762900    39.56    7      307.533
-pexels-toulouse-10807703.jpg                    lossy     ours        8       1400   2100    761160    39.75    4      524.568
-pexels-toulouse-10807703.jpg                    lossy     ours        9       1400   2100    761160    39.75    3      679.206
+pexels-toulouse-10807703.jpg                    lossy     ours        0       1400   2100    854742    39.93    16     133.385
+pexels-toulouse-10807703.jpg                    lossy     ours        1       1400   2100    844538    39.95    12     176.180
+pexels-toulouse-10807703.jpg                    lossy     ours        2       1400   2100    844538    39.95    12     172.873
+pexels-toulouse-10807703.jpg                    lossy     ours        3       1400   2100    812788    40.06    8      261.994
+pexels-toulouse-10807703.jpg                    lossy     ours        4       1400   2100    812788    40.06    8      266.978
+pexels-toulouse-10807703.jpg                    lossy     ours        5       1400   2100    812788    40.06    8      264.036
+pexels-toulouse-10807703.jpg                    lossy     ours        6       1400   2100    778956    39.92    7      301.937
+pexels-toulouse-10807703.jpg                    lossy     ours        7       1400   2100    778956    39.92    7      301.469
+pexels-toulouse-10807703.jpg                    lossy     ours        8       1400   2100    776930    40.10    4      515.813
+pexels-toulouse-10807703.jpg                    lossy     ours        9       1400   2100    776930    40.03    3      674.117
 pexels-toulouse-10807703.jpg                    lossy     wasm        0       1400   2100    857060    39.84    6      174.468
 pexels-toulouse-10807703.jpg                    lossy     wasm        1       1400   2100    812040    39.84    5      240.452
 pexels-toulouse-10807703.jpg                    lossy     wasm        2       1400   2100    796814    39.60    4      262.909

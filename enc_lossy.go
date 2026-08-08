@@ -61,9 +61,11 @@ type elossyRdMultipliers struct {
 	i4Penalty uint64
 	// The trellis weighs rate against a transform-domain error rather than the
 	// pixel-domain SSE the mode search uses, so it needs its own multipliers.
+	// There is no chroma one: chroma is never trellised. libwebp reached the
+	// same conclusion, and keeps the path behind `#define DO_TRELLIS_UV 0` with
+	// the note "disable trellis for UV. Risky. Not worth."
 	trellisI16 uint32
 	trellisI4  uint32
-	trellisUv  uint32
 }
 
 type elossyPlanes struct {
@@ -119,7 +121,6 @@ type elossyLossySearchProfile struct {
 	// refineI4TopK is how many of the plain-quantized 4x4 candidates are
 	// re-scored through the trellis. Zero refines only the plain winner.
 	refineI4TopK        int
-	refineChroma        bool
 	updateProbabilities bool
 	// modeScreenTopK is how many modes survive the Hadamard-domain pre-screen
 	// and get a full transform/quantize/reconstruct trial. Zero disables the
@@ -224,7 +225,6 @@ func elossyBuildRdMultipliers(quant *elossyQuantMatrices) elossyRdMultipliers {
 		mode:       max(qI4*qI4, 128) >> 7,
 		trellisI16: max((qI16*qI16)>>2, 1),
 		trellisI4:  max((7*qI4*qI4)>>3, 1),
-		trellisUv:  max((qUv*qUv)<<1, 1),
 		i4Penalty:  1000 * uint64(qI4) * uint64(qI4),
 	}
 }
@@ -300,17 +300,9 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			updateProbabilities: true,
 			modeScreenTopK:      elossyModeScreenTopK,
 		}
-	case 3, 4:
+	case 3, 4, 5:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
-			updateProbabilities: true,
-			modeScreenTopK:      elossyModeScreenTopK,
-			i4GateStrength:      elossyIntra4GateStrength,
-		}
-	case 5:
-		return elossyLossySearchProfile{
-			allowI4x4:           true,
-			refineChroma:        true,
 			updateProbabilities: true,
 			modeScreenTopK:      elossyModeScreenTopK,
 			i4GateStrength:      elossyIntra4GateStrength,
@@ -320,7 +312,6 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			allowI4x4:           true,
 			refineI16:           true,
 			refineI4:            true,
-			refineChroma:        true,
 			updateProbabilities: true,
 			modeScreenTopK:      elossyModeScreenTopK,
 			i4GateStrength:      elossyIntra4GateStrength,
@@ -331,7 +322,6 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			refineI16:           true,
 			refineI4:            true,
 			refineI4TopK:        elossyRefineI4TopK,
-			refineChroma:        true,
 			updateProbabilities: true,
 			modeScreenTopK:      elossyTopEffortModeScreenTopK,
 			i4GateStrength:      elossyIntra4GateStrengthTopEffort,

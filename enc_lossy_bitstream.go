@@ -863,7 +863,7 @@ func elossyAnalyzeLuma(out *elossyMacroblockCoeffs, model *elossyRateModel, sour
 	}
 }
 
-func elossyAnalyzeChroma(out *elossyMacroblockCoeffs, model *elossyRateModel, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, profile *elossyLossySearchProfile, mode *elossyMacroblockMode, quant *elossyQuantMatrices, rd *elossyRdMultipliers, top *elossyNonZeroContext, left *elossyNonZeroContext) {
+func elossyAnalyzeChroma(out *elossyMacroblockCoeffs, source *elossyPlanes, reconstructed *elossyPlanes, mbX, mbY int, mode *elossyMacroblockMode, quant *elossyQuantMatrices, top *elossyNonZeroContext, left *elossyNonZeroContext) {
 	uvX := mbX * 8
 	uvY := mbY * 8
 	elossyPredictBlock(reconstructed.u, reconstructed.uvStride, reconstructed.uvStride, uvX, uvY, mode.chroma, 8)
@@ -889,9 +889,9 @@ func elossyAnalyzeChroma(out *elossyMacroblockCoeffs, model *elossyRateModel, so
 				blockX := uvX + subX*4
 				blockY := uvY + subY*4
 				coeffs := elossyForwardTransform(plane.source, source.uvStride, plane.recon, reconstructed.uvStride, blockX, blockY)
-				ctx := int(l + (tnz & 1))
 				var levels [16]int16
-				coeffsR := elossyQuantizeLevels(profile.refineChroma, &coeffs, model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levels)
+				elossyQuantizeBlockInto(&coeffs, quant.uv[0], quant.uv[1], 0, &levels)
+				coeffsR := elossyDequantizeLevels(&levels, quant.uv[0], quant.uv[1])
 				plane.levels[block] = levels
 				elossyAddTransform(plane.recon, reconstructed.uvStride, blockX, blockY, &coeffsR)
 				hasCoeffs := uint8(0)
@@ -948,52 +948,6 @@ func elossyRefineLumaI16(out *elossyMacroblockCoeffs, model *elossyRateModel, re
 	elossyRestoreBlock16(reconstructed.y, reconstructed.yStride, mbX*16, mbY*16, &recon)
 }
 
-func elossyRefineChroma(out *elossyMacroblockCoeffs, model *elossyRateModel, reconstructed *elossyPlanes, mbX, mbY int, chroma *elossyChromaTrial, quant *elossyQuantMatrices, rd *elossyRdMultipliers, top *elossyNonZeroContext, left *elossyNonZeroContext) {
-	uvX := mbX * 8
-	uvY := mbY * 8
-	uRecon := chroma.uPred
-	vRecon := chroma.vPred
-	planes := [2]struct {
-		coeffs *[4][16]int16
-		levels *[4][16]int16
-		recon  *[64]uint8
-		tnz    uint8
-		lnz    uint8
-	}{
-		{&chroma.uCoeffs, &out.u, &uRecon, top.nz >> 4, left.nz >> 4},
-		{&chroma.vCoeffs, &out.v, &vRecon, top.nz >> 6, left.nz >> 6},
-	}
-	for _, plane := range planes {
-		tnz := plane.tnz
-		lnz := plane.lnz
-		for subY := 0; subY < 2; subY++ {
-			l := lnz & 1
-			for subX := 0; subX < 2; subX++ {
-				block := subY*2 + subX
-				ctx := int(l + (tnz & 1))
-				var levels [16]int16
-				coeffsR, _ := elossyTrellisQuantize(&plane.coeffs[block], model, 2, ctx, 0, quant.uv[0], quant.uv[1], rd.trellisUv, &levels)
-				plane.levels[block] = levels
-				elossyAddTransform(plane.recon[:], 8, subX*4, subY*4, &coeffsR)
-				hasCoeffs := uint8(0)
-				if elossyBlockHasNonZero(&levels, 0) {
-					hasCoeffs = 1
-				}
-				l = hasCoeffs
-				tnz = (tnz >> 1) | (hasCoeffs << 3)
-			}
-			tnz >>= 2
-			lnz = (lnz >> 1) | (l << 5)
-		}
-	}
-
-	for row := 0; row < 8; row++ {
-		dst := (uvY+row)*reconstructed.uvStride + uvX
-		copy(reconstructed.u[dst:dst+8], uRecon[row*8:row*8+8])
-		copy(reconstructed.v[dst:dst+8], vRecon[row*8:row*8+8])
-	}
-}
-
 // elossyFinalizeMacroblock produces the levels and reconstruction the token
 // partition encodes. Each plane group either keeps what the mode search
 // computed or, when the profile refines that group with the trellis, is
@@ -1009,13 +963,10 @@ func elossyFinalizeMacroblock(out *elossyMacroblockCoeffs, model *elossyRateMode
 	default:
 		elossyCommitLumaTrial(out, reconstructed, mbX, mbY, trials.bestLuma)
 	}
-	switch {
-	case !trials.valid:
-		elossyAnalyzeChroma(out, model, source, reconstructed, mbX, mbY, profile, mode, quant, rd, top, left)
-	case profile.refineChroma:
-		elossyRefineChroma(out, model, reconstructed, mbX, mbY, trials.bestChroma, quant, rd, top, left)
-	default:
+	if trials.valid {
 		elossyCommitChromaTrial(out, reconstructed, mbX, mbY, trials.bestChroma)
+	} else {
+		elossyAnalyzeChroma(out, source, reconstructed, mbX, mbY, mode, quant, top, left)
 	}
 	out.skip = elossyLumaLevelsAllZero(out) && elossyChromaLevelsAllZero(out)
 }
