@@ -60,8 +60,9 @@ beyond 6 at the moment). Watch out for one edge: a non-nil
 `LossyOptions` with `Quality` left at zero asks for quality 0, not the default.
 The `std` package's `Options` reads zero as the default instead.
 
-The lossy encoder does not support transparency and rejects input with any pixel
-whose alpha is not `0xff`. Lossless takes alpha as it comes.
+The lossy encoder stores transparency in a separate `ALPH` chunk, compressed
+losslessly, so alpha comes back bit-exact from a lossy encode. Fully opaque
+input gets no `ALPH` chunk. Lossless takes alpha as it comes.
 
 ## EXIF
 
@@ -76,8 +77,8 @@ func encodeWithExif(img webp.Image, exif []byte) ([]byte, error) {
 
 ## Errors
 
-Errors unwrap to sentinels, so `errors.Is` answers "is this animated?" or "did
-lossy reject the alpha?" without matching on strings:
+Errors unwrap to sentinels, so `errors.Is` answers "is this animated?" without
+matching on strings:
 
     webp.ErrInvalidParam
     webp.ErrNotEnoughData
@@ -147,8 +148,7 @@ repacking.
 
 `DecodeYUV` is lossy-only: lossless WebP is natively RGBA, so there are no
 planes to hand back. Check `Features` first, or use `Decode`, which handles
-both. `EncodeLossyYUV` rejects a non-nil alpha plane, since the lossy encoder
-has nowhere to put it.
+both. `EncodeLossyYUV` stores a non-nil alpha plane as an `ALPH` chunk.
 
 ### Sample range
 

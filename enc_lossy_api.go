@@ -225,12 +225,17 @@ func encodeLossyRgbaToWebpWithOptionsAndExif(width, height int, rgba []byte, opt
 	if err != nil {
 		return nil, err
 	}
+	alpha, err := elossyBuildAlphaChunk(width, height, elossyAlphaPlane(width, height, rgba), options.Effort)
+	if err != nil {
+		return nil, err
+	}
 	return wrapStillWebp(stillImageChunk{
 		fourcc:   [4]byte{'V', 'P', '8', ' '},
 		payload:  vp8,
 		width:    width,
 		height:   height,
-		hasAlpha: false,
+		alpha:    alpha,
+		hasAlpha: alpha != nil,
 	}, exif)
 }
 

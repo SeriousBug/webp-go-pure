@@ -103,8 +103,9 @@ func writeWebP(w io.Writer, img image.Image) error {
 }
 ```
 
-Set `Lossless` to encode with VP8L instead, which reproduces the input exactly
-and is the only mode that keeps an alpha channel. `Effort` runs 0..9 for lossy and 0..6 for
+Set `Lossless` to encode with VP8L instead, which reproduces the input exactly.
+Both modes keep an alpha channel: lossy stores it losslessly in an `ALPH` chunk
+alongside the quantized color. `Effort` runs 0..9 for lossy and 0..6 for
 lossless, and trades encode time for file size.
 
 ### Transcoding

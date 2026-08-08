@@ -166,16 +166,22 @@ func TestDecodeProducesFullRangeYCbCr(t *testing.T) {
 }
 
 func TestSentinelsAreReExported(t *testing.T) {
-	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
-	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 128})
-
 	// Matching on the re-exported sentinel must work without importing the root
 	// package, which is the reason it is re-exported.
-	if _, err := EncodeBytes(src, nil); !errors.Is(err, ErrLossyAlpha) {
-		t.Fatalf("expected ErrLossyAlpha, got %v", err)
+	if _, err := DecodeBytes([]byte("RIFF")); !errors.Is(err, ErrNotEnoughData) {
+		t.Fatalf("expected ErrNotEnoughData, got %v", err)
 	}
-	if ErrLossyAlpha != codec.ErrLossyAlpha {
-		t.Fatal("the re-exported sentinel is not the codec's own")
+	for _, pair := range [][2]error{
+		{ErrInvalidParam, codec.ErrInvalidParam},
+		{ErrNotEnoughData, codec.ErrNotEnoughData},
+		{ErrBitstream, codec.ErrBitstream},
+		{ErrUnsupported, codec.ErrUnsupported},
+		{ErrAnimated, codec.ErrAnimated},
+		{ErrLossyAlpha, codec.ErrLossyAlpha},
+	} {
+		if pair[0] != pair[1] {
+			t.Fatalf("re-exported sentinel %v is not the codec's own", pair[0])
+		}
 	}
 }
 
@@ -412,13 +418,30 @@ func TestEncodeLosslessRoundTripsExactly(t *testing.T) {
 	}
 }
 
-func TestEncodeRejectsAlphaForLossy(t *testing.T) {
+func TestEncodeKeepsAlphaForLossy(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
-	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 128})
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			src.SetNRGBA(x, y, color.NRGBA{R: 255, A: uint8(16 * (y*4 + x))})
+		}
+	}
 
-	_, err := EncodeBytes(src, nil)
-	if !errors.Is(err, codec.ErrLossyAlpha) {
-		t.Fatalf("expected ErrLossyAlpha, got %v", err)
+	data, err := EncodeBytes(src, nil)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := DecodeBytes(data)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			_, _, _, a := decoded.At(x, y).RGBA()
+			want := uint32(16 * (y*4 + x))
+			if a>>8 != want {
+				t.Fatalf("alpha at (%d,%d): got %d want %d", x, y, a>>8, want)
+			}
+		}
 	}
 }
 
@@ -448,15 +471,22 @@ func TestEncodeTakesThePlanarPathForOpaqueNYCbCrA(t *testing.T) {
 	}
 }
 
-func TestEncodeRejectsTransparentNYCbCrA(t *testing.T) {
+func TestEncodeKeepsAlphaForTransparentNYCbCrA(t *testing.T) {
 	ycbcr := decodeJPEG(t, gradient(32, 24))
 	alpha := bytes.Repeat([]byte{0xff}, 32*24)
 	alpha[0] = 0x40
 	transparent := &image.NYCbCrA{YCbCr: *ycbcr, A: alpha, AStride: 32}
 
-	_, err := EncodeBytes(transparent, nil)
-	if !errors.Is(err, codec.ErrLossyAlpha) {
-		t.Fatalf("expected ErrLossyAlpha, got %v", err)
+	data, err := EncodeBytes(transparent, nil)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := DecodeBytes(data)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, _, _, a := decoded.At(0, 0).RGBA(); a>>8 != 0x40 {
+		t.Fatalf("alpha at (0,0): got %d want %d", a>>8, 0x40)
 	}
 }
 

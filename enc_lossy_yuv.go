@@ -23,10 +23,6 @@ func elossyValidateYuv(img *YUVImage) error {
 	if img.Width > elossyMaxWebpDimension || img.Height > elossyMaxWebpDimension {
 		return encInvalidParam("image dimensions exceed VP8 limits")
 	}
-	if img.A != nil {
-		return encAlphaUnsupported("lossy encoder does not support alpha yet")
-	}
-
 	uvWidth := (img.Width + 1) / 2
 	uvHeight := (img.Height + 1) / 2
 	if err := elossyPlaneFits(img.Y, img.YStride, img.Width, img.Height, "Y"); err != nil {
@@ -35,7 +31,13 @@ func elossyValidateYuv(img *YUVImage) error {
 	if err := elossyPlaneFits(img.U, img.UVStride, uvWidth, uvHeight, "U"); err != nil {
 		return err
 	}
-	return elossyPlaneFits(img.V, img.UVStride, uvWidth, uvHeight, "V")
+	if err := elossyPlaneFits(img.V, img.UVStride, uvWidth, uvHeight, "V"); err != nil {
+		return err
+	}
+	if img.A != nil {
+		return elossyPlaneFits(img.A, img.AStride, img.Width, img.Height, "A")
+	}
+	return nil
 }
 
 // elossyCopyPaddedPlane copies a source plane into a macroblock-padded

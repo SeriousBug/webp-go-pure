@@ -289,9 +289,9 @@ func configOf(features codec.FeatureInfo) image.Config {
 // Encode writes m to w as a WebP image. A nil *Options uses the defaults:
 // lossy, quality 90.
 //
-// The lossy encoder does not support transparency and rejects an image that is
-// not fully opaque with an error matching codec.ErrLossyAlpha. Set
-// [Options.Lossless] to keep an alpha channel.
+// Both encoders keep transparency. The lossy encoder stores the color channels
+// lossily and the alpha channel losslessly, so alpha survives a lossy encode
+// unchanged.
 func Encode(w io.Writer, m image.Image, o *Options) error {
 	var opts Options
 	if o != nil {
@@ -349,15 +349,17 @@ func encode(m image.Image, o *Options) ([]byte, error) {
 // correctness.
 func planesOf(m image.Image) (*codec.YUVImage, bool) {
 	var ycbcr *image.YCbCr
+	var alpha []byte
+	alphaStride := 0
 	switch src := m.(type) {
 	case *image.YCbCr:
 		ycbcr = src
 	case *image.NYCbCrA:
-		// The lossy encoder has no alpha channel to put A in. When the image is
-		// opaque the plane carries no information and can be dropped; when it is
-		// not, the RGBA path produces the ErrLossyAlpha rejection.
+		// An opaque plane carries no information, so dropping it keeps the
+		// output byte-identical to the same image without alpha.
 		if !src.Opaque() {
-			return nil, false
+			alpha = src.A
+			alphaStride = src.AStride
 		}
 		ycbcr = &src.YCbCr
 	default:
@@ -387,6 +389,8 @@ func planesOf(m image.Image) (*codec.YUVImage, bool) {
 		V:        ycbcr.Cr,
 		YStride:  ycbcr.YStride,
 		UVStride: ycbcr.CStride,
+		A:        alpha,
+		AStride:  alphaStride,
 	}, true
 }
 

@@ -4,10 +4,13 @@ const exifFlag uint32 = 0x0000_0008
 
 // stillImageChunk holds metadata and payload for a still-image WebP chunk.
 type stillImageChunk struct {
-	fourcc   [4]byte
-	payload  []byte
-	width    int
-	height   int
+	fourcc  [4]byte
+	payload []byte
+	width   int
+	height  int
+	// alpha, when non-nil, is an ALPH chunk payload written ahead of the image
+	// chunk. Only a lossy image needs one; VP8L carries its own alpha channel.
+	alpha    []byte
 	hasAlpha bool
 }
 
@@ -61,7 +64,7 @@ func wrapStillWebp(image stillImageChunk, exif []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if exif == nil {
+	if exif == nil && image.alpha == nil {
 		bodySize := 4 + 8 + paddedImageSize
 		body := newByteWriter(bodySize)
 		body.writeBytes([]byte("WEBP"))
@@ -76,11 +79,22 @@ func wrapStillWebp(image stillImageChunk, exif []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	bodySize := 4 + (8 + vp8xPayloadSize) + (8 + paddedImageSize) + (8 + paddedExifSize)
+	paddedAlphaSize := 0
+	if image.alpha != nil {
+		paddedAlphaSize, err = paddedLen(len(image.alpha))
+		if err != nil {
+			return nil, err
+		}
+		paddedAlphaSize += 8
+	}
+	bodySize := 4 + (8 + vp8xPayloadSize) + paddedAlphaSize + (8 + paddedImageSize) + (8 + paddedExifSize)
 	body := newByteWriter(bodySize)
 	body.writeBytes([]byte("WEBP"))
 
-	flags := exifFlag
+	var flags uint32
+	if exif != nil {
+		flags |= exifFlag
+	}
 	if image.hasAlpha {
 		flags |= alphaFlag
 	}
@@ -100,11 +114,18 @@ func wrapStillWebp(image stillImageChunk, exif []byte) ([]byte, error) {
 	if err := appendChunk(body, []byte("VP8X"), vp8xPayload.intoBytes()); err != nil {
 		return nil, err
 	}
+	if image.alpha != nil {
+		if err := appendChunk(body, []byte("ALPH"), image.alpha); err != nil {
+			return nil, err
+		}
+	}
 	if err := appendChunk(body, image.fourcc[:], image.payload); err != nil {
 		return nil, err
 	}
-	if err := appendChunk(body, []byte("EXIF"), exif); err != nil {
-		return nil, err
+	if exif != nil {
+		if err := appendChunk(body, []byte("EXIF"), exif); err != nil {
+			return nil, err
+		}
 	}
 	return extendRiff(body)
 }
