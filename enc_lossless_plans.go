@@ -811,6 +811,9 @@ func elosslessShouldStopTransformSearch(bestEstimate, nextEstimate int, profile 
 // elosslessApplyColorCacheToTokens. The LZ77 match structure is identical with or
 // without a cache (the cache only reclassifies literals as cache references), so
 // this avoids re-running the expensive match search once per cache-size candidate.
+// elosslessSelectBestColorCacheBits already compares an estimated stream size for
+// no cache against every candidate size, so only its winner is written out; the
+// no-cache stream is not encoded again to be measured and thrown away.
 func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *elosslessTransformPlan, profile *elosslessLosslessSearchProfile) ([]byte, error) {
 	noCacheOptions := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, 0)
 	baseTokens, err := elosslessBuildTokens(width, plan.predicted, noCacheOptions)
@@ -818,40 +821,26 @@ func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *el
 		return nil, err
 	}
 
-	if profile.fixedColorCacheBits > 0 && len(plan.predicted) >= 64 {
-		cacheBits := profile.fixedColorCacheBits
-		if err := elosslessApplyColorCacheToTokens(baseTokens, plan.predicted, baseTokens, cacheBits); err != nil {
-			return nil, err
-		}
-		return elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, cacheBits, profile.entropySearchLevel)
-	}
-
-	best, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, 0, profile.entropySearchLevel)
-	if err != nil {
-		return nil, err
-	}
-
-	if profile.useColorCache && len(plan.predicted) >= 64 {
-		bestCacheBits, err := elosslessSelectBestColorCacheBits(width, height, plan.predicted, baseTokens, profile)
+	cacheBits := 0
+	switch {
+	case len(plan.predicted) < 64:
+	case profile.fixedColorCacheBits > 0:
+		cacheBits = profile.fixedColorCacheBits
+	case profile.useColorCache:
+		cacheBits, err = elosslessSelectBestColorCacheBits(width, height, plan.predicted, baseTokens, profile)
 		if err != nil {
 			return nil, err
 		}
-		if bestCacheBits > 0 {
-			// baseTokens is dead past this point, so rewrite it in place rather
-			// than allocating a second stream of one token per pixel.
-			if err := elosslessApplyColorCacheToTokens(baseTokens, plan.predicted, baseTokens, bestCacheBits); err != nil {
-				return nil, err
-			}
-			withCache, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, bestCacheBits, profile.entropySearchLevel)
-			if err != nil {
-				return nil, err
-			}
-			if len(withCache) < len(best) {
-				best = withCache
-			}
+	}
+
+	if cacheBits > 0 {
+		// baseTokens is dead past this point, so rewrite it in place rather than
+		// allocating a second stream of one token per pixel.
+		if err := elosslessApplyColorCacheToTokens(baseTokens, plan.predicted, baseTokens, cacheBits); err != nil {
+			return nil, err
 		}
 	}
-	return best, nil
+	return elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, cacheBits, profile.entropySearchLevel)
 }
 
 // elosslessEncodeTransformPlanToVp8lWithTokens writes a full VP8L frame from an
