@@ -58,6 +58,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
 	"math"
@@ -478,16 +479,31 @@ func loadImageBuffer(path string) (webp.Image, error) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	rgba := make([]byte, w*h*4)
-	i := 0
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			r, g, bl, a := img.At(x, y).RGBA()
-			rgba[i+0] = byte(r >> 8)
-			rgba[i+1] = byte(g >> 8)
-			rgba[i+2] = byte(bl >> 8)
-			rgba[i+3] = byte(a >> 8)
-			i += 4
+	// The encoder wants straight (non-premultiplied) RGBA, so premultiplied
+	// sources go through image/draw, whose NRGBA destination un-premultiplies.
+	switch src := img.(type) {
+	case *image.NRGBA:
+		for y := 0; y < h; y++ {
+			o := src.PixOffset(b.Min.X, b.Min.Y+y)
+			copy(rgba[y*w*4:(y+1)*w*4], src.Pix[o:o+w*4])
 		}
+	case *image.NRGBA64:
+		i := 0
+		for y := 0; y < h; y++ {
+			o := src.PixOffset(b.Min.X, b.Min.Y+y)
+			for x := 0; x < w; x++ {
+				rgba[i+0] = src.Pix[o+0]
+				rgba[i+1] = src.Pix[o+2]
+				rgba[i+2] = src.Pix[o+4]
+				rgba[i+3] = src.Pix[o+6]
+				i += 4
+				o += 8
+			}
+		}
+	default:
+		conv := image.NewNRGBA(image.Rect(0, 0, w, h))
+		draw.Draw(conv, conv.Bounds(), img, b.Min, draw.Src)
+		copy(rgba, conv.Pix)
 	}
 	return webp.Image{Width: w, Height: h, RGBA: rgba}, nil
 }
