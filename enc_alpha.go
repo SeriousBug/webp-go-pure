@@ -112,8 +112,8 @@ func elossyAlphaFilterCost(filtered []byte) float64 {
 	return cost
 }
 
-// elossyPickAlphaFilter returns the cheapest of the four filters along with the
-// plane it produces.
+// elossyPickAlphaFilter returns the lowest-entropy of the four filters along
+// with the plane it produces.
 func elossyPickAlphaFilter(alpha []byte, width, height int) (uint8, []byte) {
 	bestFilter := uint8(lossyAlphaFilterNone)
 	var bestPlane []byte
@@ -163,29 +163,61 @@ func elossyAlphaLosslessEffort(effort uint8) uint8 {
 	return effort
 }
 
+// elossyAlphaExhaustiveFilterEffort is the effort at which every filter gets a
+// trial encode rather than only the two that are usually in contention.
+const elossyAlphaExhaustiveFilterEffort = 4
+
+// elossyAlphaFilterCandidates lists the filters worth a trial encode.
+//
+// Ranking filters by the entropy of the plane they produce, as the raw form
+// would be stored, is a poor proxy for what they cost once VP8L has run: VP8L
+// applies its own spatial prediction, so pre-filtering often just destroys the
+// structure that prediction would have exploited. Filtering none and the
+// lowest-entropy filter are the two that end up in contention, and trying both
+// costs two encodes instead of four.
+func elossyAlphaFilterCandidates(alpha []byte, width, height int, effort uint8) []uint8 {
+	if effort >= elossyAlphaExhaustiveFilterEffort {
+		return []uint8{lossyAlphaFilterNone, lossyAlphaFilterHorizontal, lossyAlphaFilterVertical, lossyAlphaFilterGradient}
+	}
+	filter, _ := elossyPickAlphaFilter(alpha, width, height)
+	if filter == lossyAlphaFilterNone {
+		return []uint8{lossyAlphaFilterNone}
+	}
+	return []uint8{lossyAlphaFilterNone, filter}
+}
+
 // elossyEncodeAlphaChunk builds an ALPH chunk payload for an alpha plane,
 // choosing whichever of the raw and VP8L-compressed forms is smaller.
 func elossyEncodeAlphaChunk(width, height int, alpha []byte, effort uint8) ([]byte, error) {
 	if len(alpha) != width*height {
 		return nil, encInvalidParam("alpha plane length does not match dimensions")
 	}
-	filter, filtered := elossyPickAlphaFilter(alpha, width, height)
 
-	raw := make([]byte, 0, lossyAlphaHeaderLen+len(filtered))
-	raw = append(raw, elossyAlphaHeaderByte(lossyAlphaNoCompression, filter))
-	raw = append(raw, filtered...)
+	losslessEffort := elossyAlphaLosslessEffort(effort)
+	var best []byte
+	for _, filter := range elossyAlphaFilterCandidates(alpha, width, height, effort) {
+		filtered := elossyFilterAlphaPlane(alpha, filter, width, height)
+		stream, err := elossyAlphaToVp8lStream(width, height, filtered, losslessEffort)
+		if err != nil {
+			return nil, err
+		}
+		if best != nil && lossyAlphaHeaderLen+len(stream) >= len(best) {
+			continue
+		}
+		payload := make([]byte, 0, lossyAlphaHeaderLen+len(stream))
+		payload = append(payload, elossyAlphaHeaderByte(lossyAlphaLosslessCompression, filter))
+		best = append(payload, stream...)
+	}
 
-	stream, err := elossyAlphaToVp8lStream(width, height, filtered, elossyAlphaLosslessEffort(effort))
-	if err != nil {
-		return nil, err
+	// The raw form stores the plane byte for byte, so its size does not depend
+	// on the filter and any filter will do.
+	if best == nil || len(best) >= lossyAlphaHeaderLen+len(alpha) {
+		filter, filtered := elossyPickAlphaFilter(alpha, width, height)
+		raw := make([]byte, 0, lossyAlphaHeaderLen+len(filtered))
+		raw = append(raw, elossyAlphaHeaderByte(lossyAlphaNoCompression, filter))
+		return append(raw, filtered...), nil
 	}
-	if lossyAlphaHeaderLen+len(stream) >= len(raw) {
-		return raw, nil
-	}
-	compressed := make([]byte, 0, lossyAlphaHeaderLen+len(stream))
-	compressed = append(compressed, elossyAlphaHeaderByte(lossyAlphaLosslessCompression, filter))
-	compressed = append(compressed, stream...)
-	return compressed, nil
+	return best, nil
 }
 
 // elossyBuildAlphaChunk returns the ALPH payload for a plane, or nil when the

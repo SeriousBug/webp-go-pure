@@ -163,7 +163,9 @@ func TestAlphaFilterSelection(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("selected filter %d, want %d", got, tc.want)
 			}
-			payload, err := elossyEncodeAlphaChunk(width, height, tc.plane, 4)
+			// Below the exhaustive effort the chunk trials only filtering none
+			// and the ranked filter, so the winner is one of the two.
+			payload, err := elossyEncodeAlphaChunk(width, height, tc.plane, 2)
 			if err != nil {
 				t.Fatalf("encode: %v", err)
 			}
@@ -171,8 +173,17 @@ func TestAlphaFilterSelection(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse header: %v", err)
 			}
-			if header.Filter != tc.want {
-				t.Fatalf("chunk filter %d, want %d", header.Filter, tc.want)
+			if header.Filter != tc.want && header.Filter != lossyAlphaFilterNone {
+				t.Fatalf("chunk filter %d, want %d or none", header.Filter, tc.want)
+			}
+			decoded, err := decodeAlphaPlane(payload, width, height)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			for i := range tc.plane {
+				if decoded[i] != tc.plane[i] {
+					t.Fatalf("pixel %d: got %d want %d", i, decoded[i], tc.plane[i])
+				}
 			}
 		})
 	}
