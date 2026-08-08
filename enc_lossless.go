@@ -149,7 +149,12 @@ type elosslessHistogramCandidate struct {
 }
 
 type elosslessLosslessSearchProfile struct {
-	transformSearchLevel  uint8
+	transformSearchLevel uint8
+	// matchSearchLevel widens the LZ77 match search from the row and previous-row
+	// matches at level 0 up to deep hash chains with lazy matching at level 4.
+	// Every effort sits at 0: once the parse scores matches against measured
+	// symbol costs, the extra matches the deeper levels find are ones a greedy
+	// parse cannot spend well, and they cost size on both graphics and photos.
 	matchSearchLevel      uint8
 	entropySearchLevel    uint8
 	useColorCache         bool
@@ -180,8 +185,8 @@ var elosslessPredictorTileBitsByEffort = [][]int{
 	{5, 6},
 	{5, 6},
 	{5, 6},
-	{5, 6},
 	{4, 5, 6},
+	{3, 4, 5, 6},
 	{3, 4, 5, 6},
 }
 
@@ -255,15 +260,15 @@ func elosslessSearchProfile(optimizationLevel uint8) elosslessLosslessSearchProf
 	case 1:
 		return elosslessLosslessSearchProfile{1, 0, 0, false, 2, 101, elosslessMaxCacheBits, 0, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 2:
-		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{2, 0, 1, true, 2, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 3:
-		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{3, 0, 2, true, 3, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 4:
-		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{4, 0, 2, true, 3, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 5:
-		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{5, 0, 2, true, 4, 101, elosslessMaxCacheBits, 3, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	default:
-		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101, 0, 2, elosslessPredictorTileBitsByEffort[elosslessMaxOptimizationLevel]}
+		return elosslessLosslessSearchProfile{6, 0, 3, true, 4, 101, 0, 3, elosslessPredictorTileBitsByEffort[elosslessMaxOptimizationLevel]}
 	}
 }
 
