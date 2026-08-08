@@ -267,17 +267,27 @@ func elosslessCarveHistogramSet(buf []uint32, sizes [5]int) elosslessHistogramSe
 // elosslessNewHistogramSets returns count histogram sets carved out of a single
 // allocation.
 func elosslessNewHistogramSets(count, colorCacheBits int) []elosslessHistogramSet {
+	sets, _ := elosslessCarveHistogramSets(make([]uint32, count*elosslessHistogramSetLen(colorCacheBits)), count, colorCacheBits)
+	return sets
+}
+
+func elosslessHistogramSetLen(colorCacheBits int) int {
 	sizes := elosslessHistogramChannelSizes(colorCacheBits)
-	perSet := 0
+	total := 0
 	for _, n := range sizes {
-		perSet += n
+		total += n
 	}
-	buf := make([]uint32, count*perSet)
+	return total
+}
+
+func elosslessCarveHistogramSets(buf []uint32, count, colorCacheBits int) ([]elosslessHistogramSet, int) {
+	sizes := elosslessHistogramChannelSizes(colorCacheBits)
+	perSet := elosslessHistogramSetLen(colorCacheBits)
 	sets := make([]elosslessHistogramSet, count)
 	for i := range sets {
 		sets[i] = elosslessCarveHistogramSet(buf[i*perSet:(i+1)*perSet], sizes)
 	}
-	return sets
+	return sets, count * perSet
 }
 
 func elosslessAddTokenToHistograms(histograms *elosslessHistogramSet, width int, token elosslessToken) error {
@@ -954,6 +964,23 @@ type elosslessTileHistograms struct {
 	weights       []int
 	nonEmptyTiles [][2]int
 	sparse        []elosslessSparseHist
+	buf           *[]uint32
+}
+
+// release returns the level's histogram storage to the pool. The caller must
+// have finished with the histograms; the plan search keeps only clones of them.
+func (t *elosslessTileHistograms) release() {
+	if t.buf != nil {
+		elosslessReturnU32Buf(t.buf)
+		t.buf = nil
+	}
+}
+
+func (t *elosslessTileHistograms) allocHistograms(colorCacheBits int) {
+	count := t.tileCount()
+	t.buf = elosslessBorrowZeroedU32Buf(count * elosslessHistogramSetLen(colorCacheBits))
+	t.histograms, _ = elosslessCarveHistogramSets(*t.buf, count, colorCacheBits)
+	t.weights = make([]int, count)
 }
 
 func (t *elosslessTileHistograms) tileCount() int { return t.huffmanXsize * t.huffmanYsize }
@@ -986,9 +1013,7 @@ func elosslessScanTileHistograms(width, height int, tokens []elosslessToken, col
 		huffmanXsize: elosslessSubsampleSize(width, huffmanBits),
 		huffmanYsize: elosslessSubsampleSize(height, huffmanBits),
 	}
-	tileCount := level.tileCount()
-	level.histograms = elosslessNewHistogramSets(tileCount, colorCacheBits)
-	level.weights = make([]int, tileCount)
+	level.allocHistograms(colorCacheBits)
 
 	pos := 0
 	for _, token := range tokens {
@@ -1013,9 +1038,7 @@ func elosslessCoarsenTileHistograms(fine *elosslessTileHistograms, width, height
 		huffmanXsize: elosslessSubsampleSize(width, huffmanBits),
 		huffmanYsize: elosslessSubsampleSize(height, huffmanBits),
 	}
-	tileCount := coarse.tileCount()
-	coarse.histograms = elosslessNewHistogramSets(tileCount, colorCacheBits)
-	coarse.weights = make([]int, tileCount)
+	coarse.allocHistograms(colorCacheBits)
 
 	for y := 0; y < fine.huffmanYsize; y++ {
 		for x := 0; x < fine.huffmanXsize; x++ {
@@ -1414,6 +1437,11 @@ func elosslessWriteImageStreamFromTokens(bw *bitWriter, width, height int, token
 		if err != nil {
 			return err
 		}
+		defer func() {
+			for _, level := range levels {
+				level.release()
+			}
+		}()
 		for _, hc := range metaCandidates {
 			huffmanBits := hc[0]
 			groupCount := hc[1]

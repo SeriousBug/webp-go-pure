@@ -373,14 +373,14 @@ func elosslessSubsampleSize(size, bits int) int {
 	return (size + (1 << bits) - 1) >> bits
 }
 
-func elosslessMakePredictorTransformImage(width, height int, argb []uint32) (int, int, []uint8, []uint32) {
-	xsize := elosslessSubsampleSize(width, elosslessPredictorTransformBits)
-	ysize := elosslessSubsampleSize(height, elosslessPredictorTransformBits)
+func elosslessMakePredictorTransformImage(width, height int, argb []uint32, bits int) (int, int, []uint8, []uint32) {
+	xsize := elosslessSubsampleSize(width, bits)
+	ysize := elosslessSubsampleSize(height, bits)
 	modes := make([]uint8, 0, xsize*ysize)
 	image := make([]uint32, 0, xsize*ysize)
 	for tileY := 0; tileY < ysize; tileY++ {
 		for tileX := 0; tileX < xsize; tileX++ {
-			mode := elosslessChoosePredictorMode(width, height, argb, tileX, tileY, elosslessPredictorTransformBits)
+			mode := elosslessChoosePredictorMode(width, height, argb, tileX, tileY, bits)
 			modes = append(modes, mode)
 			image = append(image, uint32(mode)<<8)
 		}
@@ -571,13 +571,13 @@ func elosslessBuildTiledCrossPlan(width, height int, input []uint32, useSubtract
 	}
 }
 
-func elosslessBuildTiledPredictorPlan(width, height int, input []uint32, useSubtractGreen bool) elosslessTransformPlan {
-	predictorWidth, _, predictorModes, predictorImage := elosslessMakePredictorTransformImage(width, height, input)
-	predicted := elosslessApplyPredictorTransform(width, height, input, elosslessPredictorTransformBits, predictorModes)
+func elosslessBuildTiledPredictorPlan(width, height int, input []uint32, useSubtractGreen bool, bits int) elosslessTransformPlan {
+	predictorWidth, _, predictorModes, predictorImage := elosslessMakePredictorTransformImage(width, height, input, bits)
+	predicted := elosslessApplyPredictorTransform(width, height, input, bits, predictorModes)
 
 	return elosslessTransformPlan{
 		useSubtractGreen: useSubtractGreen,
-		predictorBits:    elosslessPredictorTransformBits,
+		predictorBits:    bits,
 		predictorBitsSet: true,
 		predictorWidth:   predictorWidth,
 		predictorImage:   predictorImage,
@@ -663,6 +663,18 @@ func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *eloss
 			return elosslessBuildSubtractGreenPlan(subtractGreen)
 		})
 	}
+	// The low-effort profiles skip the transform search entirely, so they get one
+	// pre-picked predictor plan rather than none: spatial prediction is worth far
+	// more than everything else the search would find.
+	if bits := profile.cheapPredictorBits; bits > 0 {
+		input, useSubtractGreen := argb, false
+		if subtractIsDistinct {
+			input, useSubtractGreen = subtractGreen, true
+		}
+		builders = append(builders, func(w, h int) elosslessTransformPlan {
+			return elosslessBuildTiledPredictorPlan(w, h, input, useSubtractGreen, bits)
+		})
+	}
 	if profile.transformSearchLevel >= 2 {
 		builders = append(builders,
 			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, argb, false) },
@@ -687,13 +699,13 @@ func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *eloss
 	if profile.transformSearchLevel >= 5 {
 		builders = append(builders,
 			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, argb, false) },
-			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledPredictorPlan(w, h, argb, false) })
+			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledPredictorPlan(w, h, argb, false, elosslessPredictorTransformBits) })
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 6 {
 		builders = append(builders,
 			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, subtractGreen, true) },
 			func(w, h int) elosslessTransformPlan {
-				return elosslessBuildTiledPredictorPlan(w, h, subtractGreen, true)
+				return elosslessBuildTiledPredictorPlan(w, h, subtractGreen, true, elosslessPredictorTransformBits)
 			})
 	}
 	return builders

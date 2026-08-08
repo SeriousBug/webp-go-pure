@@ -5,7 +5,42 @@ package webp
 
 import (
 	"math/bits"
+	"sync"
 )
+
+// The lossless search re-tokenizes and re-histograms the image many times per
+// encode, so its scratch arrays are recycled rather than handed to the
+// collector. Buffers are only pooled where they provably do not outlive the
+// call that borrowed them.
+var elosslessIntBufPool = sync.Pool{New: func() any { return new([]int) }}
+
+var elosslessU32BufPool = sync.Pool{New: func() any { return new([]uint32) }}
+
+func elosslessBorrowIntBuf(n int) *[]int {
+	buf := elosslessIntBufPool.Get().(*[]int)
+	if cap(*buf) < n {
+		*buf = make([]int, n)
+	}
+	*buf = (*buf)[:n]
+	return buf
+}
+
+func elosslessReturnIntBuf(buf *[]int) { elosslessIntBufPool.Put(buf) }
+
+// elosslessBorrowZeroedU32Buf returns a zeroed buffer of length n.
+func elosslessBorrowZeroedU32Buf(n int) *[]uint32 {
+	buf := elosslessU32BufPool.Get().(*[]uint32)
+	if cap(*buf) < n {
+		*buf = make([]uint32, n)
+	} else {
+		*buf = (*buf)[:n]
+		clear(*buf)
+	}
+	*buf = (*buf)[:n]
+	return buf
+}
+
+func elosslessReturnU32Buf(buf *[]uint32) { elosslessU32BufPool.Put(buf) }
 
 type elosslessMatch struct {
 	distance int
@@ -375,9 +410,13 @@ func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildO
 		cache = &c
 	}
 	headSize, hashShift := elosslessMatchHashParams(len(argb))
-	heads := make([]int, headSize)
+	headsBuf := elosslessBorrowIntBuf(headSize)
+	defer elosslessReturnIntBuf(headsBuf)
+	heads := *headsBuf
 	elosslessFillInt(heads, elosslessIntMax)
-	prev := make([]int, len(argb))
+	prevBuf := elosslessBorrowIntBuf(len(argb))
+	defer elosslessReturnIntBuf(prevBuf)
+	prev := *prevBuf
 	elosslessFillInt(prev, elosslessIntMax)
 	var windowOffsets []int
 	if options.useWindowOffsets {
