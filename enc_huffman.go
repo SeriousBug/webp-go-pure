@@ -1,18 +1,14 @@
 package webp
 
-import "sort"
+import (
+	"slices"
+	"sync"
+)
 
 // Canonical Huffman code builder for the lossless VP8L encoder.
 // Ported from src/encoder/huffman.rs.
 
 const elosslessMaxAllowedCodeLength = 15
-
-type elosslessHuffmanTreeNode struct {
-	totalCount uint32
-	value      int
-	left       int
-	right      int
-}
 
 type elosslessHuffmanTreeToken struct {
 	code      uint8
@@ -211,6 +207,29 @@ func elosslessCodeRepeatedZeros(repetitions int, tokens []elosslessHuffmanTreeTo
 	return tokens
 }
 
+type elosslessHuffmanLeaf struct {
+	count uint32
+	value int32
+}
+
+// elosslessHuffmanScratch holds the working buffers of
+// elosslessGenerateCodeLengths. The function runs over a thousand times per
+// encode, so the buffers are pooled instead of reallocated per call.
+type elosslessHuffmanScratch struct {
+	leaves   []elosslessHuffmanLeaf
+	nodes    []uint32
+	children [][2]int32
+	depths   []int32
+}
+
+var elosslessHuffmanScratchPool = sync.Pool{
+	New: func() any { return new(elosslessHuffmanScratch) },
+}
+
+// childLeaf encodes leaf index i as a negative child reference, keeping
+// internal-node references non-negative.
+func elosslessChildLeaf(i int) int32 { return int32(^i) }
+
 func elosslessGenerateCodeLengths(histogram []uint32, treeDepthLimit int) ([]uint8, error) {
 	codeLengths := make([]uint8, len(histogram))
 	treeSizeOrig := 0
@@ -226,69 +245,47 @@ func elosslessGenerateCodeLengths(histogram []uint32, treeDepthLimit int) ([]uin
 		return nil, encBitstream("Huffman tree exceeds depth limit")
 	}
 
+	scratch := elosslessHuffmanScratchPool.Get().(*elosslessHuffmanScratch)
+	defer elosslessHuffmanScratchPool.Put(scratch)
+
 	countMin := uint32(1)
 	for {
 		for i := range codeLengths {
 			codeLengths[i] = 0
 		}
 
-		var tree []elosslessHuffmanTreeNode
+		leaves := scratch.leaves[:0]
 		for value, count := range histogram {
 			if count != 0 {
-				tc := count
-				if countMin > tc {
-					tc = countMin
+				if count < countMin {
+					count = countMin
 				}
-				tree = append(tree, elosslessHuffmanTreeNode{
-					totalCount: tc,
-					value:      value,
-					left:       -1,
-					right:      -1,
-				})
+				leaves = append(leaves, elosslessHuffmanLeaf{count: count, value: int32(value)})
 			}
 		}
-		sort.SliceStable(tree, func(a, b int) bool {
-			if tree[a].totalCount != tree[b].totalCount {
-				return tree[a].totalCount > tree[b].totalCount
+		scratch.leaves = leaves
+
+		// Ascending by count, ties by descending symbol value: this is the order
+		// in which the reference implementation's descending-sorted array is
+		// consumed from its tail.
+		slices.SortFunc(leaves, func(a, b elosslessHuffmanLeaf) int {
+			if a.count != b.count {
+				if a.count < b.count {
+					return -1
+				}
+				return 1
 			}
-			return tree[a].value < tree[b].value
+			return int(b.value - a.value)
 		})
 
-		if len(tree) == 1 {
-			codeLengths[tree[0].value] = 1
-		} else {
-			treePool := make([]elosslessHuffmanTreeNode, 0, len(tree)*2)
-			treeSize := len(tree)
-			for treeSize > 1 {
-				treePool = append(treePool, tree[treeSize-1])
-				treePool = append(treePool, tree[treeSize-2])
-				count := treePool[len(treePool)-1].totalCount + treePool[len(treePool)-2].totalCount
-				treeSize -= 2
-
-				insertAt := 0
-				for insertAt < treeSize && tree[insertAt].totalCount > count {
-					insertAt++
-				}
-				newNode := elosslessHuffmanTreeNode{
-					totalCount: count,
-					value:      -1,
-					left:       len(treePool) - 1,
-					right:      len(treePool) - 2,
-				}
-				tree = append(tree, elosslessHuffmanTreeNode{})
-				copy(tree[insertAt+1:], tree[insertAt:])
-				tree[insertAt] = newNode
-				treeSize++
-			}
-			elosslessSetBitDepths(&tree[0], treePool, codeLengths, 0)
-		}
-
 		maxDepth := 0
-		for _, length := range codeLengths {
-			if int(length) > maxDepth {
-				maxDepth = int(length)
-			}
+		if len(leaves) == 1 {
+			codeLengths[leaves[0].value] = 1
+			maxDepth = 1
+		} else {
+			maxDepth = elosslessBuildCodeLengths(scratch, codeLengths)
 		}
+
 		if maxDepth <= treeDepthLimit {
 			return codeLengths, nil
 		}
@@ -300,13 +297,66 @@ func elosslessGenerateCodeLengths(histogram []uint32, treeDepthLimit int) ([]uin
 	}
 }
 
-func elosslessSetBitDepths(node *elosslessHuffmanTreeNode, pool []elosslessHuffmanTreeNode, bitDepths []uint8, level uint8) {
-	if node.left >= 0 {
-		elosslessSetBitDepths(&pool[node.left], pool, bitDepths, level+1)
-		elosslessSetBitDepths(&pool[node.right], pool, bitDepths, level+1)
-	} else {
-		bitDepths[node.value] = level
+// elosslessBuildCodeLengths runs the two-queue canonical Huffman construction
+// over scratch.leaves (already sorted ascending by count) and writes the leaf
+// depths into codeLengths, returning the deepest one. Merging two ordered
+// queues, one of leaves and one of the internal nodes created so far, keeps the
+// construction linear: internal node counts are produced in non-decreasing
+// order, so neither queue ever needs re-sorting.
+func elosslessBuildCodeLengths(scratch *elosslessHuffmanScratch, codeLengths []uint8) int {
+	leaves := scratch.leaves
+	n := len(leaves)
+
+	nodes := scratch.nodes[:0]
+	children := scratch.children[:0]
+
+	leafNext, nodeNext := 0, 0
+	for i := 0; i < n-1; i++ {
+		var pair [2]int32
+		total := uint32(0)
+		for k := 0; k < 2; k++ {
+			if leafNext < n && (nodeNext >= len(nodes) || leaves[leafNext].count <= nodes[nodeNext]) {
+				total += leaves[leafNext].count
+				pair[k] = elosslessChildLeaf(leafNext)
+				leafNext++
+			} else {
+				total += nodes[nodeNext]
+				pair[k] = int32(nodeNext)
+				nodeNext++
+			}
+		}
+		nodes = append(nodes, total)
+		children = append(children, pair)
 	}
+	scratch.nodes = nodes
+	scratch.children = children
+
+	depths := scratch.depths[:0]
+	if cap(depths) < len(nodes) {
+		depths = make([]int32, len(nodes))
+	}
+	depths = depths[:len(nodes)]
+	scratch.depths = depths
+
+	// Internal nodes are created in dependency order, so a single reverse pass
+	// from the root propagates depths without recursion.
+	depths[len(nodes)-1] = 0
+	maxDepth := 0
+	for i := len(nodes) - 1; i >= 0; i-- {
+		childDepth := depths[i] + 1
+		for _, child := range children[i] {
+			if child < 0 {
+				value := leaves[^child].value
+				codeLengths[value] = uint8(childDepth)
+				if int(childDepth) > maxDepth {
+					maxDepth = int(childDepth)
+				}
+			} else {
+				depths[child] = childDepth
+			}
+		}
+	}
+	return maxDepth
 }
 
 func elosslessReverseBits(code uint32, bits int) uint16 {
