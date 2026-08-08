@@ -163,8 +163,8 @@ would:
 
 ## Charts
 
-![Effort against time and size: one line per engine through its effort settings, with encode time on the x axis and output size on the y axis, one panel per mode and machine](charts/effort-sweep-light.svg#gh-light-mode-only)
-![Effort against time and size: one line per engine through its effort settings, with encode time on the x axis and output size on the y axis, one panel per mode and machine](charts/effort-sweep-dark.svg#gh-dark-mode-only)
+![What effort buys: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-light.svg#gh-light-mode-only)
+![What effort buys: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-dark.svg#gh-dark-mode-only)
 
 ![Size and quality against libwebp: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-light.svg#gh-light-mode-only)
 ![Size and quality against libwebp: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-dark.svg#gh-dark-mode-only)
