@@ -921,6 +921,24 @@ func elosslessShouldStopTransformSearch(bestEstimate, nextEstimate int, profile 
 		elosslessSatMul(nextEstimate, 100) >= elosslessSatMul(bestEstimate, profile.earlyStopRatioPercent)
 }
 
+// elosslessParseCostCacheBits reports the color cache size the parse should
+// score against. The cache is applied after tokenization, so the parse is told
+// how large it will be rather than which pixels land in it; the exact size the
+// later search settles on only shifts the hit rate slightly, and scoring against
+// the largest size the profile can pick is far closer than assuming no cache.
+func elosslessParseCostCacheBits(argb []uint32, profile *elosslessLosslessSearchProfile) int {
+	if len(argb) < 64 {
+		return 0
+	}
+	if profile.fixedColorCacheBits > 0 {
+		return profile.fixedColorCacheBits
+	}
+	if !profile.useColorCache {
+		return 0
+	}
+	return elosslessMaxColorCacheBitsForProfile(profile)
+}
+
 // elosslessEncodeTransformPlanToVp8l tokenizes the predicted image once (no color
 // cache) and derives every color-cache variant from that single token stream via
 // elosslessApplyColorCacheToTokens. The LZ77 match structure is identical with or
@@ -931,6 +949,7 @@ func elosslessShouldStopTransformSearch(bestEstimate, nextEstimate int, profile 
 // no-cache stream is not encoded again to be measured and thrown away.
 func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *elosslessTransformPlan, profile *elosslessLosslessSearchProfile) ([]byte, error) {
 	noCacheOptions := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, 0)
+	noCacheOptions.costCacheBits = elosslessParseCostCacheBits(plan.predicted, profile)
 	baseTokens, err := elosslessBuildTokens(width, plan.predicted, noCacheOptions)
 	if err != nil {
 		return nil, err
@@ -955,7 +974,55 @@ func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *el
 			return nil, err
 		}
 	}
-	return elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, cacheBits, profile.entropySearchLevel)
+	tokens := baseTokens
+	if profile.tokenCostPasses > 0 {
+		refined, err := elosslessRetokenizeWithMeasuredCosts(width, plan.predicted, tokens, cacheBits, profile)
+		if err != nil {
+			return nil, err
+		}
+		if refined != nil {
+			tokens = refined
+		}
+	}
+	return elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, tokens, cacheBits, profile.entropySearchLevel)
+}
+
+// elosslessRetokenizeWithMeasuredCosts re-parses the image, scoring matches
+// against the code lengths the previous parse's own token stream implies instead
+// of against flat cost constants. A first parse cannot know what a literal, a
+// cache reference or a copy really costs on this image, and on flat graphics
+// those differ by several bits, which is enough to change which matches are
+// worth taking. Further passes re-measure because the first re-parse shifts the
+// distance distribution enough to make its own costs stale. It returns nil when
+// no pass beats the stream it was handed, so the extra work can only cost time.
+func elosslessRetokenizeWithMeasuredCosts(width int, argb []uint32, tokens []elosslessToken, cacheBits int, profile *elosslessLosslessSearchProfile) ([]elosslessToken, error) {
+	bestSize, err := elosslessEstimateSingleGroupSizeForTokens(width, tokens, cacheBits)
+	if err != nil {
+		return nil, err
+	}
+	var best []elosslessToken
+	measured := tokens
+	for pass := 0; pass < profile.tokenCostPasses; pass++ {
+		histograms, err := elosslessBuildHistograms(measured, width, cacheBits)
+		if err != nil {
+			return nil, err
+		}
+		options := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, cacheBits)
+		options.symbolCosts = elosslessNewSymbolCosts(&histograms)
+		refined, err := elosslessBuildTokens(width, argb, options)
+		if err != nil {
+			return nil, err
+		}
+		size, err := elosslessEstimateSingleGroupSizeForTokens(width, refined, cacheBits)
+		if err != nil {
+			return nil, err
+		}
+		if size < bestSize {
+			bestSize, best = size, refined
+		}
+		measured = refined
+	}
+	return best, nil
 }
 
 // elosslessEncodeTransformPlanToVp8lWithTokens writes a full VP8L frame from an
@@ -1029,6 +1096,7 @@ func elosslessEncodeTransformPlanToVp8lWithTokens(width, height int, rgba []byte
 func elosslessEncodePaletteCandidateToVp8l(width, height int, rgba []byte, candidate *elosslessPaletteCandidate, profile *elosslessLosslessSearchProfile) ([]byte, error) {
 	transformOptions := elosslessTokenBuildOptions{}
 	noCacheOptions := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, 0)
+	noCacheOptions.costCacheBits = elosslessParseCostCacheBits(candidate.packedIndices, profile)
 	tokenOptions := noCacheOptions
 	if profile.fixedColorCacheBits > 0 && len(candidate.packedIndices) >= 64 {
 		tokenOptions = elosslessTokenBuildOptionsFor(profile.matchSearchLevel, profile.fixedColorCacheBits)

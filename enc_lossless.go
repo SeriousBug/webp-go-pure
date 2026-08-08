@@ -32,10 +32,13 @@ const (
 	elosslessMatchChainDepthLevel3                = 16
 	elosslessMatchChainDepthLevel4                = 32
 	elosslessMaxFallbackDistance                  = (1 << 20) - 120
-	elosslessApproxLiteralCostBits                = 32
-	elosslessApproxCacheCostBits                  = 8
-	elosslessApproxCopyLengthSymbolBits           = 8
-	elosslessApproxCopyDistanceSymbolBits         = 8
+	// Match scoring works in elosslessCostScale-ths of a bit so that costs read
+	// off a histogram keep their fractional part through the parse.
+	elosslessCostScale                    = 16
+	elosslessApproxLiteralCostBits        = 32
+	elosslessApproxCacheCostBits          = 8
+	elosslessApproxCopyLengthSymbolBits   = 8
+	elosslessApproxCopyDistanceSymbolBits = 8
 
 	elosslessIntMax = int(^uint(0) >> 1)
 )
@@ -107,7 +110,15 @@ type elosslessPaletteCandidate struct {
 }
 
 type elosslessTokenBuildOptions struct {
-	colorCacheBits    int
+	colorCacheBits int
+	// costCacheBits is the color cache size the match cost model assumes when
+	// the cache is applied to the token stream after the parse instead of during
+	// it. It only affects scoring, never what the tokenizer emits.
+	costCacheBits int
+	// symbolCosts, when set, replaces the flat per-symbol cost constants in the
+	// match scoring with code lengths measured from a previous tokenization of
+	// the same image.
+	symbolCosts       *elosslessSymbolCosts
 	matchChainDepth   int
 	useWindowOffsets  bool
 	windowOffsetLimit int
@@ -149,6 +160,11 @@ type elosslessLosslessSearchProfile struct {
 	// costs one estimate pass per candidate size and, up to effort 5, picks a
 	// size no better than the largest one for the time it spends.
 	fixedColorCacheBits int
+	// tokenCostPasses is how many times the LZ77 parse is re-run against
+	// per-symbol costs measured from the previous parse's own token stream. Each
+	// pass costs roughly one tokenization; zero leaves the parse on the flat cost
+	// constants.
+	tokenCostPasses int
 	// predictorTileBits lists the tile sizes to build tiled predictor plans at.
 	// The lowest profiles use it for the one pre-picked plan that stands in for
 	// the transform search they do not run; the highest profiles search every
@@ -235,19 +251,19 @@ func elosslessValidateOptions(options *LosslessOptions) error {
 func elosslessSearchProfile(optimizationLevel uint8) elosslessLosslessSearchProfile {
 	switch optimizationLevel {
 	case 0:
-		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100, elosslessMaxCacheBits, 0, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 1:
-		return elosslessLosslessSearchProfile{1, 0, 0, false, 2, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{1, 0, 0, false, 2, 101, elosslessMaxCacheBits, 0, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 2:
-		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 3:
-		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 4:
-		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 5:
-		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101, elosslessMaxCacheBits, elosslessPredictorTileBitsByEffort[optimizationLevel]}
+		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	default:
-		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101, 0, elosslessPredictorTileBitsByEffort[elosslessMaxOptimizationLevel]}
+		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101, 0, 2, elosslessPredictorTileBitsByEffort[elosslessMaxOptimizationLevel]}
 	}
 }
 

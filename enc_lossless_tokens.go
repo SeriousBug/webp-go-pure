@@ -4,6 +4,7 @@ package webp
 // Ported from src/encoder/lossless/tokens.rs.
 
 import (
+	"math"
 	"math/bits"
 	"sync"
 )
@@ -79,6 +80,13 @@ func elosslessTokenBuildOptionsFor(matchSearchLevel uint8, colorCacheBits int) e
 		windowOffsetLimit: windowOffsetLimit,
 		lazyMatching:      lazyMatching,
 	}
+}
+
+func (o elosslessTokenBuildOptions) parseCostCacheBits() int {
+	if o.colorCacheBits > 0 {
+		return o.colorCacheBits
+	}
+	return o.costCacheBits
 }
 
 func elosslessMaxColorCacheBitsForProfile(profile *elosslessLosslessSearchProfile) int {
@@ -207,24 +215,194 @@ func elosslessPrefixExtraBitCount(value int) int {
 	return highestBit - 1
 }
 
-func elosslessCopyCostBits(width, distance, length int) int {
-	planeCode := elosslessDistanceToPlaneCode(width, distance)
-	return elosslessApproxCopyLengthSymbolBits +
-		elosslessPrefixExtraBitCount(length) +
-		elosslessApproxCopyDistanceSymbolBits +
-		elosslessPrefixExtraBitCount(planeCode)
+// elosslessSymbolCosts holds the modelled code length of every token symbol, in
+// elosslessCostScale-ths of a bit, derived from the token histograms of a first
+// tokenization pass. Scoring a match against these instead of against flat
+// per-symbol constants is what lets the parse tell a cheap copy from an
+// expensive one on content where literals, cache references and copies do not
+// cost anything like the same.
+type elosslessSymbolCosts struct {
+	green []int32
+	red   []int32
+	blue  []int32
+	alpha []int32
+	dist  []int32
+	// length is indexed by match length and already folded together the length
+	// prefix symbol and its extra bits.
+	length []int32
 }
 
-func elosslessMatchGainBits(width, distance, length int) int {
-	return elosslessApproxLiteralCostBits*length - elosslessCopyCostBits(width, distance, length)
+// elosslessMaxSymbolCostBits caps the cost charged to a symbol the first pass
+// never emitted. Such a symbol is not free to add to a tree, but it is also not
+// infinitely expensive, and an uncapped estimate would let one unseen pixel
+// value veto an otherwise good parse decision.
+const elosslessMaxSymbolCostBits = 24
+
+func elosslessChannelSymbolCosts(counts []uint32) []int32 {
+	total := 0.0
+	for _, count := range counts {
+		total += float64(count)
+	}
+	out := make([]int32, len(counts))
+	if total == 0 {
+		for i := range out {
+			out[i] = elosslessMaxSymbolCostBits * elosslessCostScale
+		}
+		return out
+	}
+	for i, count := range counts {
+		frequency := float64(count)
+		if frequency == 0 {
+			frequency = 0.25
+		}
+		bits := math.Log2(total / frequency)
+		if bits > elosslessMaxSymbolCostBits {
+			bits = elosslessMaxSymbolCostBits
+		}
+		out[i] = int32(bits*elosslessCostScale + 0.5)
+	}
+	return out
 }
 
-func elosslessConsiderMatch(width int, best *elosslessMatch, distance, length int) {
-	if length < elosslessMinMatchLengthForDistance(width, distance) {
+func elosslessNewSymbolCosts(histograms *elosslessHistogramSet) *elosslessSymbolCosts {
+	costs := &elosslessSymbolCosts{
+		green: elosslessChannelSymbolCosts(histograms[0]),
+		red:   elosslessChannelSymbolCosts(histograms[1]),
+		blue:  elosslessChannelSymbolCosts(histograms[2]),
+		alpha: elosslessChannelSymbolCosts(histograms[3]),
+		dist:  elosslessChannelSymbolCosts(histograms[4]),
+	}
+	costs.length = make([]int32, elosslessMaxLength+1)
+	for length := 1; length <= elosslessMaxLength; length++ {
+		symbol, extraBits := elosslessPrefixSymbolExtra(length)
+		costs.length[length] = costs.green[elosslessNumLiteralCodes+symbol] + int32(extraBits*elosslessCostScale)
+	}
+	return costs
+}
+
+func (s *elosslessSymbolCosts) literalCost(pixel uint32) int32 {
+	return s.green[(pixel>>8)&0xff] +
+		s.red[(pixel>>16)&0xff] +
+		s.blue[pixel&0xff] +
+		s.alpha[pixel>>24]
+}
+
+func (s *elosslessSymbolCosts) cacheCost(key int) int32 {
+	index := elosslessNumLiteralCodes + elosslessNumLengthCodes + key
+	if index >= len(s.green) {
+		return elosslessMaxSymbolCostBits * elosslessCostScale
+	}
+	return s.green[index]
+}
+
+func (s *elosslessSymbolCosts) distanceCost(planeCode int) int32 {
+	symbol, extraBits := elosslessPrefixSymbolExtra(planeCode)
+	if symbol >= len(s.dist) {
+		symbol = len(s.dist) - 1
+	}
+	return s.dist[symbol] + int32(extraBits*elosslessCostScale)
+}
+
+// elosslessPrefixSymbolExtra is elosslessPrefixEncode without the extra-bit
+// payload or the error return, for the parse's inner loop.
+func elosslessPrefixSymbolExtra(value int) (symbol, extraBits int) {
+	if value <= 4 {
+		return value - 1, 0
+	}
+	value--
+	highestBit := bits.Len(uint(value)) - 1
+	return 2*highestBit + ((value >> (highestBit - 1)) & 1), highestBit - 1
+}
+
+// elosslessLiteralCostPrefix returns prefix sums over the modelled cost of
+// coding each pixel on its own: a color cache reference for a pixel already in
+// the cache at that point, a full literal otherwise. Every pixel enters the
+// cache in stream order no matter how the parse codes it, so the hit pattern is
+// a property of the pixel sequence alone and can be computed before the parse.
+// Sums are taken over spans of at most elosslessMaxLength pixels, so the int32
+// accumulator wrapping on huge images does not affect any difference read out of
+// it.
+func elosslessLiteralCostPrefix(argb []uint32, cacheBits int, symbols *elosslessSymbolCosts) ([]int32, error) {
+	var cache elosslessColorCache
+	if cacheBits > 0 {
+		c, err := elosslessColorCacheNew(cacheBits)
+		if err != nil {
+			return nil, err
+		}
+		cache = c
+	}
+	prefix := make([]int32, len(argb)+1)
+	for i, pixel := range argb {
+		var cost int32
+		key, hit := 0, false
+		if cacheBits > 0 {
+			key, hit = cache.lookup(pixel)
+		}
+		switch {
+		case symbols == nil && hit:
+			cost = elosslessApproxCacheCostBits * elosslessCostScale
+		case symbols == nil:
+			cost = elosslessApproxLiteralCostBits * elosslessCostScale
+		case hit:
+			cost = symbols.cacheCost(key)
+		default:
+			cost = symbols.literalCost(pixel)
+		}
+		prefix[i+1] = prefix[i] + cost
+		if cacheBits > 0 {
+			cache.insert(pixel)
+		}
+	}
+	return prefix, nil
+}
+
+// elosslessMatchCosts scores a candidate match against the real alternative of
+// coding the same pixels one at a time. Without a color cache that alternative
+// is a literal per pixel; with one, pixels the cache already holds are charged
+// the much cheaper cache reference, so the parse stops taking long matches over
+// runs that would have coded as cache hits anyway. Costs are in
+// elosslessCostScale-ths of a bit.
+type elosslessMatchCosts struct {
+	width         int
+	literalPrefix []int32
+	symbols       *elosslessSymbolCosts
+}
+
+func (c *elosslessMatchCosts) pixelsCostBits(index, length int) int {
+	if c.literalPrefix == nil {
+		return elosslessApproxLiteralCostBits * elosslessCostScale * length
+	}
+	return int(c.literalPrefix[index+length] - c.literalPrefix[index])
+}
+
+func (c *elosslessMatchCosts) copyCostBits(distance, length int) int {
+	planeCode := elosslessDistanceToPlaneCode(c.width, distance)
+	if c.symbols == nil {
+		return elosslessCostScale * (elosslessApproxCopyLengthSymbolBits +
+			elosslessPrefixExtraBitCount(length) +
+			elosslessApproxCopyDistanceSymbolBits +
+			elosslessPrefixExtraBitCount(planeCode))
+	}
+	return int(c.symbols.length[length] + c.symbols.distanceCost(planeCode))
+}
+
+func (c *elosslessMatchCosts) matchGainBits(index, distance, length int) int {
+	return c.pixelsCostBits(index, length) - c.copyCostBits(distance, length)
+}
+
+func elosslessConsiderMatch(costs *elosslessMatchCosts, best *elosslessMatch, index, distance, length int) {
+	if length < elosslessMinMatchLengthForDistance(costs.width, distance) {
 		return
 	}
 
-	candidateScore := elosslessMatchGainBits(width, distance, length)
+	candidateScore := costs.matchGainBits(index, distance, length)
+	// A match that costs more than coding the same pixels one at a time is worse
+	// than not matching at all. Under the flat cost constants this never happens,
+	// but once the costs are measured from the image a copy over pixels the color
+	// cache already holds routinely loses to the cache references it displaces.
+	if candidateScore <= 0 {
+		return
+	}
 	better := true
 	if best.set {
 		better = candidateScore > best.score ||
@@ -294,7 +472,7 @@ func elosslessUpdateMatchChain(argb []uint32, index int, heads, prev []int, hash
 	heads[hash] = index
 }
 
-func elosslessFindBestHashMatch(width int, argb []uint32, index, maxLen int, heads, prev []int, matchChainDepth int, hashShift uint32) elosslessMatch {
+func elosslessFindBestHashMatch(costs *elosslessMatchCosts, argb []uint32, index, maxLen int, heads, prev []int, matchChainDepth int, hashShift uint32) elosslessMatch {
 	var best elosslessMatch
 	if matchChainDepth == 0 || maxLen < elosslessMinLength || index+elosslessMinLength > len(argb) {
 		return best
@@ -321,7 +499,7 @@ func elosslessFindBestHashMatch(width int, argb []uint32, index, maxLen int, hea
 			if bestLen == 0 || argb[candidate+bestLen] == bestArgb {
 				length := elosslessFindMatchLength(argb, index, candidate, maxLen)
 				if length >= elosslessMinLength {
-					elosslessConsiderMatch(width, &best, distance, length)
+					elosslessConsiderMatch(costs, &best, index, distance, length)
 				}
 				if length > bestLen {
 					bestLen = length
@@ -338,7 +516,7 @@ func elosslessFindBestHashMatch(width int, argb []uint32, index, maxLen int, hea
 	return best
 }
 
-func elosslessFindBestWindowOffsetMatch(width int, argb []uint32, index, maxLen int, windowOffsets []int) elosslessMatch {
+func elosslessFindBestWindowOffsetMatch(costs *elosslessMatchCosts, argb []uint32, index, maxLen int, windowOffsets []int) elosslessMatch {
 	var best elosslessMatch
 	for _, distance := range windowOffsets {
 		if distance > index || distance > elosslessMaxFallbackDistance {
@@ -347,20 +525,13 @@ func elosslessFindBestWindowOffsetMatch(width int, argb []uint32, index, maxLen 
 		candidateIndex := index - distance
 		length := elosslessFindMatchLength(argb, index, candidateIndex, maxLen)
 		if length >= elosslessMinLength {
-			elosslessConsiderMatch(width, &best, distance, length)
+			elosslessConsiderMatch(costs, &best, index, distance, length)
 		}
 	}
 	return best
 }
 
-func elosslessSinglePixelCostBits(cacheHit bool) int {
-	if cacheHit {
-		return elosslessApproxCacheCostBits
-	}
-	return elosslessApproxLiteralCostBits
-}
-
-func elosslessFindBestMatch(width int, argb []uint32, index int, options elosslessTokenBuildOptions, heads, prev, windowOffsets []int, hashShift uint32) elosslessMatch {
+func elosslessFindBestMatch(costs *elosslessMatchCosts, argb []uint32, index int, options elosslessTokenBuildOptions, heads, prev, windowOffsets []int, hashShift uint32) elosslessMatch {
 	maxLen := len(argb) - index
 	if elosslessMaxLength < maxLen {
 		maxLen = elosslessMaxLength
@@ -369,21 +540,21 @@ func elosslessFindBestMatch(width int, argb []uint32, index int, options elossle
 
 	if index > 0 {
 		rleLen := elosslessFindMatchLength(argb, index, index-1, maxLen)
-		elosslessConsiderMatch(width, &best, 1, rleLen)
+		elosslessConsiderMatch(costs, &best, index, 1, rleLen)
 	}
-	if index >= width {
-		prevRowLen := elosslessFindMatchLength(argb, index, index-width, maxLen)
-		elosslessConsiderMatch(width, &best, width, prevRowLen)
+	if index >= costs.width {
+		prevRowLen := elosslessFindMatchLength(argb, index, index-costs.width, maxLen)
+		elosslessConsiderMatch(costs, &best, index, costs.width, prevRowLen)
 	}
 	if options.useWindowOffsets {
-		m := elosslessFindBestWindowOffsetMatch(width, argb, index, maxLen, windowOffsets)
+		m := elosslessFindBestWindowOffsetMatch(costs, argb, index, maxLen, windowOffsets)
 		if m.set {
-			elosslessConsiderMatch(width, &best, m.distance, m.length)
+			elosslessConsiderMatch(costs, &best, index, m.distance, m.length)
 		}
 	}
-	m := elosslessFindBestHashMatch(width, argb, index, maxLen, heads, prev, options.matchChainDepth, hashShift)
+	m := elosslessFindBestHashMatch(costs, argb, index, maxLen, heads, prev, options.matchChainDepth, hashShift)
 	if m.set {
-		elosslessConsiderMatch(width, &best, m.distance, m.length)
+		elosslessConsiderMatch(costs, &best, index, m.distance, m.length)
 	}
 
 	return best
@@ -422,6 +593,15 @@ func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildO
 	if options.useWindowOffsets {
 		windowOffsets = elosslessBuildWindowOffsets(width, options.windowOffsetLimit)
 	}
+	costs := elosslessMatchCosts{width: width, symbols: options.symbolCosts}
+	costCacheBits := options.parseCostCacheBits()
+	if costCacheBits > 0 || options.symbolCosts != nil {
+		prefix, err := elosslessLiteralCostPrefix(argb, costCacheBits, options.symbolCosts)
+		if err != nil {
+			return nil, err
+		}
+		costs.literalPrefix = prefix
+	}
 
 	index := 0
 	for index < len(argb) {
@@ -430,7 +610,7 @@ func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildO
 		if cache != nil {
 			cacheKey, cacheHit = cache.lookup(argb[index])
 		}
-		bestMatch := elosslessFindBestMatch(width, argb, index, options, heads, prev, windowOffsets, hashShift)
+		bestMatch := elosslessFindBestMatch(&costs, argb, index, options, heads, prev, windowOffsets, hashShift)
 
 		if options.lazyMatching {
 			if bestMatch.set {
@@ -438,15 +618,14 @@ func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildO
 				length := bestMatch.length
 				if length < 64 && index+1 < len(argb) {
 					preview := elosslessPreviewUpdateMatchChain(argb, index, heads, prev, hashShift)
-					nextMatch := elosslessFindBestMatch(width, argb, index+1, options, heads, prev, windowOffsets, hashShift)
+					nextMatch := elosslessFindBestMatch(&costs, argb, index+1, options, heads, prev, windowOffsets, hashShift)
 					elosslessRestorePreviewedMatchChain(index, preview, heads, prev)
 
-					currentGain := elosslessMatchGainBits(width, distance, length)
+					currentGain := costs.matchGainBits(index, distance, length)
 					takeLiteral := false
 					if nextMatch.set {
 						nextLength := nextMatch.length
-						nextGain := elosslessMatchGainBits(width, nextMatch.distance, nextMatch.length) +
-							elosslessApproxLiteralCostBits - elosslessSinglePixelCostBits(cacheHit)
+						nextGain := costs.matchGainBits(index+1, nextMatch.distance, nextMatch.length)
 						if index+1+nextLength >= index+length && nextGain > currentGain {
 							takeLiteral = true
 						}
