@@ -281,7 +281,7 @@ func elosslessPredictorError(actual, predicted uint32) uint32 {
 		elosslessWrappedChannelError(actual, predicted, 0)
 }
 
-func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY, bits int) uint8 {
+func elosslessScorePredictorTile(width, height int, argb []uint32, tileX, tileY, bits int) elosslessPredictorTileCosts {
 	startX := tileX << bits
 	startY := tileY << bits
 	endX := (tileX + 1) << bits
@@ -297,7 +297,7 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 	// them, instead of re-reading neighbours per mode. Interior pixels (y>=1,
 	// x>=1, x+1<width) are scored by elosslessScorePredictorRow, which the
 	// arm64/amd64 builds vectorize; the borders are scored scalar here.
-	var costs [elosslessNumPredictorModes]uint64
+	var costs elosslessPredictorTileCosts
 	for y := startY; y < endY; y++ {
 		if y == 0 {
 			for x := startX; x < endX; x++ {
@@ -323,7 +323,7 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 			interiorEnd = width - 1
 		}
 		if x < interiorEnd {
-			elosslessScorePredictorRow(argb, width, y, x, interiorEnd, &costs)
+			elosslessScorePredictorRow(argb, width, y, x, interiorEnd, (*[elosslessNumPredictorModes]uint64)(&costs))
 			x = interiorEnd
 		}
 		for ; x < endX; x++ {
@@ -344,6 +344,16 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 		}
 	}
 
+	return costs
+}
+
+// elosslessPredictorTileCosts holds one tile's total predictor error per mode.
+// Costs are sums over pixels, so summing the costs of a 2x2 block of tiles gives
+// the costs of the one tile that covers them at the next larger tile size. That
+// is what lets a search over tile sizes score every pixel only once.
+type elosslessPredictorTileCosts [elosslessNumPredictorModes]uint64
+
+func (costs *elosslessPredictorTileCosts) bestMode() uint8 {
 	bestMode := uint8(11)
 	bestCost := ^uint64(0)
 	for mode := uint8(0); mode < elosslessNumPredictorModes; mode++ {
@@ -353,6 +363,64 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 		}
 	}
 	return bestMode
+}
+
+// elosslessPredictorTileScorer serves predictor transform images at any tile
+// size at or above the one it was built for, scoring the pixels only once.
+type elosslessPredictorTileScorer struct {
+	bits  int
+	xsize int
+	ysize int
+	costs []elosslessPredictorTileCosts
+}
+
+func elosslessNewPredictorTileScorer(width, height int, argb []uint32, bits int) *elosslessPredictorTileScorer {
+	xsize := elosslessSubsampleSize(width, bits)
+	ysize := elosslessSubsampleSize(height, bits)
+	costs := make([]elosslessPredictorTileCosts, 0, xsize*ysize)
+	for tileY := 0; tileY < ysize; tileY++ {
+		for tileX := 0; tileX < xsize; tileX++ {
+			costs = append(costs, elosslessScorePredictorTile(width, height, argb, tileX, tileY, bits))
+		}
+	}
+	return &elosslessPredictorTileScorer{bits: bits, xsize: xsize, ysize: ysize, costs: costs}
+}
+
+// coarsen halves the tile grid resolution in place, advancing the scorer one
+// tile-size step. Requested sizes are served in increasing order, so each step
+// is taken at most once.
+func (s *elosslessPredictorTileScorer) coarsen() {
+	xsize := elosslessDivCeil(s.xsize, 2)
+	ysize := elosslessDivCeil(s.ysize, 2)
+	costs := make([]elosslessPredictorTileCosts, xsize*ysize)
+	for tileY := 0; tileY < s.ysize; tileY++ {
+		for tileX := 0; tileX < s.xsize; tileX++ {
+			dst := &costs[(tileY/2)*xsize+tileX/2]
+			src := &s.costs[tileY*s.xsize+tileX]
+			for mode := range dst {
+				dst[mode] += src[mode]
+			}
+		}
+	}
+	s.bits++
+	s.xsize, s.ysize, s.costs = xsize, ysize, costs
+}
+
+// transformImage returns the tile grid size, per-tile modes, and the packed
+// transform image for the given tile size, which must be at least the size the
+// scorer was built for and at least as large as any size requested before it.
+func (s *elosslessPredictorTileScorer) transformImage(bits int) (int, int, []uint8, []uint32) {
+	for s.bits < bits {
+		s.coarsen()
+	}
+	modes := make([]uint8, len(s.costs))
+	image := make([]uint32, len(s.costs))
+	for i := range s.costs {
+		mode := s.costs[i].bestMode()
+		modes[i] = mode
+		image[i] = uint32(mode) << 8
+	}
+	return s.xsize, s.ysize, modes, image
 }
 
 func elosslessApplyPredictorTransform(width, height int, argb []uint32, bits int, modes []uint8) []uint32 {
@@ -371,21 +439,6 @@ func elosslessApplyPredictorTransform(width, height int, argb []uint32, bits int
 
 func elosslessSubsampleSize(size, bits int) int {
 	return (size + (1 << bits) - 1) >> bits
-}
-
-func elosslessMakePredictorTransformImage(width, height int, argb []uint32, bits int) (int, int, []uint8, []uint32) {
-	xsize := elosslessSubsampleSize(width, bits)
-	ysize := elosslessSubsampleSize(height, bits)
-	modes := make([]uint8, 0, xsize*ysize)
-	image := make([]uint32, 0, xsize*ysize)
-	for tileY := 0; tileY < ysize; tileY++ {
-		for tileX := 0; tileX < xsize; tileX++ {
-			mode := elosslessChoosePredictorMode(width, height, argb, tileX, tileY, bits)
-			modes = append(modes, mode)
-			image = append(image, uint32(mode)<<8)
-		}
-	}
-	return xsize, ysize, modes, image
 }
 
 func elosslessMakeUniformPredictorTransformImage(width, height, bits int, mode uint8) (int, int, []uint8, []uint32) {
@@ -572,7 +625,11 @@ func elosslessBuildTiledCrossPlan(width, height int, input []uint32, useSubtract
 }
 
 func elosslessBuildTiledPredictorPlan(width, height int, input []uint32, useSubtractGreen bool, bits int) elosslessTransformPlan {
-	predictorWidth, _, predictorModes, predictorImage := elosslessMakePredictorTransformImage(width, height, input, bits)
+	return elosslessBuildScoredTiledPredictorPlan(width, height, input, useSubtractGreen, elosslessNewPredictorTileScorer(width, height, input, bits), bits)
+}
+
+func elosslessBuildScoredTiledPredictorPlan(width, height int, input []uint32, useSubtractGreen bool, scorer *elosslessPredictorTileScorer, bits int) elosslessTransformPlan {
+	predictorWidth, _, predictorModes, predictorImage := scorer.transformImage(bits)
 	predicted := elosslessApplyPredictorTransform(width, height, input, bits, predictorModes)
 
 	return elosslessTransformPlan{
@@ -652,61 +709,96 @@ func elosslessEstimateTransformPlanScore(width int, plan *elosslessTransformPlan
 	return score, nil
 }
 
-func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []func(width, height int) elosslessTransformPlan {
+// elosslessPlanBuilder builds one candidate transform plan. Builders sharing a
+// non-zero family are alternative parameterizations of the same transform rather
+// than genuinely different plans, so only the best-scoring one of a family
+// reaches the shortlist; without that they would crowd out every other plan.
+type elosslessPlanBuilder struct {
+	family int
+	build  func(width, height int) elosslessTransformPlan
+}
+
+const (
+	elosslessPlanFamilyNone = iota
+	elosslessPlanFamilyTiledPredictor
+	elosslessPlanFamilyTiledPredictorSubtractGreen
+)
+
+func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []elosslessPlanBuilder {
 	subtractIsDistinct := !elosslessSlicesEqualU32(subtractGreen, argb)
-	builders := []func(int, int) elosslessTransformPlan{
-		func(_, _ int) elosslessTransformPlan { return elosslessBuildRawPlan(argb) },
+	builders := []elosslessPlanBuilder{
+		{build: func(_, _ int) elosslessTransformPlan { return elosslessBuildRawPlan(argb) }},
 	}
 
 	if subtractIsDistinct && profile.transformSearchLevel >= 1 {
-		builders = append(builders, func(_, _ int) elosslessTransformPlan {
+		builders = append(builders, elosslessPlanBuilder{build: func(_, _ int) elosslessTransformPlan {
 			return elosslessBuildSubtractGreenPlan(subtractGreen)
-		})
+		}})
 	}
 	// The low-effort profiles skip the transform search entirely, so they get one
 	// pre-picked predictor plan rather than none: spatial prediction is worth far
 	// more than everything else the search would find.
-	if bits := profile.cheapPredictorBits; bits > 0 {
+	if profile.transformSearchLevel < 2 {
 		input, useSubtractGreen := argb, false
 		if subtractIsDistinct {
 			input, useSubtractGreen = subtractGreen, true
 		}
-		builders = append(builders, func(w, h int) elosslessTransformPlan {
-			return elosslessBuildTiledPredictorPlan(w, h, input, useSubtractGreen, bits)
-		})
+		builders = append(builders, elosslessTiledPredictorBuilders(input, useSubtractGreen, profile.predictorTileBits, elosslessPlanFamilyTiledPredictor)...)
 	}
 	if profile.transformSearchLevel >= 2 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, argb, false) },
-			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalPredictorPlan(w, h, argb, false) })
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, argb, false) }},
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalPredictorPlan(w, h, argb, false) }})
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 3 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, subtractGreen, true) },
-			func(w, h int) elosslessTransformPlan {
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, subtractGreen, true) }},
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan {
 				return elosslessBuildGlobalPredictorPlan(w, h, subtractGreen, true)
-			})
+			}})
 	}
 	if profile.transformSearchLevel >= 4 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalTransformPlan(w, h, argb, false) })
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalTransformPlan(w, h, argb, false) }})
 		if subtractIsDistinct {
-			builders = append(builders, func(w, h int) elosslessTransformPlan {
+			builders = append(builders, elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan {
 				return elosslessBuildGlobalTransformPlan(w, h, subtractGreen, true)
-			})
+			}})
 		}
 	}
 	if profile.transformSearchLevel >= 5 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, argb, false) },
-			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledPredictorPlan(w, h, argb, false, elosslessPredictorTransformBits) })
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, argb, false) }})
+		builders = append(builders, elosslessTiledPredictorBuilders(argb, false, profile.predictorTileBits, elosslessPlanFamilyTiledPredictor)...)
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 6 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, subtractGreen, true) },
-			func(w, h int) elosslessTransformPlan {
-				return elosslessBuildTiledPredictorPlan(w, h, subtractGreen, true, elosslessPredictorTransformBits)
-			})
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, subtractGreen, true) }})
+		builders = append(builders, elosslessTiledPredictorBuilders(subtractGreen, true, profile.predictorTileBits, elosslessPlanFamilyTiledPredictorSubtractGreen)...)
+	}
+	return builders
+}
+
+// elosslessTiledPredictorBuilders builds one tiled predictor plan per requested
+// tile size, all off a single shared scorer so the per-pixel predictor mode
+// scoring runs once rather than once per tile size. The sizes are handed out in
+// increasing order because the scorer only coarsens.
+func elosslessTiledPredictorBuilders(input []uint32, useSubtractGreen bool, tileBits []int, family int) []elosslessPlanBuilder {
+	sorted := append([]int(nil), tileBits...)
+	sort.Ints(sorted)
+	if len(sorted) == 1 {
+		family = elosslessPlanFamilyNone
+	}
+	var scorer *elosslessPredictorTileScorer
+	builders := make([]elosslessPlanBuilder, 0, len(sorted))
+	for _, bits := range sorted {
+		bits := bits
+		builders = append(builders, elosslessPlanBuilder{family: family, build: func(w, h int) elosslessTransformPlan {
+			if scorer == nil {
+				scorer = elosslessNewPredictorTileScorer(w, h, input, sorted[0])
+			}
+			return elosslessBuildScoredTiledPredictorPlan(w, h, input, useSubtractGreen, scorer, bits)
+		}})
 	}
 	return builders
 }
@@ -719,13 +811,23 @@ func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *eloss
 func elosslessShortlistTransformPlans(width, height int, argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) ([]elosslessRankedPlan, error) {
 	builders := elosslessTransformPlanBuilders(argb, subtractGreen, profile)
 	ranked := make([]elosslessRankedPlan, 0, len(builders))
-	for _, build := range builders {
-		plan := build(width, height)
+	bestOfFamily := make(map[int]int, len(builders))
+	for _, builder := range builders {
+		plan := builder.build(width, height)
 		score, err := elosslessEstimateTransformPlanScore(width, &plan, profile)
 		if err != nil {
 			return nil, err
 		}
 		plan.predicted = nil
+		if builder.family != elosslessPlanFamilyNone {
+			if at, seen := bestOfFamily[builder.family]; seen {
+				if score < ranked[at].score {
+					ranked[at] = elosslessRankedPlan{score: score, plan: plan}
+				}
+				continue
+			}
+			bestOfFamily[builder.family] = len(ranked)
+		}
 		ranked = append(ranked, elosslessRankedPlan{score: score, plan: plan})
 	}
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score < ranked[j].score })

@@ -14,7 +14,6 @@ const (
 	elosslessGlobalPredictorMode           uint8  = 11
 	elosslessCrossColorTransformBits              = 5
 	elosslessPredictorTransformBits               = 5
-	elosslessCheapPredictorTransformBits          = 6
 	elosslessMaxOptimizationLevel          uint8  = 6
 	elosslessDefaultOptimizationLevel      uint8  = 6
 	elosslessNumPredictorModes             uint8  = 14
@@ -150,11 +149,18 @@ type elosslessLosslessSearchProfile struct {
 	// costs one estimate pass per candidate size, which dominates the encode at
 	// the low-effort settings; a fixed cache captures most of the win for free.
 	fixedColorCacheBits int
-	// cheapPredictorBits, when non-zero, adds a single tiled predictor plan at
-	// that tile size to the candidate list. It exists for the profiles whose
-	// transformSearchLevel is too low to build any predictor plan at all.
-	cheapPredictorBits int
+	// predictorTileBits lists the tile sizes to build tiled predictor plans at.
+	// The lowest profiles use it for the one pre-picked plan that stands in for
+	// the transform search they do not run; the highest profiles search every
+	// listed size, because the best tile size is content-dependent.
+	predictorTileBits []int
 }
+
+var (
+	elosslessCheapPredictorTileBits    = []int{6}
+	elosslessDefaultPredictorTileBits  = []int{elosslessPredictorTransformBits}
+	elosslessSearchedPredictorTileBits = []int{3, 4, 5}
+)
 
 func elosslessDefaultOptions() LosslessOptions {
 	return LosslessOptions{Effort: elosslessDefaultOptimizationLevel}
@@ -222,19 +228,19 @@ func elosslessValidateOptions(options *LosslessOptions) error {
 func elosslessSearchProfile(optimizationLevel uint8) elosslessLosslessSearchProfile {
 	switch optimizationLevel {
 	case 0:
-		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100, elosslessMaxCacheBits, elosslessCheapPredictorTransformBits}
+		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100, elosslessMaxCacheBits, elosslessCheapPredictorTileBits}
 	case 1:
-		return elosslessLosslessSearchProfile{1, 1, 0, false, 2, 100, elosslessMaxCacheBits, elosslessCheapPredictorTransformBits}
+		return elosslessLosslessSearchProfile{1, 1, 0, false, 2, 100, elosslessMaxCacheBits, elosslessCheapPredictorTileBits}
 	case 2:
-		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 100, 0, 0}
+		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 100, 0, elosslessDefaultPredictorTileBits}
 	case 3:
-		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101, 0, 0}
+		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101, 0, elosslessDefaultPredictorTileBits}
 	case 4:
-		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101, 0, 0}
+		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101, 0, elosslessDefaultPredictorTileBits}
 	case 5:
-		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101, 0, 0}
+		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101, 0, elosslessDefaultPredictorTileBits}
 	default:
-		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101, 0, 0}
+		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101, 0, elosslessSearchedPredictorTileBits}
 	}
 }
 
