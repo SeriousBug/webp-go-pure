@@ -12,6 +12,10 @@ const (
 	fontSans = `system-ui, -apple-system, "Segoe UI", sans-serif`
 )
 
+// figWidth is the width the figure being drawn is laid out at. Most figures use
+// figW; the effort sweep fits three panels per machine row and sets its own.
+var figWidth = float64(figW)
+
 type canvas struct {
 	b strings.Builder
 }
@@ -62,16 +66,15 @@ func escape(s string) string {
 func textWidth(s string, size float64) float64 { return float64(len(s)) * size * 0.55 }
 
 func header(c *canvas, th theme, h float64, title, subtitle string) {
-	c.printf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%.0f" viewBox="0 0 %d %.0f" role="img">`,
-		figW, h, figW, h)
-	c.printf(`<rect width="%d" height="%.0f" fill="%s"/>`, figW, h, th.surface)
+	c.printf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f" role="img">`,
+		figWidth, h, figWidth, h)
+	c.printf(`<rect width="%.0f" height="%.0f" fill="%s"/>`, figWidth, h, th.surface)
 	c.text(40, 34, 19, th.inkPrimary, "start", "600", title)
 	c.text(40, 56, 13, th.inkSecondary, "start", "", subtitle)
 }
 
 const (
 	footSize  = 11.5
-	footMaxW  = 820.0
 	footLineH = 16.0
 )
 
@@ -82,7 +85,7 @@ func footnoteWrap(s string) []string {
 	var line string
 	for _, word := range strings.Fields(s) {
 		next := strings.TrimSpace(line + " " + word)
-		if textWidth(next, footSize) > footMaxW && line != "" {
+		if textWidth(next, footSize) > figWidth-80 && line != "" {
 			lines = append(lines, line)
 			line = word
 			continue

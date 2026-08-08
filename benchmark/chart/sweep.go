@@ -74,19 +74,25 @@ func effortSweep(sets []dataset, th theme) string {
 		return th.series[eng]
 	}
 
+	// The sweep is the widest figure here: three panels per machine row, each of
+	// which has to separate four engines' curves.
+	const sweepW = 1320.0
+	figWidth = sweepW
+	defer func() { figWidth = float64(figW) }()
+
 	const (
-		padL     = 74.0
-		padR     = 26.0
-		colGap   = 62.0
-		rowH     = 250.0
-		row0Top  = 186.0
-		rowStrid = rowH + 108
+		padL     = 82.0
+		padR     = 30.0
+		colGap   = 70.0
+		rowH     = 330.0
+		row0Top  = 196.0
+		rowStrid = rowH + 116
 	)
 	var weight float64
 	for _, p := range sweepPanels {
 		weight += p.width
 	}
-	unit := (figW - padL - padR - float64(len(sweepPanels)-1)*colGap) / weight
+	unit := (sweepW - padL - padR - float64(len(sweepPanels)-1)*colGap) / weight
 	panelX := make([]float64, len(sweepPanels))
 	panelWs := make([]float64, len(sweepPanels))
 	x := padL
@@ -212,7 +218,9 @@ func effortSweep(sets []dataset, th theme) string {
 			}
 			c.line(px, rowBot, px+panelW, rowBot, th.axis, 1)
 
-			var placed []label
+			// Markers are drawn after every curve in the panel, so one engine's
+			// line cannot run across another's number.
+			var markers []marker
 			for _, eng := range engines {
 				pts := curves[eng]
 				if len(pts) == 0 {
@@ -239,50 +247,40 @@ func effortSweep(sets []dataset, th theme) string {
 					c.printf(`<path d="%s" fill="none" stroke="%s" stroke-width="1.5" stroke-dasharray="3 3" stroke-linecap="round" opacity="0.45"/>`,
 						strings.TrimSpace(offScale.String()), color(eng))
 				}
-				labels := effortLabels(pts, panel.value, panel.labelStep, sx, sy)
-				moved := map[int]bool{}
-				for _, l := range labels {
-					moved[l.effort] = true
-				}
-				// A setting that does not move the panel's value is drawn as a
-				// smaller dot with no ring. Several engines hold one size across
-				// most of their range, and at full weight those runs read as a
-				// row of choices rather than as one choice repeated.
+				moved := movingSettings(pts, panel.value, panel.labelStep)
 				for _, p := range pts {
 					x, v := sx(p.seconds), panel.value(p)
 					if v > yMax {
 						// Labelled with the setting and its value: every other label
 						// in the panel is a setting number, so a bare value here
 						// would read as one.
-						c.printf(`<path d="M %.1f %.1f l 4.5 6 l -9 0 Z" fill="%s"/>`, x, rowTop+1, color(eng))
-						c.haloText(x, rowTop+20, labelSize, color(eng), th.surface,
+						c.printf(`<path d="M %.1f %.1f l 5.5 7 l -11 0 Z" fill="%s"/>`, x, rowTop+1, color(eng))
+						c.haloText(x, rowTop+22, labelSize, color(eng), th.surface,
 							fmt.Sprintf("%d: %s", p.effort, panel.format(v)))
 						continue
 					}
 					if moved[p.effort] {
-						c.circle(x, sy(v), 3.5, color(eng), th.surface)
+						markers = append(markers, marker{x: x, y: sy(v), color: color(eng), text: fmt.Sprintf("%d", p.effort)})
 					} else {
-						c.circle(x, sy(v), 2, color(eng), "")
+						// A setting that does not move the panel's value is a plain
+						// dot. Several engines hold one size across most of their
+						// range, and at marker weight those runs read as a row of
+						// choices rather than as one choice repeated.
+						c.circle(x, sy(v), 2.5, color(eng), "")
 					}
-				}
-				for _, l := range labels {
-					if l.value > yMax {
-						continue
-					}
-					l.color = color(eng)
-					placed = append(placed, place(l, placed, rowTop+30, rowBot-5))
 				}
 			}
-			// Labels go on after every curve in the panel, so one engine's line
-			// cannot paint over another's numbers.
-			for _, l := range placed {
-				c.haloText(l.x, l.y, labelSize, l.color, th.surface, l.text)
+			for _, m := range markers {
+				c.printf(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s" stroke="%s" stroke-width="2"/>`,
+					m.x, m.y, markerR, th.surface, m.color)
+				c.printf(`<text x="%.1f" y="%.1f" font-family='%s' font-size="%.1f" fill="%s" text-anchor="middle" style="font-variant-numeric:tabular-nums">%s</text>`,
+					m.x, m.y+labelSize*0.36, fontSans, labelSize, m.color, m.text)
 			}
 		}
 	}
 
 	lastBot := row0Top + rowStrid + rowH
-	c.text(figW/2, lastBot+46, 12.5, th.inkSecondary, "middle", "",
+	c.text(sweepW/2, lastBot+52, 13, th.inkSecondary, "middle", "",
 		"encode time for the whole corpus, log scale (left = faster)")
 	footnote(c, th, 40, footTop, note)
 	c.printf(`</svg>`)
@@ -347,53 +345,29 @@ func sweepCurve(d dataset, mode, engine string) []sweepPoint {
 	return out
 }
 
-const labelSize = 10.0
+const (
+	labelSize = 11.5
+	// markerR holds a single digit with room to read against a line crossing it.
+	markerR = 10.0
+)
 
-type label struct {
-	x, y   float64
-	text   string
-	color  string
-	effort int
-	value  float64
-	// anchor is the point the label belongs to, so a label pushed aside can be
-	// tested for overlap without drifting away from its own point.
-	anchorY float64
+// marker is a labelled setting: the point itself carries its number, drawn as a
+// hollow circle with the digit inside rather than a dot with the number beside
+// it. In the dense parts of a panel the number cannot then drift far enough from
+// its point to be read against the wrong one.
+type marker struct {
+	x, y  float64
+	color string
+	text  string
 }
 
-// place moves a label off the ones already in the panel, trying above the point
-// first and then below it, so two engines that meet at the same setting still
-// both read. It stays inside the panel: a label in the tick row below the axis
-// reads as an axis label rather than as a point's.
-func place(l label, taken []label, top, bottom float64) label {
-	w := textWidth(l.text, labelSize)
-	free := func(y float64) bool {
-		if y < top || y > bottom {
-			return false
-		}
-		for _, o := range taken {
-			ow := textWidth(o.text, labelSize)
-			if math.Abs(o.x-l.x) < (w+ow)/2+2 && math.Abs(o.y-y) < 11 {
-				return false
-			}
-		}
-		return true
-	}
-	for _, dy := range []float64{-9, 16, -22, 29, -35, 42} {
-		if y := l.anchorY + dy; free(y) {
-			l.y = y
-			return l
-		}
-	}
-	return l
-}
-
-// effortLabels labels a setting only where it moves the panel's value: an engine
-// whose settings 3 through 8 all write the same bytes has one interesting
+// movingSettings marks a setting only where it moves the panel's value: an
+// engine whose settings 3 through 8 all write the same bytes has one interesting
 // setting there, the cheapest of them, and six numbers on the panel would
 // suggest six choices. Points stay on the curve either way, so the settings in
 // between are still visible as time spent for nothing.
-func effortLabels(pts []sweepPoint, value func(sweepPoint) float64, step func(float64) float64, sx, sy func(float64) float64) []label {
-	var out []label
+func movingSettings(pts []sweepPoint, value func(sweepPoint) float64, step func(float64) float64) map[int]bool {
+	out := map[int]bool{}
 	var last float64
 	for i, p := range pts {
 		v := value(p)
@@ -401,8 +375,7 @@ func effortLabels(pts []sweepPoint, value func(sweepPoint) float64, step func(fl
 			continue
 		}
 		last = v
-		y := sy(v)
-		out = append(out, label{x: sx(p.seconds), y: y - 9, text: fmt.Sprintf("%d", p.effort), anchorY: y, effort: p.effort, value: v})
+		out[p.effort] = true
 	}
 	return out
 }
