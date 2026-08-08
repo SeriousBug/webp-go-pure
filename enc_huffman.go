@@ -25,14 +25,18 @@ type elosslessHuffmanCode struct {
 func elosslessHuffmanCodeFromCodeLengths(codeLengths []uint8) (elosslessHuffmanCode, error) {
 	var counts [elosslessMaxAllowedCodeLength + 1]uint32
 
-	var symbols []int
+	usedCount := 0
+	firstUsed := 0
 	for symbol, length := range codeLengths {
 		if length != 0 {
-			symbols = append(symbols, symbol)
+			if usedCount == 0 {
+				firstUsed = symbol
+			}
+			usedCount++
 		}
 	}
 
-	if len(symbols) == 0 {
+	if usedCount == 0 {
 		return elosslessHuffmanCode{}, encBitstream("empty Huffman tree")
 	}
 
@@ -46,12 +50,12 @@ func elosslessHuffmanCodeFromCodeLengths(codeLengths []uint8) (elosslessHuffmanC
 		}
 	}
 
-	hasSingle := len(symbols) == 1
+	hasSingle := usedCount == 1
 	singleSymbol := 0
 	if hasSingle {
-		singleSymbol = symbols[0]
+		singleSymbol = firstUsed
 	}
-	if len(symbols) > 1 {
+	if usedCount > 1 {
 		left := int32(1)
 		for bits := 1; bits <= elosslessMaxAllowedCodeLength; bits++ {
 			left = (left << 1) - int32(counts[bits])
@@ -111,14 +115,22 @@ func (c *elosslessHuffmanCode) symbolDepth(symbol int) int {
 	return int(c.codeLengths[symbol])
 }
 
-func (c *elosslessHuffmanCode) usedSymbols() []int {
-	var symbols []int
+// usedSymbols returns the symbols with a non-zero code length, stopping once
+// more than max have been found. The count is reported separately so callers
+// can tell "exactly max" from "more than max".
+func (c *elosslessHuffmanCode) usedSymbols(out []int, max int) ([]int, int) {
+	count := 0
 	for symbol, length := range c.codeLengths {
-		if length != 0 {
-			symbols = append(symbols, symbol)
+		if length == 0 {
+			continue
 		}
+		count++
+		if count > max {
+			break
+		}
+		out = append(out, symbol)
 	}
-	return symbols
+	return out, count
 }
 
 func (c *elosslessHuffmanCode) writeSymbol(bw *bitWriter, symbol int) error {

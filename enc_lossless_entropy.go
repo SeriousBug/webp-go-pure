@@ -110,8 +110,9 @@ func elosslessWriteTrimmedLength(bw *bitWriter, trimmedLength int) error {
 }
 
 func elosslessWriteHuffmanTree(bw *bitWriter, code *elosslessHuffmanCode) error {
-	symbols := code.usedSymbols()
-	if len(symbols) == 0 {
+	var symbolBuf [2]int
+	symbols, usedCount := code.usedSymbols(symbolBuf[:0], 2)
+	if usedCount == 0 {
 		return encBitstream("empty Huffman tree")
 	}
 	allSmall := true
@@ -121,7 +122,7 @@ func elosslessWriteHuffmanTree(bw *bitWriter, code *elosslessHuffmanCode) error 
 			break
 		}
 	}
-	if len(symbols) <= 2 && allSmall {
+	if usedCount <= 2 && allSmall {
 		return elosslessWriteSimpleHuffmanTree(bw, symbols)
 	}
 
