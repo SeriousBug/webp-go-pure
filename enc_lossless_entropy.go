@@ -479,23 +479,11 @@ func elosslessSparseHistCost(s *elosslessSparseHist, codes *elosslessHuffmanGrou
 	return total
 }
 
+// elosslessHistogramEntropyCost returns the Shannon cost in bits of a dense
+// histogram. Zero counts contribute nothing, so the sparse and dense forms
+// share one summation.
 func elosslessHistogramEntropyCost(histogram []uint32) float64 {
-	total := 0.0
-	for _, count := range histogram {
-		total += float64(count)
-	}
-	if total == 0.0 {
-		return 0.0
-	}
-
-	sum := 0.0
-	for _, count := range histogram {
-		if count != 0 {
-			c := float64(count)
-			sum += c * math.Log2(total/c)
-		}
-	}
-	return sum
+	return elosslessChannelEntropyOfCounts(histogram)
 }
 
 func elosslessHistogramSignatureCosts(histograms *elosslessHistogramSet) [3]float64 {
