@@ -61,9 +61,11 @@ type elossyRdMultipliers struct {
 	i4Penalty uint64
 	// The trellis weighs rate against a transform-domain error rather than the
 	// pixel-domain SSE the mode search uses, so it needs its own multipliers.
+	// There is no chroma one: chroma is never trellised. libwebp reached the
+	// same conclusion, and keeps the path behind `#define DO_TRELLIS_UV 0` with
+	// the note "disable trellis for UV. Risky. Not worth."
 	trellisI16 uint32
 	trellisI4  uint32
-	trellisUv  uint32
 }
 
 type elossyPlanes struct {
@@ -119,7 +121,6 @@ type elossyLossySearchProfile struct {
 	// refineI4TopK is how many of the plain-quantized 4x4 candidates are
 	// re-scored through the trellis. Zero refines only the plain winner.
 	refineI4TopK        int
-	refineChroma        bool
 	updateProbabilities bool
 	// modeScreenTopK is how many modes survive the Hadamard-domain pre-screen
 	// and get a full transform/quantize/reconstruct trial. Zero disables the
@@ -224,7 +225,6 @@ func elossyBuildRdMultipliers(quant *elossyQuantMatrices) elossyRdMultipliers {
 		mode:       max(qI4*qI4, 128) >> 7,
 		trellisI16: max((qI16*qI16)>>2, 1),
 		trellisI4:  max((7*qI4*qI4)>>3, 1),
-		trellisUv:  max((qUv*qUv)<<1, 1),
 		i4Penalty:  1000 * uint64(qI4) * uint64(qI4),
 	}
 }
@@ -300,17 +300,9 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			updateProbabilities: true,
 			modeScreenTopK:      elossyModeScreenTopK,
 		}
-	case 3, 4:
+	case 3, 4, 5:
 		return elossyLossySearchProfile{
 			allowI4x4:           true,
-			updateProbabilities: true,
-			modeScreenTopK:      elossyModeScreenTopK,
-			i4GateStrength:      elossyIntra4GateStrength,
-		}
-	case 5:
-		return elossyLossySearchProfile{
-			allowI4x4:           true,
-			refineChroma:        true,
 			updateProbabilities: true,
 			modeScreenTopK:      elossyModeScreenTopK,
 			i4GateStrength:      elossyIntra4GateStrength,
@@ -320,7 +312,6 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			allowI4x4:           true,
 			refineI16:           true,
 			refineI4:            true,
-			refineChroma:        true,
 			updateProbabilities: true,
 			modeScreenTopK:      elossyModeScreenTopK,
 			i4GateStrength:      elossyIntra4GateStrength,
@@ -331,7 +322,6 @@ func elossySearchProfile(optimizationLevel uint8) elossyLossySearchProfile {
 			refineI16:           true,
 			refineI4:            true,
 			refineI4TopK:        elossyRefineI4TopK,
-			refineChroma:        true,
 			updateProbabilities: true,
 			modeScreenTopK:      elossyTopEffortModeScreenTopK,
 			i4GateStrength:      elossyIntra4GateStrengthTopEffort,
@@ -757,6 +747,20 @@ func elossyBuildSegmentCandidates(source *elossyPlanes, mbWidth, mbHeight int, b
 		return candidates
 	}
 
+	// Frames this large used to get a single hard-coded segmentation here,
+	// returned without ever being compared against the unsegmented baseline. It
+	// raised the quantizer index by 12 on the flattest 65% of the frame, which at
+	// quality 90 is a 1.9x coarser step over two thirds of the image: 1.0 to 2.1 dB
+	// of PSNR for 5 to 30% fewer bytes, and 1.5 to 10% worse BD-rate. Effort 9 was
+	// the only tier that got to RD-compare it, and it rejected it on every image in
+	// the corpus, which is what made effort 9 both slower and larger than effort 8.
+	// Searching the presets here instead costs 15 to 25% more time and the
+	// frame-level ranking still picks the segmented candidate on images where it
+	// loses, so efforts below 9 skip segmentation on large frames entirely.
+	if !elossyUseExhaustiveSegmentSearch(optimizationLevel) && mbCount >= 1024 {
+		return candidates
+	}
+
 	activities := make([]uint32, 0, mbCount)
 	for mbY := 0; mbY < mbHeight; mbY++ {
 		for mbX := 0; mbX < mbWidth; mbX++ {
@@ -766,13 +770,6 @@ func elossyBuildSegmentCandidates(source *elossyPlanes, mbWidth, mbHeight int, b
 	sorted := make([]uint32, len(activities))
 	copy(sorted, activities)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-
-	if !elossyUseExhaustiveSegmentSearch(optimizationLevel) && mbCount >= 1024 {
-		if config, ok := elossyBuildSegmentConfig(activities, sorted, 65, 12, -2, baseQuant); ok {
-			return []elossySegmentConfig{config}
-		}
-		return candidates
-	}
 
 	type twoSegmentPreset struct {
 		flatPercent int

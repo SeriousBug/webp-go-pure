@@ -12,6 +12,10 @@ const (
 	fontSans = `system-ui, -apple-system, "Segoe UI", sans-serif`
 )
 
+// figWidth is the width the figure being drawn is laid out at. Most figures use
+// figW; the effort sweep fits three panels per machine row and sets its own.
+var figWidth = float64(figW)
+
 type canvas struct {
 	b strings.Builder
 }
@@ -62,16 +66,15 @@ func escape(s string) string {
 func textWidth(s string, size float64) float64 { return float64(len(s)) * size * 0.55 }
 
 func header(c *canvas, th theme, h float64, title, subtitle string) {
-	c.printf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%.0f" viewBox="0 0 %d %.0f" role="img">`,
-		figW, h, figW, h)
-	c.printf(`<rect width="%d" height="%.0f" fill="%s"/>`, figW, h, th.surface)
+	c.printf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f" role="img">`,
+		figWidth, h, figWidth, h)
+	c.printf(`<rect width="%.0f" height="%.0f" fill="%s"/>`, figWidth, h, th.surface)
 	c.text(40, 34, 19, th.inkPrimary, "start", "600", title)
 	c.text(40, 56, 13, th.inkSecondary, "start", "", subtitle)
 }
 
 const (
 	footSize  = 11.5
-	footMaxW  = 820.0
 	footLineH = 16.0
 )
 
@@ -82,7 +85,7 @@ func footnoteWrap(s string) []string {
 	var line string
 	for _, word := range strings.Fields(s) {
 		next := strings.TrimSpace(line + " " + word)
-		if textWidth(next, footSize) > footMaxW && line != "" {
+		if textWidth(next, footSize) > figWidth-80 && line != "" {
 			lines = append(lines, line)
 			line = word
 			continue
@@ -132,7 +135,7 @@ func rateDistortion(d dataset, th theme) string {
 			if !ok {
 				continue
 			}
-			for _, eng := range []string{engOurs, engRust} {
+			for _, eng := range []string{engOurs} {
 				r, ok := d.find(eng, mode, file)
 				if !ok || !r.hasPSNR || !base.hasPSNR {
 					continue
@@ -140,11 +143,7 @@ func rateDistortion(d dataset, th theme) string {
 				p := point{eng, file, float64(r.bytes) / float64(base.bytes), r.psnr - base.psnr}
 				panels[mode] = append(panels[mode], p)
 				xMin, xMax = math.Min(xMin, p.x), math.Max(xMax, p.x)
-				// Corrupt output sits ~30 dB down and would flatten the scale;
-				// it is pinned to the floor and labelled instead.
-				if p.y > -8 {
-					yMin, yMax = math.Min(yMin, p.y), math.Max(yMax, p.y)
-				}
+				yMin, yMax = math.Min(yMin, p.y), math.Max(yMax, p.y)
 			}
 		}
 	}
@@ -166,7 +165,6 @@ func rateDistortion(d dataset, th theme) string {
 		"Each point is one test image, encoded at quality 90. Up and to the left is better: smaller file, higher PSNR.")
 	legend(c, th, 40, 84, []struct{ color, label string }{
 		{th.series[engOurs], "webp-go-pure"},
-		{th.series[engRust], "webp-rust"},
 		{th.muted, "libwebp and wasm (reference, at the crosshair)"},
 	})
 
@@ -200,17 +198,7 @@ func rateDistortion(d dataset, th theme) string {
 		c.text(px+panelW/2, plotTop-16, 13.5, th.inkPrimary, "middle", "600", mode)
 
 		for _, p := range panels[mode] {
-			x := sx(px, p.x)
-			if p.y < yMin {
-				// Off-scale: corrupt output sits ~30 dB down. A downward triangle
-				// on the floor marks it; the footnote carries the values, since
-				// three labels this close together collide.
-				y := plotBot - 7
-				c.printf(`<path d="M %.1f %.1f l 6 -10 l -12 0 z" fill="%s" stroke="%s" stroke-width="2"/>`,
-					x, y, th.series[p.engine], th.surface)
-				continue
-			}
-			c.circle(x, sy(p.y), 5, th.series[p.engine], th.surface)
+			c.circle(sx(px, p.x), sy(p.y), 5, th.series[p.engine], th.surface)
 		}
 	}
 
@@ -219,7 +207,7 @@ func rateDistortion(d dataset, th theme) string {
 	c.printf(`<text transform="translate(26,%.1f) rotate(-90)" font-family='%s' font-size="12.5" fill="%s" text-anchor="middle">%s</text>`,
 		(plotTop+plotBot)/2, fontSans, th.inkSecondary, "PSNR vs libwebp (dB)")
 	footnote(c, th, 40, 442,
-		"Triangles on the floor of the lossy-fast panel are webp-rust files that decode as garbage, 25 to 33 dB below libwebp (see the bug section).")
+		"lossy-fast is each encoder's fastest setting and lossy-slow its slowest, which are not the same amount of work across encoders; the effort sweep figure shows every setting in between.")
 	c.printf(`</svg>`)
 	return c.b.String()
 }
@@ -250,7 +238,7 @@ func decodeTime(sets []dataset, th theme) string {
 		subtitle: "Geometric mean of each engine's ms/op over the test images, decoding files libwebp encoded. Each panel has its own scale.",
 		footnote: "Every engine ends at packed RGBA, so x/image and wasm pay for converting their YCbCr planes inside the measurement, as an application would. x/image is golang.org/x/image/webp, the Go project's own decoder, which has no encoder and so appears in this figure alone.",
 		modes:    decodeModes,
-		engines:  []string{engOurs, engLibwebp, engWasm, engRust, engXImage},
+		engines:  []string{engOurs, engLibwebp, engWasm, engXImage},
 		value:    func(r row) float64 { return r.ms },
 		format:   duration,
 	})
@@ -285,10 +273,10 @@ func barPanels(sets []dataset, th theme, spec barSpec) string {
 		// nativewebp goes last: it is lossless-only, so its slot is empty in the
 		// lossy panels, and an empty slot at the edge of the group reads as
 		// absence where one in the middle would read as a gap.
-		engines = []string{engOurs, engLibwebp, engWasm, engRust, engNative}
+		engines = []string{engOurs, engLibwebp, engWasm, engNative}
 	}
 	names := map[string]string{
-		engOurs: "webp-go-pure", engLibwebp: "libwebp", engWasm: "wasm", engRust: "webp-rust",
+		engOurs: "webp-go-pure", engLibwebp: "libwebp", engWasm: "wasm",
 		engXImage: "x/image", engNative: "nativewebp",
 	}
 	color := func(eng string) string {

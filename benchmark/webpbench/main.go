@@ -25,7 +25,13 @@
 // psnr_db scores the encoder's own output against the pixels it was handed, and
 // is "-" for lossless.
 //
-// so results can be merged with the Rust engine's output (see benchmark/run.sh).
+// With -sweep it walks every effort setting each engine exposes instead of the
+// three fixed modes, emitting an extra effort column:
+//
+//	engine,mode,effort,file,width,height,bytes,psnr_db,iters,ms_per_op
+//
+// Its modes are "lossless" and "lossy" (quality 90). That pass is what shows the
+// time-for-size tradeoff: an engine is a curve through (time, size), not a point.
 //
 // With -mem it runs the memory pass instead, emitting:
 //
@@ -78,7 +84,17 @@ const (
 	libwebpFast  = 0 // libwebp method 0 = fastest
 	libwebpSlow  = 6 // libwebp method 6 = slowest
 	libwebpLL    = 6 // lossless preset level
+
+	oursMaxEffort    = 9 // our lossy Effort is 0..9
+	oursMaxEffortLL  = 6 // our lossless Effort is 0..6; 7..9 behave as 6
+	libwebpMaxMethod = 6 // libwebp method (the lossy knob, and wasm's only knob)
+	libwebpMaxLevel  = 9 // libwebp lossless preset level, cwebp's -z
 )
+
+// nativewebpLevels are the compression levels nativewebp distinguishes: its
+// getMethodLevel maps BestSpeed to 0, DefaultCompression to 4, BestCompression
+// to 6, and everything else to 4, so those three are the whole scale.
+var nativewebpLevels = []int{0, 4, 6}
 
 type encoderCase struct {
 	engine, mode string
@@ -101,8 +117,51 @@ func encoderCases(buf *webp.Image) []encoderCase {
 		{"wasm", "lossless", wasmEncoder(nrgba, gwebp.Options{Lossless: true, Method: libwebpSlow})},
 		{"wasm", "lossy-fast", wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: libwebpFast})},
 		{"wasm", "lossy-slow", wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: libwebpSlow})},
-		{"nativewebp", "lossless", nativeEncoder(nrgba)},
+		{"nativewebp", "lossless", nativeEncoder(nrgba, nativewebp.BestCompression)},
 	}
+}
+
+type sweepCase struct {
+	engine, mode string
+	effort       int
+	fn           func() ([]byte, error)
+}
+
+// sweepCases walks each engine's own effort knob end to end, in both modes. The
+// scales are not the same knob: ours is Effort 0..9 lossy and 0..6 lossless, libwebp's lossy knob is
+// method 0..6 and its lossless one is the preset level 0..9 (cwebp's -z), and
+// gen2brain/webp exposes only method, so the "wasm" engine sweeps method in both
+// modes. The point of the pass is each engine's reachable time-for-size curve,
+// so what matters is that every engine's endpoints are covered, not that the
+// numbers line up across engines.
+func sweepCases(buf *webp.Image) []sweepCase {
+	nrgba := &image.NRGBA{Pix: buf.RGBA, Stride: buf.Width * 4, Rect: image.Rect(0, 0, buf.Width, buf.Height)}
+	var cases []sweepCase
+	for e := 0; e <= oursMaxEffort; e++ {
+		effort := uint8(e)
+		if e <= oursMaxEffortLL {
+			cases = append(cases, sweepCase{"ours", "lossless", e, func() ([]byte, error) {
+				return webp.EncodeLossless(buf, &webp.LosslessOptions{Effort: effort})
+			}})
+		}
+		cases = append(cases, sweepCase{"ours", "lossy", e, func() ([]byte, error) {
+			return webp.EncodeLossy(buf, &webp.LossyOptions{Quality: lossyQuality, Effort: effort})
+		}})
+	}
+	for z := 0; z <= libwebpMaxLevel; z++ {
+		cases = append(cases, sweepCase{"libwebp", "lossless", z, libwebpEncoder(nrgba, true, 0, z)})
+	}
+	for m := 0; m <= libwebpMaxMethod; m++ {
+		cases = append(cases,
+			sweepCase{"libwebp", "lossy", m, libwebpEncoder(nrgba, false, lossyQuality, m)},
+			sweepCase{"wasm", "lossless", m, wasmEncoder(nrgba, gwebp.Options{Lossless: true, Method: m})},
+			sweepCase{"wasm", "lossy", m, wasmEncoder(nrgba, gwebp.Options{Quality: lossyQuality, Method: m})},
+		)
+	}
+	for _, lvl := range nativewebpLevels {
+		cases = append(cases, sweepCase{"nativewebp", "lossless", lvl, nativeEncoder(nrgba, nativewebp.CompressionLevel(lvl))})
+	}
+	return cases
 }
 
 func main() {
@@ -113,7 +172,8 @@ func main() {
 	header := flag.Bool("header", false, "print CSV header line")
 	mem := flag.Bool("mem", false, "run the peak-RSS pass instead of the timing pass")
 	decode := flag.Bool("decode", false, "run the decode pass instead of the encode pass")
-	decodeDir := flag.String("decode-dir", "", "with -decode, `directory` to write the decode inputs and libwebp's reference decode to, for the Rust engine")
+	sweep := flag.Bool("sweep", false, "sweep every effort setting instead of the three fixed modes")
+	engine := flag.String("engine", "", "restrict the sweep to one engine, for re-measuring it after a change")
 	memOne := flag.String("mem-one", "", "internal: measure peak RSS of one `engine/mode` on -mem-file and exit")
 	memFile := flag.String("mem-file", "", "internal: source image for -mem-one")
 	flag.Parse()
@@ -144,12 +204,21 @@ func main() {
 	}
 
 	if *header {
-		fmt.Println("engine,mode,file,width,height,bytes,psnr_db,iters,ms_per_op")
+		if *sweep {
+			fmt.Println("engine,mode,effort,file,width,height,bytes,psnr_db,iters,ms_per_op")
+		} else {
+			fmt.Println("engine,mode,file,width,height,bytes,psnr_db,iters,ms_per_op")
+		}
 	}
 	budget := time.Duration(*budgetMs) * time.Millisecond
 
 	if *decode {
-		decodePass(paths, *decodeDir, budget, *minIters, *maxIters)
+		decodePass(paths, budget, *minIters, *maxIters)
+		return
+	}
+
+	if *sweep {
+		sweepPass(paths, budget, *minIters, *maxIters, *engine)
 		return
 	}
 
@@ -178,6 +247,41 @@ func main() {
 			}
 			fmt.Printf("%s,%s,%s,%d,%d,%d,%s,%d,%.3f\n",
 				e.engine, e.mode, name, buf.Width, buf.Height, len(out), quality, iters,
+				float64(perOp.Microseconds())/1000.0)
+		}
+	}
+}
+
+// sweepPass measures every (engine, mode, effort) on every image, so each engine
+// comes out as a curve rather than a point.
+func sweepPass(paths []string, budget time.Duration, minIters, maxIters int, engine string) {
+	for _, p := range paths {
+		buf, err := loadImageBuffer(p)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "skip %s: %v\n", p, err)
+			continue
+		}
+		name := filepath.Base(p)
+		for _, e := range sweepCases(&buf) {
+			if engine != "" && e.engine != engine {
+				continue
+			}
+			out, iters, perOp, err := measure(e.fn, budget, minIters, maxIters)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s/%s/%d %s: %v\n", e.engine, e.mode, e.effort, name, err)
+				continue
+			}
+			quality := "-"
+			if e.mode != "lossless" {
+				dB, err := psnrOf(buf.RGBA, out)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%s/%s/%d %s: psnr: %v\n", e.engine, e.mode, e.effort, name, err)
+					continue
+				}
+				quality = fmt.Sprintf("%.2f", dB)
+			}
+			fmt.Printf("%s,%s,%d,%s,%d,%d,%d,%s,%d,%.3f\n",
+				e.engine, e.mode, e.effort, name, buf.Width, buf.Height, len(out), quality, iters,
 				float64(perOp.Microseconds())/1000.0)
 		}
 	}
@@ -263,10 +367,10 @@ func libwebpEncoder(img *image.NRGBA, lossless bool, quality float32, method int
 
 // nativeEncoder is lossless-only: nativewebp writes VP8L and nothing else, so it
 // has no row in the lossy modes.
-func nativeEncoder(img *image.NRGBA) func() ([]byte, error) {
+func nativeEncoder(img *image.NRGBA, level nativewebp.CompressionLevel) func() ([]byte, error) {
 	return func() ([]byte, error) {
 		var b bytes.Buffer
-		opts := &nativewebp.Options{CompressionLevel: nativewebp.BestCompression}
+		opts := &nativewebp.Options{CompressionLevel: level}
 		if err := nativewebp.Encode(&b, img, opts); err != nil {
 			return nil, err
 		}

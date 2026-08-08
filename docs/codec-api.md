@@ -54,7 +54,9 @@ whether there is alpha or animation, reading only a header rather than the whole
 file.
 
 `EncodeLossy` and `EncodeLossless` take a `nil` options pointer for the defaults,
-quality 90 effort 0 and effort 6 respectively. Watch out for one edge: a non-nil
+quality 90 effort 0 and effort 6 respectively. Lossy effort runs 0..9; lossless
+effort runs 0..6 (7..9 accepted, but does not enable any additional options
+beyond 6 at the moment). Watch out for one edge: a non-nil
 `LossyOptions` with `Quality` left at zero asks for quality 0, not the default.
 The `std` package's `Options` reads zero as the default instead.
 

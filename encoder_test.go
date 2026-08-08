@@ -393,7 +393,7 @@ func TestEncodeLossyRareSkipsRoundTrip(t *testing.T) {
 // encoded size alone just picks whichever one quantizes hardest. The encoder
 // must emit the rate-distortion best candidate, not the smallest.
 func TestEncodeLossySelectsCandidateOnRateDistortionNotSize(t *testing.T) {
-	src := lossyPhotoCropRGBA(t, 256)
+	src := lossyPhotoCropRGBA(t, 512)
 	width, height := src.Width, src.Height
 	mbWidth := (width + 15) >> 4
 	mbHeight := (height + 15) >> 4
@@ -432,7 +432,7 @@ func TestEncodeLossySelectsCandidateOnRateDistortionNotSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The emitted frame goes through the filter search, which shifts its size by
-	// a few bytes; candidates here are thousands of bytes apart.
+	// a few bytes; candidates here are hundreds of bytes apart.
 	if distance(len(encoded), rdBestSize) >= distance(len(encoded), smallestSize) {
 		t.Fatalf("encoder emitted %d bytes, matching the smallest candidate (%d) rather than the rate-distortion best (%d)",
 			len(encoded), smallestSize, rdBestSize)

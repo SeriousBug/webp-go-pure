@@ -585,26 +585,6 @@ func elosslessBuildTiledPredictorPlan(width, height int, input []uint32, useSubt
 	}
 }
 
-func elosslessBuildTiledTransformPlan(width, height int, input []uint32, useSubtractGreen bool) elosslessTransformPlan {
-	crossPlan := elosslessBuildTiledCrossPlan(width, height, input, useSubtractGreen)
-	crossColored := crossPlan.predicted
-	predictorWidth, _, predictorModes, predictorImage := elosslessMakePredictorTransformImage(width, height, crossColored)
-	predicted := elosslessApplyPredictorTransform(width, height, crossColored, elosslessPredictorTransformBits, predictorModes)
-
-	return elosslessTransformPlan{
-		useSubtractGreen: useSubtractGreen,
-		crossBits:        crossPlan.crossBits,
-		crossBitsSet:     crossPlan.crossBitsSet,
-		crossWidth:       crossPlan.crossWidth,
-		crossImage:       crossPlan.crossImage,
-		predictorBits:    elosslessPredictorTransformBits,
-		predictorBitsSet: true,
-		predictorWidth:   predictorWidth,
-		predictorImage:   predictorImage,
-		predicted:        predicted,
-	}
-}
-
 func elosslessEstimateTokenStreamCostBytes(width int, argb []uint32, options elosslessTokenBuildOptions) (int, error) {
 	tokens, err := elosslessBuildTokens(width, argb, options)
 	if err != nil {
@@ -716,16 +696,6 @@ func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *eloss
 				return elosslessBuildTiledPredictorPlan(w, h, subtractGreen, true)
 			})
 	}
-	if profile.transformSearchLevel >= 7 {
-		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledTransformPlan(w, h, argb, false) })
-		if subtractIsDistinct {
-			builders = append(builders, func(w, h int) elosslessTransformPlan {
-				return elosslessBuildTiledTransformPlan(w, h, subtractGreen, true)
-			})
-		}
-	}
-
 	return builders
 }
 

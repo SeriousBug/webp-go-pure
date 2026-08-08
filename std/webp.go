@@ -71,7 +71,9 @@ type Options struct {
 	// Quality is the lossy quality target in 1..100. Higher is better looking
 	// and larger. Zero means [DefaultQuality]. Ignored when Lossless is set.
 	Quality int
-	// Effort trades encode time for file size, in 0..9. Higher is slower and
+	// Effort trades encode time for file size, in 0..9 for lossy and 0..6 for
+	// lossless (7..9 accepted there, but do not enable any additional options
+	// beyond 6 at the moment). Higher is slower and
 	// smaller. Zero means the default for the mode, which is 0 for lossy and 6
 	// for lossless; pass [EffortFastest] to ask for 0 explicitly.
 	Effort int
