@@ -878,50 +878,150 @@ func elosslessApplyColorCacheToTokens(dst []elosslessToken, argb []uint32, token
 	return nil
 }
 
-func elosslessBuildMetaHuffmanPlan(width, height int, tokens []elosslessToken, colorCacheBits, huffmanBits, maxGroups int) (*elosslessMetaHuffmanPlan, error) {
+// elosslessTileHistograms holds the per-tile token histograms of one
+// huffmanBits level along with the data the plan search derives from them.
+type elosslessTileHistograms struct {
+	huffmanBits   int
+	huffmanXsize  int
+	huffmanYsize  int
+	histograms    []elosslessHistogramSet
+	weights       []int
+	nonEmptyTiles [][2]int
+	sparse        []elosslessSparseHist
+}
+
+func (t *elosslessTileHistograms) tileCount() int { return t.huffmanXsize * t.huffmanYsize }
+
+// finish computes the non-empty tile list and the sparse histograms the
+// assignment cost is evaluated against.
+func (t *elosslessTileHistograms) finish() {
+	for index, weight := range t.weights {
+		if weight != 0 {
+			t.nonEmptyTiles = append(t.nonEmptyTiles, [2]int{index, weight})
+		}
+	}
+	sort.SliceStable(t.nonEmptyTiles, func(i, j int) bool {
+		return t.nonEmptyTiles[j][1] < t.nonEmptyTiles[i][1]
+	})
+	t.sparse = make([]elosslessSparseHist, t.tileCount())
+	for _, tile := range t.nonEmptyTiles {
+		t.sparse[tile[0]] = elosslessMakeSparseHist(&t.histograms[tile[0]])
+	}
+}
+
+func elosslessScanTileHistograms(width, height int, tokens []elosslessToken, colorCacheBits, huffmanBits int) (*elosslessTileHistograms, error) {
+	level := &elosslessTileHistograms{
+		huffmanBits:  huffmanBits,
+		huffmanXsize: elosslessSubsampleSize(width, huffmanBits),
+		huffmanYsize: elosslessSubsampleSize(height, huffmanBits),
+	}
+	tileCount := level.tileCount()
+	level.histograms = make([]elosslessHistogramSet, tileCount)
+	for i := range level.histograms {
+		level.histograms[i] = elosslessNewHistograms(colorCacheBits)
+	}
+	level.weights = make([]int, tileCount)
+
+	pos := 0
+	for _, token := range tokens {
+		tile := elosslessTileIndexForPos(width, huffmanBits, level.huffmanXsize, pos)
+		if err := elosslessAddTokenToHistograms(&level.histograms[tile], width, token); err != nil {
+			return nil, err
+		}
+		level.weights[tile] += elosslessTokenLen(token)
+		pos += elosslessTokenLen(token)
+	}
+	level.finish()
+	return level, nil
+}
+
+// elosslessCoarsenTileHistograms returns the level one huffmanBits above fine.
+// Each coarse tile is exactly the union of the 2x2 block of fine tiles under
+// it, so its histogram is their sum and the token stream need not be rescanned.
+func elosslessCoarsenTileHistograms(fine *elosslessTileHistograms, width, height, colorCacheBits int) *elosslessTileHistograms {
+	huffmanBits := fine.huffmanBits + 1
+	coarse := &elosslessTileHistograms{
+		huffmanBits:  huffmanBits,
+		huffmanXsize: elosslessSubsampleSize(width, huffmanBits),
+		huffmanYsize: elosslessSubsampleSize(height, huffmanBits),
+	}
+	tileCount := coarse.tileCount()
+	coarse.histograms = make([]elosslessHistogramSet, tileCount)
+	for i := range coarse.histograms {
+		coarse.histograms[i] = elosslessNewHistograms(colorCacheBits)
+	}
+	coarse.weights = make([]int, tileCount)
+
+	for y := 0; y < fine.huffmanYsize; y++ {
+		for x := 0; x < fine.huffmanXsize; x++ {
+			src := y*fine.huffmanXsize + x
+			if fine.weights[src] == 0 {
+				continue
+			}
+			dst := (y>>1)*coarse.huffmanXsize + (x >> 1)
+			elosslessMergeHistograms(&coarse.histograms[dst], &fine.histograms[src])
+			coarse.weights[dst] += fine.weights[src]
+		}
+	}
+	coarse.finish()
+	return coarse
+}
+
+// elosslessTileHistogramLevels builds the tile histograms for every huffmanBits
+// in candidates. Only the finest level scans the token stream; the coarser ones
+// are summed up from it.
+func elosslessTileHistogramLevels(width, height int, tokens []elosslessToken, colorCacheBits int, candidates [][2]int) (map[int]*elosslessTileHistograms, error) {
+	minBits, maxBits := 0, 0
+	for _, hc := range candidates {
+		bits := hc[0]
+		if bits < elosslessMinHuffmanBits || bits >= elosslessMinHuffmanBits+(1<<elosslessNumHuffmanBits) {
+			continue
+		}
+		if minBits == 0 || bits < minBits {
+			minBits = bits
+		}
+		if bits > maxBits {
+			maxBits = bits
+		}
+	}
+	levels := make(map[int]*elosslessTileHistograms, maxBits-minBits+1)
+	if minBits == 0 {
+		return levels, nil
+	}
+
+	level, err := elosslessScanTileHistograms(width, height, tokens, colorCacheBits, minBits)
+	if err != nil {
+		return nil, err
+	}
+	levels[minBits] = level
+	for bits := minBits + 1; bits <= maxBits; bits++ {
+		level = elosslessCoarsenTileHistograms(level, width, height, colorCacheBits)
+		levels[bits] = level
+	}
+	return levels, nil
+}
+
+func elosslessBuildMetaHuffmanPlan(colorCacheBits, maxGroups int, level *elosslessTileHistograms) (*elosslessMetaHuffmanPlan, error) {
+	if level == nil {
+		return nil, nil
+	}
+	huffmanBits := level.huffmanBits
 	if huffmanBits < elosslessMinHuffmanBits || huffmanBits >= elosslessMinHuffmanBits+(1<<elosslessNumHuffmanBits) {
 		return nil, nil
 	}
 
-	huffmanXsize := elosslessSubsampleSize(width, huffmanBits)
-	huffmanYsize := elosslessSubsampleSize(height, huffmanBits)
-	tileCount := huffmanXsize * huffmanYsize
+	huffmanXsize := level.huffmanXsize
+	tileCount := level.tileCount()
 	if tileCount <= 1 {
 		return nil, nil
 	}
 
-	tileHistograms := make([]elosslessHistogramSet, tileCount)
-	for i := range tileHistograms {
-		tileHistograms[i] = elosslessNewHistograms(colorCacheBits)
-	}
-	tileWeights := make([]int, tileCount)
-	pos := 0
-	for _, token := range tokens {
-		tile := elosslessTileIndexForPos(width, huffmanBits, huffmanXsize, pos)
-		if err := elosslessAddTokenToHistograms(&tileHistograms[tile], width, token); err != nil {
-			return nil, err
-		}
-		tileWeights[tile] += elosslessTokenLen(token)
-		pos += elosslessTokenLen(token)
-	}
-
-	var nonEmptyTiles [][2]int
-	for index, weight := range tileWeights {
-		if weight != 0 {
-			nonEmptyTiles = append(nonEmptyTiles, [2]int{index, weight})
-		}
-	}
+	tileHistograms := level.histograms
+	nonEmptyTiles := level.nonEmptyTiles
 	if len(nonEmptyTiles) <= 1 {
 		return nil, nil
 	}
-	sort.SliceStable(nonEmptyTiles, func(i, j int) bool {
-		return nonEmptyTiles[j][1] < nonEmptyTiles[i][1]
-	})
-
-	tileSparse := make([]elosslessSparseHist, tileCount)
-	for _, t := range nonEmptyTiles {
-		tileSparse[t[0]] = elosslessMakeSparseHist(&tileHistograms[t[0]])
-	}
+	tileSparse := level.sparse
 
 	groupCount := maxGroups
 	if len(nonEmptyTiles) < groupCount {
@@ -1245,10 +1345,14 @@ func elosslessWriteImageStreamFromTokens(bw *bitWriter, width, height int, token
 		}
 		var bestMeta *elosslessMetaHuffmanPlan
 		bestMetaSize := elosslessIntMax
+		levels, err := elosslessTileHistogramLevels(width, height, tokens, colorCacheBits, metaCandidates)
+		if err != nil {
+			return err
+		}
 		for _, hc := range metaCandidates {
 			huffmanBits := hc[0]
 			groupCount := hc[1]
-			plan, err := elosslessBuildMetaHuffmanPlan(width, height, tokens, colorCacheBits, huffmanBits, groupCount)
+			plan, err := elosslessBuildMetaHuffmanPlan(colorCacheBits, groupCount, levels[huffmanBits])
 			if err != nil {
 				return err
 			}
