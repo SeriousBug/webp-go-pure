@@ -7,7 +7,8 @@ Pure Go WebP decoder and encoder. No cgo, no external dependencies.
 Decodes lossy `VP8` and lossless `VP8L` still images, decodes animated WebP into
 a composited frame sequence, and encodes still images as lossy or lossless.
 Alpha comes through `ALPH` chunks on lossy still images and on lossy animation
-frames.
+frames, and the lossy encoder writes one, so a lossy encode keeps transparency
+bit-exact.
 
 The `std` subpackage implements the standard library's codec interfaces, so
 `image.Image` goes in and comes out and `image.Decode` works. Underneath it, the
