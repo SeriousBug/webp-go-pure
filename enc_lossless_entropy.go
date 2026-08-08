@@ -725,22 +725,39 @@ type elosslessEntropyWork struct {
 	indices []uint16
 }
 
-// channelEntropy is elosslessHistogramEntropyCost restricted to the non-zero
-// counts, which it receives in ascending index order.
+// elosslessLog2Table caches log2 of the small integers the histogram counts
+// almost always are. Each entry is what math.Log2 returns for that integer, so
+// a lookup is not an approximation of it.
+var elosslessLog2Table = func() [1 << 14]float64 {
+	var table [1 << 14]float64
+	for i := 1; i < len(table); i++ {
+		table[i] = math.Log2(float64(i))
+	}
+	return table
+}()
+
+func elosslessLog2OfCount(count uint64) float64 {
+	if count < uint64(len(elosslessLog2Table)) {
+		return elosslessLog2Table[count]
+	}
+	return math.Log2(float64(count))
+}
+
+// elosslessChannelEntropyOfCounts returns the Shannon cost in bits of the
+// non-zero counts it is given. It sums the counts' own log terms rather than
+// taking a log of total/count per symbol, which turns the per-symbol division
+// and logarithm into a table lookup.
 func elosslessChannelEntropyOfCounts(counts []uint32) float64 {
-	total := 0.0
-	for _, count := range counts {
-		total += float64(count)
-	}
-	if total == 0.0 {
-		return 0.0
-	}
+	total := uint64(0)
 	sum := 0.0
 	for _, count := range counts {
-		c := float64(count)
-		sum += c * math.Log2(total/c)
+		total += uint64(count)
+		sum -= float64(count) * elosslessLog2OfCount(uint64(count))
 	}
-	return sum
+	if total == 0 {
+		return 0.0
+	}
+	return sum + float64(total)*elosslessLog2OfCount(total)
 }
 
 func (w *elosslessEntropyWork) setEntropy(h *elosslessHistogramSet, nz *elosslessHistogramNonZeros) float64 {
