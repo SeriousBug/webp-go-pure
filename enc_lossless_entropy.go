@@ -427,43 +427,6 @@ func elosslessHistogramSignatureCosts(histograms *elosslessHistogramSet) [3]floa
 	}
 }
 
-func elosslessHistogramSetEntropyCost(histograms *elosslessHistogramSet) float64 {
-	sum := 0.0
-	for i := 0; i < 5; i++ {
-		sum += elosslessHistogramEntropyCost(histograms[i])
-	}
-	return sum
-}
-
-// elosslessCombinedChannelEntropy returns the Shannon entropy cost of the
-// element-wise sum of two histograms without materializing the sum.
-func elosslessCombinedChannelEntropy(a, b []uint32) float64 {
-	total := 0.0
-	for i := range a {
-		total += float64(a[i] + b[i])
-	}
-	if total == 0.0 {
-		return 0.0
-	}
-	sum := 0.0
-	for i := range a {
-		c := a[i] + b[i]
-		if c != 0 {
-			cf := float64(c)
-			sum += cf * math.Log2(total/cf)
-		}
-	}
-	return sum
-}
-
-func elosslessCombinedHistogramSetEntropy(a, b *elosslessHistogramSet) float64 {
-	return elosslessCombinedChannelEntropy(a[0], b[0]) +
-		elosslessCombinedChannelEntropy(a[1], b[1]) +
-		elosslessCombinedChannelEntropy(a[2], b[2]) +
-		elosslessCombinedChannelEntropy(a[3], b[3]) +
-		elosslessCombinedChannelEntropy(a[4], b[4])
-}
-
 func elosslessHistogramPartitionIndex(value, minValue, maxValue float64, partitions int) int {
 	if partitions <= 1 || maxValue <= minValue {
 		return 0
@@ -540,15 +503,18 @@ func elosslessEntropyHistogramCandidates(nonEmptyTiles [][2]int, tileHistograms 
 	// entropy evaluations at O(n^2) overall instead of recomputing them for
 	// every pair on every merge step.
 	n := len(candidates)
+	var work elosslessEntropyWork
+	nonZeros := make([]elosslessHistogramNonZeros, n)
 	selfCost := make([]float64, n)
 	comb := make([][]float64, n)
 	for i := 0; i < n; i++ {
-		selfCost[i] = elosslessHistogramSetEntropyCost(&candidates[i].histograms)
+		nonZeros[i].rebuild(&candidates[i].histograms)
+		selfCost[i] = work.setEntropy(&candidates[i].histograms, &nonZeros[i])
 		comb[i] = make([]float64, n)
 	}
 	for i := 0; i < n; i++ {
 		for j := i + 1; j < n; j++ {
-			comb[i][j] = elosslessCombinedHistogramSetEntropy(&candidates[i].histograms, &candidates[j].histograms)
+			comb[i][j] = work.combinedSetEntropy(&candidates[i].histograms, &nonZeros[i], &candidates[j].histograms, &nonZeros[j])
 		}
 	}
 	recomputeRow := func(i, active int) {
@@ -556,7 +522,7 @@ func elosslessEntropyHistogramCandidates(nonEmptyTiles [][2]int, tileHistograms 
 			if j == i {
 				continue
 			}
-			v := elosslessCombinedHistogramSetEntropy(&candidates[i].histograms, &candidates[j].histograms)
+			v := work.combinedSetEntropy(&candidates[i].histograms, &nonZeros[i], &candidates[j].histograms, &nonZeros[j])
 			if i < j {
 				comb[i][j] = v
 			} else {
@@ -569,8 +535,9 @@ func elosslessEntropyHistogramCandidates(nonEmptyTiles [][2]int, tileHistograms 
 		bestLhs, bestRhs := -1, -1
 		bestPenalty := math.Inf(1)
 		for lhs := 0; lhs < n; lhs++ {
+			row := comb[lhs]
 			for rhs := lhs + 1; rhs < n; rhs++ {
-				penalty := comb[lhs][rhs] - selfCost[lhs] - selfCost[rhs]
+				penalty := row[rhs] - selfCost[lhs] - selfCost[rhs]
 				if penalty < bestPenalty {
 					bestPenalty = penalty
 					bestLhs, bestRhs = lhs, rhs
@@ -584,21 +551,164 @@ func elosslessEntropyHistogramCandidates(nonEmptyTiles [][2]int, tileHistograms 
 		rhsCandidate := candidates[bestRhs]
 		elosslessMergeHistograms(&candidates[bestLhs].histograms, &rhsCandidate.histograms)
 		elosslessNormalizeHistograms(&candidates[bestLhs].histograms)
+		nonZeros[bestLhs].union(&nonZeros[bestRhs], &work)
 		candidates[bestLhs].weight += rhsCandidate.weight
-		selfCost[bestLhs] = elosslessHistogramSetEntropyCost(&candidates[bestLhs].histograms)
+		selfCost[bestLhs] = work.setEntropy(&candidates[bestLhs].histograms, &nonZeros[bestLhs])
 
 		last := n - 1
 		candidates[bestRhs] = candidates[last]
 		selfCost[bestRhs] = selfCost[last]
+		nonZeros[bestRhs], nonZeros[last] = nonZeros[last], nonZeros[bestRhs]
 		candidates = candidates[:last]
 		n = last
+		// The candidate moved into bestRhs keeps its combined entropies, so its
+		// row is a copy of the vacated one rather than a recomputation.
 		if bestRhs < n {
-			recomputeRow(bestRhs, n)
+			for j := 0; j < n; j++ {
+				if j == bestRhs {
+					continue
+				}
+				v := elosslessCombGet(comb, last, j)
+				elosslessCombSet(comb, bestRhs, j, v)
+			}
 		}
 		recomputeRow(bestLhs, n)
 	}
 
 	return candidates
+}
+
+func elosslessCombGet(comb [][]float64, i, j int) float64 {
+	if i < j {
+		return comb[i][j]
+	}
+	return comb[j][i]
+}
+
+func elosslessCombSet(comb [][]float64, i, j int, v float64) {
+	if i < j {
+		comb[i][j] = v
+	} else {
+		comb[j][i] = v
+	}
+}
+
+// elosslessHistogramNonZeros lists, per channel, the ascending indices whose
+// count is non-zero. Candidate histograms are sparse, and every entropy sum
+// skips zero counts anyway, so walking these lists visits the same terms in the
+// same order as a dense scan while touching far fewer entries.
+type elosslessHistogramNonZeros struct {
+	idx [5][]uint16
+}
+
+func (nz *elosslessHistogramNonZeros) rebuild(h *elosslessHistogramSet) {
+	for c := 0; c < 5; c++ {
+		list := nz.idx[c][:0]
+		for i, v := range h[c] {
+			if v != 0 {
+				list = append(list, uint16(i))
+			}
+		}
+		nz.idx[c] = list
+	}
+}
+
+// union folds other's non-zero indices into nz, matching a histogram merge.
+func (nz *elosslessHistogramNonZeros) union(other *elosslessHistogramNonZeros, work *elosslessEntropyWork) {
+	for c := 0; c < 5; c++ {
+		merged := work.indices[:0]
+		a, b := nz.idx[c], other.idx[c]
+		i, j := 0, 0
+		for i < len(a) && j < len(b) {
+			switch {
+			case a[i] < b[j]:
+				merged = append(merged, a[i])
+				i++
+			case b[j] < a[i]:
+				merged = append(merged, b[j])
+				j++
+			default:
+				merged = append(merged, a[i])
+				i++
+				j++
+			}
+		}
+		merged = append(merged, a[i:]...)
+		merged = append(merged, b[j:]...)
+		work.indices = merged
+		nz.idx[c] = append(nz.idx[c][:0], merged...)
+	}
+}
+
+// elosslessEntropyWork holds the scratch buffers of the candidate merge search.
+type elosslessEntropyWork struct {
+	counts  []uint32
+	indices []uint16
+}
+
+// channelEntropy is elosslessHistogramEntropyCost restricted to the non-zero
+// counts, which it receives in ascending index order.
+func elosslessChannelEntropyOfCounts(counts []uint32) float64 {
+	total := 0.0
+	for _, count := range counts {
+		total += float64(count)
+	}
+	if total == 0.0 {
+		return 0.0
+	}
+	sum := 0.0
+	for _, count := range counts {
+		c := float64(count)
+		sum += c * math.Log2(total/c)
+	}
+	return sum
+}
+
+func (w *elosslessEntropyWork) setEntropy(h *elosslessHistogramSet, nz *elosslessHistogramNonZeros) float64 {
+	sum := 0.0
+	for c := 0; c < 5; c++ {
+		hist := h[c]
+		counts := w.counts[:0]
+		for _, i := range nz.idx[c] {
+			counts = append(counts, hist[i])
+		}
+		w.counts = counts
+		sum += elosslessChannelEntropyOfCounts(counts)
+	}
+	return sum
+}
+
+func (w *elosslessEntropyWork) combinedSetEntropy(a *elosslessHistogramSet, nza *elosslessHistogramNonZeros, b *elosslessHistogramSet, nzb *elosslessHistogramNonZeros) float64 {
+	sum := 0.0
+	for c := 0; c < 5; c++ {
+		ha, hb := a[c], b[c]
+		ia, ib := nza.idx[c], nzb.idx[c]
+		counts := w.counts[:0]
+		i, j := 0, 0
+		for i < len(ia) && j < len(ib) {
+			switch {
+			case ia[i] < ib[j]:
+				counts = append(counts, ha[ia[i]])
+				i++
+			case ib[j] < ia[i]:
+				counts = append(counts, hb[ib[j]])
+				j++
+			default:
+				counts = append(counts, ha[ia[i]]+hb[ib[j]])
+				i++
+				j++
+			}
+		}
+		for ; i < len(ia); i++ {
+			counts = append(counts, ha[ia[i]])
+		}
+		for ; j < len(ib); j++ {
+			counts = append(counts, hb[ib[j]])
+		}
+		w.counts = counts
+		sum += elosslessChannelEntropyOfCounts(counts)
+	}
+	return sum
 }
 
 func elosslessBuildEntropySeedHistograms(nonEmptyTiles [][2]int, tileHistograms []elosslessHistogramSet, groupCount int) []elosslessHistogramSet {
