@@ -173,6 +173,7 @@ func main() {
 	mem := flag.Bool("mem", false, "run the peak-RSS pass instead of the timing pass")
 	decode := flag.Bool("decode", false, "run the decode pass instead of the encode pass")
 	sweep := flag.Bool("sweep", false, "sweep every effort setting instead of the three fixed modes")
+	engine := flag.String("engine", "", "restrict the sweep to one engine, for re-measuring it after a change")
 	memOne := flag.String("mem-one", "", "internal: measure peak RSS of one `engine/mode` on -mem-file and exit")
 	memFile := flag.String("mem-file", "", "internal: source image for -mem-one")
 	flag.Parse()
@@ -217,7 +218,7 @@ func main() {
 	}
 
 	if *sweep {
-		sweepPass(paths, budget, *minIters, *maxIters)
+		sweepPass(paths, budget, *minIters, *maxIters, *engine)
 		return
 	}
 
@@ -253,7 +254,7 @@ func main() {
 
 // sweepPass measures every (engine, mode, effort) on every image, so each engine
 // comes out as a curve rather than a point.
-func sweepPass(paths []string, budget time.Duration, minIters, maxIters int) {
+func sweepPass(paths []string, budget time.Duration, minIters, maxIters int, engine string) {
 	for _, p := range paths {
 		buf, err := loadImageBuffer(p)
 		if err != nil {
@@ -262,6 +263,9 @@ func sweepPass(paths []string, budget time.Duration, minIters, maxIters int) {
 		}
 		name := filepath.Base(p)
 		for _, e := range sweepCases(&buf) {
+			if engine != "" && e.engine != engine {
+				continue
+			}
 			out, iters, perOp, err := measure(e.fn, budget, minIters, maxIters)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s/%s/%d %s: %v\n", e.engine, e.mode, e.effort, name, err)
