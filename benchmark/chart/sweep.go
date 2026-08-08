@@ -122,7 +122,12 @@ func effortSweep(sets []dataset, th theme) string {
 	// quality data differently and make the rows look like different results;
 	// shared, the only thing that moves between them is time, which is the one
 	// thing the machine actually changes.
-	type axisRange struct{ xMin, xMax, yMin, yMax float64 }
+	type axisRange struct {
+		xMin, xMax, yMin, yMax float64
+		// clipped is set when yMax is a cutoff rather than the largest value, so
+		// the ceiling leaves room for the off-scale markers drawn on the frame.
+		clipped bool
+	}
 	panelRange := make([]axisRange, len(sweepPanels))
 	for pi, panel := range sweepPanels {
 		var xs, ys []float64
@@ -141,10 +146,13 @@ func effortSweep(sets []dataset, th theme) string {
 		}
 		xMin, xMax := minMax(xs)
 		yMin, yMax := minMax(ys)
+		clipped := false
 		if panel.clipTop {
-			yMax = clipOutlierTop(ys)
+			if cut := clipOutlierTop(ys); cut < yMax {
+				yMax, clipped = cut, true
+			}
 		}
-		panelRange[pi] = axisRange{xMin, xMax, yMin, yMax}
+		panelRange[pi] = axisRange{xMin, xMax, yMin, yMax, clipped}
 	}
 
 	for ri, d := range sets {
@@ -185,19 +193,28 @@ func effortSweep(sets []dataset, th theme) string {
 			sx := func(v float64) float64 { return px + (math.Log10(v)-lo)/(hi-lo)*panelW }
 			var sy func(float64) float64
 			var yAxis []float64
+			// A clipped panel's ceiling has to clear the off-scale triangles and
+			// the values printed under them, not just a marker.
+			headroom := markerClearance
+			if rng.clipped {
+				headroom = offScaleClearance
+			}
 			if panel.logY {
 				yLo, yHi := math.Log10(yMin)-0.06, math.Log10(yMax)+0.06
 				yAxis = axisTicks(math.Pow(10, yLo), math.Pow(10, yHi))
-				yLo, yAxis = snapBottom(yLo, yHi, math.Log10(yMin), yAxis, math.Log10, rowH)
+				yLo, yAxis = snapBottom(yLo, yHi, math.Log10(yMin), yAxis, math.Log10, rowH, markerClearance)
+				yHi, yAxis = snapTop(yLo, yHi, math.Log10(yMax), yAxis, math.Log10, rowH, headroom)
 				sy = func(v float64) float64 {
 					y := rowBot - (math.Log10(v)-yLo)/(yHi-yLo)*rowH
 					return math.Max(y, rowTop)
 				}
 			} else {
+				identity := func(v float64) float64 { return v }
 				pad := math.Max((yMax-yMin)*0.1, 0.2)
 				yLo, yHi := yMin-pad, yMax+pad
 				yAxis = evenTicks(yLo, yHi)
-				yLo, yAxis = snapBottom(yLo, yHi, yMin, yAxis, func(v float64) float64 { return v }, rowH)
+				yLo, yAxis = snapBottom(yLo, yHi, yMin, yAxis, identity, rowH, markerClearance)
+				yHi, yAxis = snapTop(yLo, yHi, yMax, yAxis, identity, rowH, headroom)
 				sy = func(v float64) float64 { return rowBot - (v-yLo)/(yHi-yLo)*rowH }
 			}
 
@@ -351,6 +368,11 @@ const (
 	labelSize = 11.5
 	// markerR holds a single digit with room to read against a line crossing it.
 	markerR = 10.0
+	// markerClearance keeps the outermost marker off the frame; offScaleClearance
+	// additionally clears the triangle and value an off-scale setting is drawn
+	// with along the top edge.
+	markerClearance   = markerR + 4
+	offScaleClearance = markerR + 32
 )
 
 // marker is a labelled setting: the point itself carries its number, drawn as a
@@ -382,17 +404,16 @@ func movingSettings(pts []sweepPoint, value func(sweepPoint) float64, step func(
 	return out
 }
 
-// snapBottom pulls a panel's floor down onto the lowest gridline the data
-// clears, so the bottom of the frame is a labelled line rather than a blank
-// strip under one. It returns the new floor and the gridlines still inside the
-// panel. axis maps a tick to the space the panel is drawn in, which is the
-// identity for a linear panel and log10 for a logarithmic one.
+// snapBottom and snapTop pull a panel's floor and ceiling onto the outermost
+// gridlines the data clears, so each edge of the frame is a labelled line rather
+// than a blank strip beyond one. They return the new bound and the gridlines
+// still inside the panel. axis maps a tick to the space the panel is drawn in,
+// which is the identity for a linear panel and log10 for a logarithmic one.
 //
-// The lowest point keeps a marker's clearance above the frame: landing a curve
-// exactly on the axis line cuts its markers in half, so a value sitting on a
-// gridline drops the floor one line further.
-func snapBottom(lo, hi, dataMin float64, ticks []float64, axis func(float64) float64, rowH float64) (float64, []float64) {
-	const clearance = markerR + 4
+// clearance is the room the outermost point keeps from the frame, in pixels.
+// Landing a curve exactly on the frame cuts its markers in half, so a value that
+// sits on a gridline pushes the bound one line further out.
+func snapBottom(lo, hi, dataMin float64, ticks []float64, axis func(float64) float64, rowH, clearance float64) (float64, []float64) {
 	floor := lo
 	for i, t := range ticks {
 		at := axis(t)
@@ -409,13 +430,37 @@ func snapBottom(lo, hi, dataMin float64, ticks []float64, axis func(float64) flo
 			floor = at
 		}
 	}
-	kept := ticks[:0:0]
+	return floor, ticksWithin(ticks, axis, floor, hi)
+}
+
+func snapTop(lo, hi, dataMax float64, ticks []float64, axis func(float64) float64, rowH, clearance float64) (float64, []float64) {
+	ceiling := hi
+	for i := len(ticks) - 1; i >= 0; i-- {
+		at := axis(ticks[i])
+		if at < dataMax {
+			break
+		}
+		if (at-dataMax)/(at-lo)*rowH < clearance {
+			if i == len(ticks)-1 {
+				break
+			}
+			at = axis(ticks[i+1])
+		}
+		if at < ceiling {
+			ceiling = at
+		}
+	}
+	return ceiling, ticksWithin(ticks, axis, lo, ceiling)
+}
+
+func ticksWithin(ticks []float64, axis func(float64) float64, lo, hi float64) []float64 {
+	var kept []float64
 	for _, t := range ticks {
-		if axis(t) >= floor-1e-9 {
+		if at := axis(t); at >= lo-1e-9 && at <= hi+1e-9 {
 			kept = append(kept, t)
 		}
 	}
-	return floor, kept
+	return kept
 }
 
 // clipOutlierTop finds where a panel's values stop being a spread and become a
