@@ -16,7 +16,8 @@ type LossyOptions struct {
 // *LosslessOptions to EncodeLossless to use the default (effort 6).
 type LosslessOptions struct {
 	// Effort selects the encode-effort preset in 0..=6. Higher is slower and
-	// produces smaller output. Values 7..=9 are accepted but behave as 6: the
+	// produces smaller output. Values 7..=9 are accepted, but do not enable any
+	// additional options beyond 6 at the moment: the
 	// deeper searches they used to run cost many times the encode time for
 	// about 1% smaller output.
 	Effort uint8

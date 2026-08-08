@@ -146,7 +146,7 @@ func encodeLossless(img image.Image) ([]byte, error) {
 | field | meaning |
 | --- | --- |
 | `Quality` | 1..100 for lossy. Zero means 90. Ignored when `Lossless` is set. |
-| `Effort` | 0..9 for lossy, 0..6 for lossless (7..9 accepted, same as 6). Higher is slower and smaller. Zero means the default for the mode, 0 lossy and 6 lossless. Pass `webp.EffortFastest` to ask for 0 explicitly. |
+| `Effort` | 0..9 for lossy, 0..6 for lossless (7..9 accepted, but does not enable any additional options beyond 6 at the moment). Higher is slower and smaller. Zero means the default for the mode, 0 lossy and 6 lossless. Pass `webp.EffortFastest` to ask for 0 explicitly. |
 | `Lossless` | Encode with VP8L, reproducing the input exactly. |
 | `EXIF` | Raw EXIF bytes to embed as a metadata chunk. |
 
