@@ -103,8 +103,8 @@ memory table as MiB, not as MiB per megapixel.
   below. `nativewebp` has no lossy mode, so the choice only exists for VP8L.
 - **`libwebp` and `wasm` are the same encoder.** Their lossy output is
   byte-identical at every method, so their sizes and PSNR match exactly; `wasm`
-  is the cgo-free option and runs 2-3x slower than native `libwebp` on lossy,
-  1.6-3.3x on lossless.
+  is the cgo-free option and runs 2.3-3.6x slower than native `libwebp` on arm64
+  and 2.9-4.8x on amd64 in the lossy modes, 1.8-3.7x and 2.7-5.6x on lossless.
 
 On effort. The modes above are two points on each encoder's curve; `run-sweep.sh`
 walks every setting. The figures below are totals over the seven photos, arm64
@@ -145,8 +145,8 @@ first and amd64 second, and the effort numbers are each engine's own scale.
   files that happen to total the same bytes, at 43.04 and 43.11 dB. Our lossless
   ladder has no aliases on this corpus, and lossless effort caps at 6: 7 through
   9 are accepted and behave as 6.
-- **`wasm` is libwebp's curve shifted right**, 2-4x on lossy and 1.6-3.3x on
-  lossless, at the same sizes. Its lossless knob is `Method` rather than the
+- **`wasm` is libwebp's curve shifted right**, 2.4-3.8x on arm64 and 3.2-5.4x on
+  amd64 across the lossy settings, at the same sizes. Its lossless knob is `Method` rather than the
   preset level, so its curve stops at 6 and never reaches libwebp's level 9, and
   its methods 5 and 6 are not monotonic in either time or size.
 
@@ -156,9 +156,9 @@ On memory:
   peak on arm64 and 0.82-0.93x on amd64, 15-19 MiB per megapixel on the
   geometric mean. On the 5.5+ MP images that is 69-78 MiB against libwebp's
   92-106 MiB. Encoding a 4K frame costs on the order of 150-190 MiB.
-- **`wasm` costs 2.3-2.9x libwebp's peak in the lossy modes:** it carries a
+- **`wasm` costs 1.4-2.5x libwebp's peak in the lossy modes:** it carries a
   WebAssembly runtime and its own linear memory on top of the encode. That is the
-  memory half of the cgo-free tradeoff, next to the 2-4x on time.
+  memory half of the cgo-free tradeoff, next to the 2.3-4.8x on time.
 - **Lossless is where we are expensive, and it got worse with the new encoder.**
   We sit at 2.4-3.8x libwebp's peak, 127 MiB per megapixel on the geometric mean
   and up to 150: 725-821 MiB on the 5.5+ MP images on arm64 and 659-757 MiB on
