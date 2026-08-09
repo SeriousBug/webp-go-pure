@@ -50,8 +50,10 @@ point.
 
 ![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-light.svg#gh-light-mode-only)
 ![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)
+![Peak memory per megapixel for each engine, one panel per mode and machine](benchmark/charts/peak-memory-photos-light.svg#gh-light-mode-only)
+![Peak memory per megapixel for each engine, one panel per mode and machine](benchmark/charts/peak-memory-photos-dark.svg#gh-dark-mode-only)
 
-That figure is for encoding. For decoding, the comparison to make is
+Those figures are for encoding. For decoding, the comparison to make is
 `golang.org/x/image/webp`, which decodes but does not encode. We are faster than
 it in every mode on both machines, by 2% to 20% on the geometric mean; on arm64
 lossless the per-image results go either way. Against libwebp we are 2.2-5.8x
