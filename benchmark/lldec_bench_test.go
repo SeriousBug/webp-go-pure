@@ -56,7 +56,7 @@ func buildLosslessCorpus() ([]llInput, error) {
 		return out, nil
 	}
 
-	paths, err := filepath.Glob("../testdata/photos/*")
+	paths, err := filepath.Glob("testdata/photos-jpeg/*")
 	if err != nil {
 		return nil, err
 	}

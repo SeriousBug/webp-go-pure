@@ -24,7 +24,7 @@ import (
 )
 
 func main() {
-	dir := flag.String("dir", "testdata/photos", "image directory")
+	dir := flag.String("dir", "testdata/photos-jpeg", "image directory")
 	quality := flag.Int("q", 90, "quality")
 	effort := flag.Int("effort", 9, "our effort level")
 	method := flag.Int("method", 6, "libwebp method")
