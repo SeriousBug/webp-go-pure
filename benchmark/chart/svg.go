@@ -183,10 +183,16 @@ func rateDistortion(d dataset, th theme) string {
 				c.tickText(px-10, y+4, 11.5, th.muted, "end", fmt.Sprintf("%+g", v))
 			}
 		}
-		for v := 0.4; v <= xMax; v += 0.2 {
-			if v < xMin {
-				continue
+		// A corpus whose sizes all land within a few percent of libwebp's would
+		// get one labelled tick at a fixed 0.2 step, so the step follows the span.
+		step := 0.2
+		for _, s := range []float64{0.1, 0.05, 0.02} {
+			if (xMax-xMin)/step >= 3 {
+				break
 			}
+			step = s
+		}
+		for v := math.Ceil(xMin/step) * step; v <= xMax; v += step {
 			c.tickText(sx(px, v), plotBot+20, 11.5, th.muted, "middle", fmt.Sprintf("%.1f", v))
 		}
 
@@ -236,7 +242,7 @@ func decodeTime(sets []dataset, th theme) string {
 	return barPanels(sets, th, barSpec{
 		title:    "Decode time",
 		subtitle: "Geometric mean of each engine's ms/op over the test images, decoding files libwebp encoded. Each panel has its own scale.",
-		footnote: "Every engine ends at packed RGBA, so x/image and wasm pay for converting their YCbCr planes inside the measurement, as an application would. x/image is golang.org/x/image/webp, the Go project's own decoder, which has no encoder and so appears in this figure alone.",
+		footnote: "Every engine ends at straight, non-premultiplied RGBA, so an engine that returns YCbCr planes or premultiplied pixels pays for that conversion inside the measurement, as an application would. x/image is golang.org/x/image/webp, the Go project's own decoder, which has no encoder and so appears in this figure alone.",
 		modes:    decodeModes,
 		engines:  []string{engOurs, engLibwebp, engWasm, engXImage},
 		value:    func(r row) float64 { return r.ms },

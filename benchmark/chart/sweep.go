@@ -561,20 +561,29 @@ func evenTicks(lo, hi float64) []float64 {
 	return out
 }
 
+// formatMiB keeps enough decimals that two neighbouring gridlines cannot print
+// the same number. A corpus totalling under a megabyte puts its whole axis
+// inside one decimal place, where %.1f would label six gridlines "0.5".
 func formatMiB(v float64) string {
-	if v >= 10 {
+	switch {
+	case v >= 10:
 		return fmt.Sprintf("%.0f", v)
+	case v >= 1:
+		return fmt.Sprintf("%.1f", v)
+	default:
+		return fmt.Sprintf("%.3f", v)
 	}
-	return fmt.Sprintf("%.1f", v)
 }
 
 func formatSeconds(v float64) string {
 	switch {
-	case v >= 10:
-		return fmt.Sprintf("%.0f s", v)
 	case v >= 1:
 		return fmt.Sprintf("%.0f s", v)
-	default:
+	case v >= 0.1:
 		return fmt.Sprintf("%.1f s", v)
+	default:
+		// A corpus that encodes in tens of milliseconds would otherwise label its
+		// leftmost gridlines "0.0 s".
+		return fmt.Sprintf("%.2f s", v)
 	}
 }
