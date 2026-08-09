@@ -11,13 +11,19 @@
 #
 # Requirements: Go toolchain, cgo, libwebp + pkg-config (brew install webp pkg-config).
 #
-# Usage: benchmark/run.sh [budget_ms]   (default 2000)
+# Corpus selection: pass a name as the second argument or set CORPUS, and it
+# resolves under testdata/. Set IMAGES_DIR to point somewhere else entirely.
+#   photos      - the default: six JPEG photographs plus one PNG, all opaque
+#   transparent - five PNGs with an alpha channel, flat-graphics content
+# Usage: benchmark/run.sh [budget_ms] [corpus]   (defaults 2000, photos)
 set -euo pipefail
 
 BUDGET_MS="${1:-2000}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IMAGES_DIR="$REPO_ROOT/testdata/photos"
+CORPUS="${2:-${CORPUS:-photos}}"
+IMAGES_DIR="${IMAGES_DIR:-$REPO_ROOT/testdata/$CORPUS}"
+[ -d "$IMAGES_DIR" ] || { echo "no such corpus: $IMAGES_DIR" >&2; exit 1; }
 RESULTS="$(mktemp)"
 MEM="$(mktemp)"
 trap 'rm -f "$RESULTS" "$MEM"' EXIT
@@ -35,7 +41,7 @@ echo ">> Go engines, peak RSS..." >&2
   -dir "$IMAGES_DIR" -mem ) >>"$MEM"
 
 echo
-echo "Results (budget ${BUDGET_MS}ms/measurement, quality 90 for lossy):"
+echo "Results ($CORPUS corpus, budget ${BUDGET_MS}ms/measurement, quality 90 for lossy):"
 echo
 {
   echo "file,mode,engine,width,height,bytes,psnr_db,iters,ms_per_op"
@@ -48,7 +54,7 @@ echo "Decoding is a separate pass: benchmark/run-decode.sh"
 echo "The effort sweep is another: benchmark/run-sweep.sh"
 
 echo
-echo "Peak RSS (one encode per process, same settings):"
+echo "Peak RSS ($CORPUS corpus, one encode per process, same settings):"
 echo
 {
   echo "file,mode,engine,width,height,megapixels,peak_rss_mib,mib_per_mp"

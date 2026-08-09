@@ -6,14 +6,19 @@
 // script (./benchmark/chart/chart.go) as well as via `go run ./chart`.
 //
 // It reads the tables embedded in results.md (each fenced block under a "## "
-// heading is one machine) so the figures and the tables cannot drift apart, and
-// writes a light and a dark variant of each figure, which results.md selects
-// between with GitHub's #gh-light-mode-only / #gh-dark-mode-only anchors.
+// heading is one machine and one corpus, written "arm64 (Apple M4 Pro) / photos")
+// so the figures and the tables cannot drift apart, and writes a light and a dark
+// variant of each figure, which results.md selects between with GitHub's
+// #gh-light-mode-only / #gh-dark-mode-only anchors.
+//
+// Each corpus gets its own set of figures, named <figure>-<corpus>-<theme>.svg:
+// the corpora hold different images, so one figure over both would average a
+// photograph's cost against a sprite's.
 //
 //	go run ./chart -md results.md -out charts   (from benchmark/)
 //
-// Five figures, because size/quality, the effort tradeoff, encode speed, decode
-// speed and memory are different questions:
+// Five figures per corpus, because size/quality, the effort tradeoff, encode
+// speed, decode speed and memory are different questions:
 //
 //   - rate-distortion: output size and PSNR, both relative to libwebp, one point
 //     per image. Engines that are strictly better sit up and to the left.
@@ -48,9 +53,29 @@ type row struct {
 	mibPerMP           float64
 }
 
+// A dataset is one machine's rows for one corpus. label is the machine part of
+// the heading; corpus is the slug after the "/", which decides which figure file
+// the dataset is drawn into.
 type dataset struct {
-	label string
-	rows  []row
+	label  string
+	corpus string
+	rows   []row
+}
+
+// splitHeading reads "arm64 (Apple M4 Pro) / photos" as machine and corpus. A
+// heading with no corpus is the photos corpus, which is what the tables held
+// before there was a second one.
+func splitHeading(h string) (machine, corpus string) {
+	machine, corpus = h, "photos"
+	i := strings.LastIndex(h, "/")
+	if i < 0 {
+		return machine, corpus
+	}
+	rest := strings.Fields(h[i+1:])
+	if len(rest) == 0 {
+		return machine, corpus
+	}
+	return strings.TrimSpace(h[:i]), strings.ToLower(rest[0])
 }
 
 const (
@@ -115,20 +140,34 @@ func main() {
 		fatal(err)
 	}
 
-	for _, th := range themes {
-		figures := map[string]string{
-			"rate-distortion": rateDistortion(sets[0], th),
-			"encode-time":     encodeTime(sets, th),
-			"decode-time":     decodeTime(sets, th),
-			"peak-memory":     peakMemory(sets, th),
-			"effort-sweep":    effortSweep(sets, th),
+	// One figure set per corpus: the two corpora hold different images, so a
+	// figure mixing them would average a photograph's cost with a sprite's.
+	var order []string
+	byCorpus := map[string][]dataset{}
+	for _, d := range sets {
+		if _, seen := byCorpus[d.corpus]; !seen {
+			order = append(order, d.corpus)
 		}
-		for name, svg := range figures {
-			path := filepath.Join(*out, fmt.Sprintf("%s-%s.svg", name, th.name))
-			if err := os.WriteFile(path, []byte(svg), 0o644); err != nil {
-				fatal(err)
+		byCorpus[d.corpus] = append(byCorpus[d.corpus], d)
+	}
+
+	for _, corpus := range order {
+		group := byCorpus[corpus]
+		for _, th := range themes {
+			figures := map[string]string{
+				"rate-distortion": rateDistortion(group[0], th),
+				"encode-time":     encodeTime(group, th),
+				"decode-time":     decodeTime(group, th),
+				"peak-memory":     peakMemory(group, th),
+				"effort-sweep":    effortSweep(group, th),
 			}
-			fmt.Println("wrote", path)
+			for name, svg := range figures {
+				path := filepath.Join(*out, fmt.Sprintf("%s-%s-%s.svg", name, corpus, th.name))
+				if err := os.WriteFile(path, []byte(svg), 0o644); err != nil {
+					fatal(err)
+				}
+				fmt.Println("wrote", path)
+			}
 		}
 	}
 }
@@ -175,9 +214,10 @@ func parseMarkdown(path string) ([]dataset, error) {
 			}
 			i, seen := byLabel[heading]
 			if !seen {
+				machine, corpus := splitHeading(heading)
 				i = len(sets)
 				byLabel[heading] = i
-				sets = append(sets, dataset{label: heading})
+				sets = append(sets, dataset{label: machine, corpus: corpus})
 			}
 			sets[i].merge(r)
 		default:

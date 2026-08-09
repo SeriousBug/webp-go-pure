@@ -10,13 +10,19 @@
 #
 # Requirements: Go toolchain, cgo, libwebp + pkg-config (brew install webp pkg-config).
 #
-# Usage: benchmark/run-sweep.sh [budget_ms]   (default 1000)
+# Corpus selection: pass a name as the second argument or set CORPUS, and it
+# resolves under testdata/. Set IMAGES_DIR to point somewhere else entirely.
+#   photos      - the default: six JPEG photographs plus one PNG, all opaque
+#   transparent - five PNGs with an alpha channel, flat-graphics content
+# Usage: benchmark/run-sweep.sh [budget_ms] [corpus]   (defaults 1000, photos)
 set -euo pipefail
 
 BUDGET_MS="${1:-1000}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IMAGES_DIR="$REPO_ROOT/testdata/photos"
+CORPUS="${2:-${CORPUS:-photos}}"
+IMAGES_DIR="${IMAGES_DIR:-$REPO_ROOT/testdata/$CORPUS}"
+[ -d "$IMAGES_DIR" ] || { echo "no such corpus: $IMAGES_DIR" >&2; exit 1; }
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
@@ -27,7 +33,7 @@ echo ">> Effort sweep (ours + libwebp + wasm + nativewebp)..." >&2
   -dir "$IMAGES_DIR" -sweep -budget-ms "$BUDGET_MS" ) >>"$RESULTS"
 
 echo
-echo "Effort sweep (budget ${BUDGET_MS}ms/measurement, quality 90 for lossy):"
+echo "Effort sweep ($CORPUS corpus, budget ${BUDGET_MS}ms/measurement, quality 90 for lossy):"
 echo
 {
   echo "file,mode,engine,effort,width,height,bytes,psnr_db,iters,ms_per_op"

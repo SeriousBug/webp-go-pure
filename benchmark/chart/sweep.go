@@ -101,8 +101,8 @@ func effortSweep(sets []dataset, th theme) string {
 		x += panelWs[i] + colGap
 	}
 
-	note := "Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless preset level 0-9, and nativewebp's three compression levels. Time and size are totals over the whole corpus and PSNR is the mean over it; time and size are on log scales. Faster is left, smaller is down, higher quality is up. Both machines share each panel's axes, so a curve sitting further right is that machine being slower, not a different scale. A triangle on a panel's top edge is a setting whose value is off the axis, labelled setting and value and reached by a dashed segment: our lossless efforts 0 and 1 write 54 and 45 MiB, and scaling the panel to them would flatten every other engine into one band. A setting is labelled only where it moves the panel's value (1% of size, 0.1 dB of PSNR), so an unlabelled point is a setting that costs time and changes nothing: read the nearest label to its left. " +
-		"The lossy panels have to be read together, since an encoder can spend effort on either one: the same quality 90 request lands between 39 and 43 dB depending on engine and setting."
+	note := "Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless preset level 0-9, and nativewebp's three compression levels. Time and size are totals over the whole corpus and PSNR is the mean over it; time and size are on log scales. Faster is left, smaller is down, higher quality is up. Both machines share each panel's axes, so a curve sitting further right is that machine being slower, not a different scale. A triangle on a panel's top edge is a setting whose value is off the axis, labelled setting and value and reached by a dashed segment; scaling the panel to those would flatten every other engine into one band. A setting is labelled only where it moves the panel's value (1% of size, 0.1 dB of PSNR), so an unlabelled point is a setting that costs time and changes nothing: read the nearest label to its left. " +
+		"The lossy panels have to be read together, since an encoder can spend effort on either one: the same quality 90 request lands at a different PSNR for each engine and setting."
 	footTop := row0Top + rowStrid + rowH + 92
 	h := footTop + footLineH*float64(len(footnoteWrap(note))) - 2
 
@@ -511,7 +511,7 @@ func minMax(vs []float64) (float64, float64) {
 
 // axisTicks picks gridlines for a log axis, using whichever set of round
 // multiples lands 4 to 9 lines in the range. Evenly spaced values are wrong
-// here: the lossless panel runs 13 to 62 MiB, where a step of 10 puts one line
+// here: on a panel running 13 to 62 MiB, a step of 10 puts one line
 // under 20 and leaves the band every engine but ours sits in unlabelled, while
 // 1-1.5-2-3-5-7 spaces the lines the way the axis does.
 func axisTicks(lo, hi float64) []float64 {
