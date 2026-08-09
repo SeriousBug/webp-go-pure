@@ -16,46 +16,49 @@ root package is the codec itself, working on plain byte buffers.
 
 ## Performance
 
-If you can use cgo, use libwebp itself. It is the faster encoder in most modes
-and the faster decoder in all of them.
+If you can use cgo, use libwebp itself. It is the faster decoder in every mode,
+and the faster encoder in most of them.
 
 Without cgo, the alternative is libwebp compiled to WebAssembly and run through
 wazero, such as [gen2brain/webp](https://github.com/gen2brain/webp). That costs
 both time and memory, and webp-go-pure comes out ahead of it on photographs:
 
-- **Lossy:** 1.2-3.4x faster, at 1.6-3.8x lower peak memory.
-- **Lossless:** 1.7-2.9x faster, at roughly the same peak memory.
+- **Lossy:** 1.2-3.4x faster, at 1.6-2.9x lower peak memory.
+- **Lossless:** 1.9-3.5x faster, at 1.3-1.8x lower peak memory.
 
-Against libwebp itself on photographs, lossless is now a close match on size: our
+Against libwebp itself on photographs, lossless is a close match on size: our
 effort 6 writes 1.66 MB per image on the geometric mean against libwebp's
-1.65 MB, half a percent apart, and lands under the WASM engine's 1.66 MB. Time is
-where we still trail, and by how much depends on the machine: 1.07x libwebp's on
-an M4 Pro, 1.68x on a Ryzen 7 5700G. On lossy, our effort 8 writes 1.7% more than
-libwebp's method 6 at the same PSNR, for 1.17x the time on the M4 Pro and 1.03x
-on the Ryzen.
+1.65 MB, half a percent apart, and lands under the WASM engine's 1.66 MB. On time
+it depends on the machine: we are level on an M4 Pro, 0.99x libwebp's on the
+geometric mean, and behind on a Ryzen 7 5700G at 1.47x. On lossy, our effort 8
+writes 1.7% more than libwebp's method 6 at the same PSNR, for 1.22x the time on
+the M4 Pro and 1.03x on the Ryzen.
 
 For lossless encoding only, there is another pure Go encoder,
 [nativewebp](https://github.com/HugoSmits86/nativewebp). We are smaller and
 faster than it at once, at more than one setting:
 
 - **Photographs:** our effort 0 writes 15.69 MiB of the test corpus where its
-  best setting writes 17.39 MiB, 9.8% smaller, in a fifth of the time. Our
-  efforts 0 through 4 all beat its best setting on both size and time.
+  best setting writes 17.39 MiB, 9.8% smaller, in a sixth of the time. Our
+  efforts 0 through 5 all beat its best setting on both size and time.
 - **Flat graphics with alpha:** our effort 0 is 0.5% smaller than its best
-  setting and 3.4% smaller than its fastest, at 3-4x the speed of that fastest
+  setting and 3.4% smaller than its fastest, at 4x the speed of that fastest
   setting.
 
-It still uses far less memory than we do for lossless, 0.23-0.40x our peak on
+It still uses less memory than we do for lossless, 0.43-0.63x our peak on
 photographs, and that gap is the reason to reach for it.
 
 Lossy encoding now keeps alpha, in an `ALPH` chunk, where it used to refuse any
-input with an alpha channel. On the alpha corpus a lossy encode lands within
-0.4 dB of libwebp at matched settings.
+input with an alpha channel. On the alpha corpus a lossy encode lands 0.37 dB
+below libwebp on the corpus mean at matched fast settings.
 
 Peak memory is the number to check before using lossless on large images: we cost
-2.4-3.8x libwebp's peak there, 659-821 MiB to encode a 5.5 megapixel image
-against libwebp's 201-219 MiB. The lossy modes are the other way around, and we
-are the lightest of the three.
+1.4-2.1x libwebp's peak there, 389-446 MiB to encode a 5.5 megapixel image
+against libwebp's 201-220 MiB, where the WASM engine costs 577-700 MiB. The lossy
+modes are cheaper for everyone, and there we are the lightest of the three.
+
+Encoder output is byte-identical on amd64 and arm64, verified over every row of
+both benchmark corpora.
 
 Effort is the knob to reach for either way. The figure below is every setting of
 every encoder: pick the time and size you want, then read the setting off the
@@ -70,9 +73,9 @@ point.
 
 Those figures are for encoding. For decoding, the comparison to make is
 `golang.org/x/image/webp`, which decodes but does not encode. We are faster than
-it in every mode on both machines and both corpora, by 2% to 21% on the geometric
+it in every mode on both machines and both corpora, by 2% to 20% on the geometric
 mean; on arm64 lossless the per-image results go either way. Against libwebp we
-are 2.1-5.8x slower on lossy and 1.5-2.9x on lossless.
+are 2.2-5.8x slower on lossy and 1.5-3.1x on lossless.
 
 Full tables, PSNR and peak-memory figures, both test corpora and the method are
 in [benchmark/results.md](benchmark/results.md).
