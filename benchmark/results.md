@@ -282,37 +282,37 @@ One set of figures per corpus, regenerated from the tables below with
 
 ### photos
 
-[![Time vs file size at each effort level, photos corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-photos-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/effort-sweep-photos-light.svg)
-[![Time vs file size at each effort level, photos corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/effort-sweep-photos-dark.svg)
+![Time vs file size at each effort level, photos corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-photos-light.svg#gh-light-mode-only)
+![Time vs file size at each effort level, photos corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)
 
-[![Size and quality against libwebp on the photos corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-photos-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/rate-distortion-photos-light.svg)
-[![Size and quality against libwebp on the photos corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-photos-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/rate-distortion-photos-dark.svg)
+![Size and quality against libwebp on the photos corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-photos-light.svg#gh-light-mode-only)
+![Size and quality against libwebp on the photos corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-photos-dark.svg#gh-dark-mode-only)
 
-[![Encode time per image for each engine on the photos corpus, one panel per mode and machine, with bars that run off the panel drawn fading out under an arrow](charts/encode-time-photos-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/encode-time-photos-light.svg)
-[![Encode time per image for each engine on the photos corpus, one panel per mode and machine, with bars that run off the panel drawn fading out under an arrow](charts/encode-time-photos-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/encode-time-photos-dark.svg)
+![Encode time per image for each engine on the photos corpus, one panel per mode and machine, with bars that run off the panel drawn fading out under an arrow](charts/encode-time-photos-light.svg#gh-light-mode-only)
+![Encode time per image for each engine on the photos corpus, one panel per mode and machine, with bars that run off the panel drawn fading out under an arrow](charts/encode-time-photos-dark.svg#gh-dark-mode-only)
 
-[![Decode time per image for each engine on the photos corpus, one panel per mode and machine, on the same bar layout as the encode time figure, with x/image added](charts/decode-time-photos-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/decode-time-photos-light.svg)
-[![Decode time per image for each engine on the photos corpus, one panel per mode and machine, on the same bar layout as the encode time figure, with x/image added](charts/decode-time-photos-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/decode-time-photos-dark.svg)
+![Decode time per image for each engine on the photos corpus, one panel per mode and machine, on the same bar layout as the encode time figure, with x/image added](charts/decode-time-photos-light.svg#gh-light-mode-only)
+![Decode time per image for each engine on the photos corpus, one panel per mode and machine, on the same bar layout as the encode time figure, with x/image added](charts/decode-time-photos-dark.svg#gh-dark-mode-only)
 
-[![Peak memory per megapixel for each engine on the photos corpus, one panel per mode and machine, on the same bar layout as the encode time figure](charts/peak-memory-photos-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/peak-memory-photos-light.svg)
-[![Peak memory per megapixel for each engine on the photos corpus, one panel per mode and machine, on the same bar layout as the encode time figure](charts/peak-memory-photos-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/peak-memory-photos-dark.svg)
+![Peak memory per megapixel for each engine on the photos corpus, one panel per mode and machine, on the same bar layout as the encode time figure](charts/peak-memory-photos-light.svg#gh-light-mode-only)
+![Peak memory per megapixel for each engine on the photos corpus, one panel per mode and machine, on the same bar layout as the encode time figure](charts/peak-memory-photos-dark.svg#gh-dark-mode-only)
 
 ### transparent
 
-[![Time vs file size at each effort level, alpha corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine](charts/effort-sweep-transparent-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/effort-sweep-transparent-light.svg)
-[![Time vs file size at each effort level, alpha corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine](charts/effort-sweep-transparent-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/effort-sweep-transparent-dark.svg)
+![Time vs file size at each effort level, alpha corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine](charts/effort-sweep-transparent-light.svg#gh-light-mode-only)
+![Time vs file size at each effort level, alpha corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine](charts/effort-sweep-transparent-dark.svg#gh-dark-mode-only)
 
-[![Size and quality against libwebp on the alpha corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-transparent-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/rate-distortion-transparent-light.svg)
-[![Size and quality against libwebp on the alpha corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-transparent-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/rate-distortion-transparent-dark.svg)
+![Size and quality against libwebp on the alpha corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-transparent-light.svg#gh-light-mode-only)
+![Size and quality against libwebp on the alpha corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-transparent-dark.svg#gh-dark-mode-only)
 
-[![Encode time per image for each engine on the alpha corpus, one panel per mode and machine](charts/encode-time-transparent-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/encode-time-transparent-light.svg)
-[![Encode time per image for each engine on the alpha corpus, one panel per mode and machine](charts/encode-time-transparent-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/encode-time-transparent-dark.svg)
+![Encode time per image for each engine on the alpha corpus, one panel per mode and machine](charts/encode-time-transparent-light.svg#gh-light-mode-only)
+![Encode time per image for each engine on the alpha corpus, one panel per mode and machine](charts/encode-time-transparent-dark.svg#gh-dark-mode-only)
 
-[![Decode time per image for each engine on the alpha corpus, one panel per mode and machine, with x/image added](charts/decode-time-transparent-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/decode-time-transparent-light.svg)
-[![Decode time per image for each engine on the alpha corpus, one panel per mode and machine, with x/image added](charts/decode-time-transparent-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/decode-time-transparent-dark.svg)
+![Decode time per image for each engine on the alpha corpus, one panel per mode and machine, with x/image added](charts/decode-time-transparent-light.svg#gh-light-mode-only)
+![Decode time per image for each engine on the alpha corpus, one panel per mode and machine, with x/image added](charts/decode-time-transparent-dark.svg#gh-dark-mode-only)
 
-[![Peak memory per megapixel for each engine on the alpha corpus, one panel per mode and machine](charts/peak-memory-transparent-light.svg#gh-light-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/peak-memory-transparent-light.svg)
-[![Peak memory per megapixel for each engine on the alpha corpus, one panel per mode and machine](charts/peak-memory-transparent-dark.svg#gh-dark-mode-only)](https://raw.githubusercontent.com/SeriousBug/webp-go-pure/main/benchmark/charts/peak-memory-transparent-dark.svg)
+![Peak memory per megapixel for each engine on the alpha corpus, one panel per mode and machine](charts/peak-memory-transparent-light.svg#gh-light-mode-only)
+![Peak memory per megapixel for each engine on the alpha corpus, one panel per mode and machine](charts/peak-memory-transparent-dark.svg#gh-dark-mode-only)
 
 ## arm64 (Apple M4 Pro) / photos
 
