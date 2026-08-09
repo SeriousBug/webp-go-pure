@@ -740,12 +740,14 @@ func elosslessChannelEntropyOfCounts(counts []uint32) float64 {
 	sum := 0.0
 	for _, count := range counts {
 		total += uint64(count)
-		sum -= float64(count) * elosslessLog2OfCount(uint64(count))
+		// The conversions keep the products out of a fused multiply-add. See
+		// enc_fma_test.go.
+		sum -= float64(float64(count) * elosslessLog2OfCount(uint64(count)))
 	}
 	if total == 0 {
 		return 0.0
 	}
-	return sum + float64(total)*elosslessLog2OfCount(total)
+	return sum + float64(float64(total)*elosslessLog2OfCount(total))
 }
 
 func (w *elosslessEntropyWork) setEntropy(h *elosslessHistogramSet, nz *elosslessHistogramNonZeros) float64 {

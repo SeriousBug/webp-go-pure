@@ -272,7 +272,9 @@ func elosslessChannelSymbolCosts(counts []uint32) []int32 {
 		if bits > elosslessMaxSymbolCostBits {
 			bits = elosslessMaxSymbolCostBits
 		}
-		out[i] = int32(bits*elosslessCostScale + 0.5)
+		// The conversion keeps the product out of a fused multiply-add. See
+		// enc_fma_test.go.
+		out[i] = int32(float64(bits*elosslessCostScale) + 0.5)
 	}
 	return out
 }

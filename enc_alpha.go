@@ -93,8 +93,8 @@ func elossyFilterAlphaPlane(alpha []byte, filter uint8, width, height int) []byt
 
 // elossyAlphaFilterCost estimates what a filtered plane costs to store, as the
 // zero-order entropy of its bytes in bits. Ranking the four filters this way
-// costs one pass each instead of four trial compressions, which is how libwebp
-// picks a filter too.
+// costs one pass each instead of four trial compressions, which is why the
+// cheap effort levels use it to narrow the field before trial encoding.
 func elossyAlphaFilterCost(filtered []byte) float64 {
 	var histogram [256]int
 	for _, v := range filtered {
@@ -107,7 +107,9 @@ func elossyAlphaFilterCost(filtered []byte) float64 {
 			continue
 		}
 		p := float64(count) / total
-		cost -= float64(count) * math.Log2(p)
+		// The conversion keeps the product out of a fused multiply-subtract.
+		// See enc_fma_test.go.
+		cost -= float64(float64(count) * math.Log2(p))
 	}
 	return cost
 }
