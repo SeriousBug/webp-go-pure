@@ -4,10 +4,12 @@ Pure Go WebP decoder and encoder. No cgo, no external dependencies.
 
     go get github.com/SeriousBug/webp-go-pure
 
-Decodes lossy `VP8` and lossless `VP8L` still images, decodes animated WebP into
-a composited frame sequence, and encodes still images as lossy or lossless.
-Alpha comes through `ALPH` chunks on lossy still images and on lossy animation
-frames.
+Decodes any WebP still image and decodes animated WebP into a composited frame
+sequence, ready to display. Encodes still images, lossy or lossless.
+
+Transparency works in every mode, including lossy: your alpha channel comes back
+exactly as you gave it, and only the color is compressed with loss. Encoder
+output is byte-identical on amd64 and arm64.
 
 The `std` subpackage implements the standard library's codec interfaces, so
 `image.Image` goes in and comes out and `image.Decode` works. Underneath it, the
@@ -15,39 +17,51 @@ root package is the codec itself, working on plain byte buffers.
 
 ## Performance
 
-If you can use cgo, use libwebp itself. It encodes faster than webp-go-pure at
-slightly better quality per byte.
+If you can use cgo, use libwebp itself. It is the faster decoder in every mode,
+and the faster encoder in most of them.
 
 Without cgo, the alternative is libwebp compiled to WebAssembly and run through
 wazero, such as [gen2brain/webp](https://github.com/gen2brain/webp). That costs
 both time and memory, and webp-go-pure comes out ahead of it:
 
-- **Lossy:** 1.1-3.4x faster, at 1.7-3.8x lower peak memory.
-- **Lossless:** roughly even on time (0.9-2.3x), at 1.2-1.8x lower peak memory.
+- **Lossy:** 1.2-3.4x faster, at 1.6-2.9x lower peak memory.
+- **Lossless:** 1.9-3.5x faster, at 1.3-1.8x lower peak memory.
+
+Against libwebp itself, lossless is a close match on size, half a percent apart
+at our effort 6, and on time we range from level with it to 1.47x slower
+depending on the machine. Our lossy effort 8 writes 1.7% more than its method 6
+at the same PSNR, for 1.0-1.2x the time.
 
 For lossless encoding only, there is another pure Go encoder,
-[nativewebp](https://github.com/HugoSmits86/nativewebp). Its compression level
-does almost nothing (its fastest and slowest settings differ by 0.06% in output
-size), so it sits at one point rather than on a curve. At the effort where we
-match its speed, our effort 3, we write files 8% smaller than it does. It does
-use less than half our peak memory.
+[nativewebp](https://github.com/HugoSmits86/nativewebp). We are smaller and
+faster than it at the same time: our effort 0 writes 9.8% smaller files than its
+best setting in a sixth of the time, and everything up to our effort 5 still
+beats that setting on both. It does use less memory than we do, 0.43-0.63x our
+peak, and that gap is the reason to reach for it.
+
+Peak memory is the number to check before using lossless on large images: we cost
+1.4-2.1x libwebp's peak there, and around 400 MiB to encode a 5.5 megapixel
+image. The lossy modes are cheaper for everyone, and there we are the lightest of
+the three.
 
 Effort is the knob to reach for either way. The figure below is every setting of
 every encoder: pick the time and size you want, then read the setting off the
 point.
 
-![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-light.svg#gh-light-mode-only)
-![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-dark.svg#gh-dark-mode-only)
-![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](benchmark/charts/peak-memory-light.svg#gh-light-mode-only)
-![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](benchmark/charts/peak-memory-dark.svg#gh-dark-mode-only)
+![Time vs file size at each effort level: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-light.svg#gh-light-mode-only)
+![Time vs file size at each effort level: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)
+![Peak memory per megapixel for each engine, one panel per mode and machine](benchmark/charts/peak-memory-photos-light.svg#gh-light-mode-only)
+![Peak memory per megapixel for each engine, one panel per mode and machine](benchmark/charts/peak-memory-photos-dark.svg#gh-dark-mode-only)
 
 Those figures are for encoding. For decoding, the comparison to make is
 `golang.org/x/image/webp`, which decodes but does not encode. We are faster than
-it in every mode on both machines, by 1% to 18% on the geometric mean; on arm64
-lossless the per-image results go either way. Against libwebp we are 2.4-5.8x
-slower on lossy and 1.5-2.9x on lossless.
+it in every mode on both machines, by 2% to 20% on the geometric mean; on arm64
+lossless the per-image results go either way. Against libwebp we are 2.2-5.8x
+slower on lossy and 1.5-3.1x on lossless.
 
-Full tables, PSNR and peak-memory figures, the test corpus and the method are in
+The numbers above are for photographs. Flat graphics with alpha are a different
+encoding problem and the rankings shift; full tables, PSNR and peak-memory
+figures, both test corpora and the method are in
 [benchmark/results.md](benchmark/results.md).
 
 ## Library API
@@ -103,9 +117,9 @@ func writeWebP(w io.Writer, img image.Image) error {
 }
 ```
 
-Set `Lossless` to encode with VP8L instead, which reproduces the input exactly
-and is the only mode that keeps an alpha channel. `Effort` runs 0..9 for lossy and 0..6 for
-lossless, and trades encode time for file size.
+Set `Lossless` to encode with VP8L instead, which reproduces the input exactly.
+`Effort` runs 0..9 for lossy and 0..6 for lossless, and trades encode time for
+file size.
 
 ### Transcoding
 

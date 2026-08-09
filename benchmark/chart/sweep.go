@@ -101,14 +101,13 @@ func effortSweep(sets []dataset, th theme) string {
 		x += panelWs[i] + colGap
 	}
 
-	note := "Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless preset level 0-9, and nativewebp's three compression levels. Time and size are totals over the whole corpus and PSNR is the mean over it; time and size are on log scales. Faster is left, smaller is down, higher quality is up. Both machines share each panel's axes, so a curve sitting further right is that machine being slower, not a different scale. A triangle on a panel's top edge is a setting whose value is off the axis, labelled setting and value and reached by a dashed segment: our lossless efforts 0 and 1 write 54 and 45 MiB, and scaling the panel to them would flatten every other engine into one band. A setting is labelled only where it moves the panel's value (1% of size, 0.1 dB of PSNR), so an unlabelled point is a setting that costs time and changes nothing: read the nearest label to its left. " +
-		"The lossy panels have to be read together, since an encoder can spend effort on either one: the same quality 90 request lands between 39 and 43 dB depending on engine and setting."
+	note := "Each point is labelled with the effort number used to get that data point. Time and size are totals over the whole set of images, PSNR is the mean. Time and size are on log scales. An arrow at the top of a panel indicates a value that is off the chart. Any effort setting that did not produce a significant change in file size or PSNR compared to the previous effort level for that encoder is not labelled."
 	footTop := row0Top + rowStrid + rowH + 92
 	h := footTop + footLineH*float64(len(footnoteWrap(note))) - 2
 
 	c := &canvas{}
-	header(c, th, h, "What effort buys",
-		"Every effort setting of every engine, encoding the same corpus. Pick the tradeoff you want, then read the setting off the point.")
+	header(c, th, h, "Time vs file size at each effort level",
+		"Effort setting of every encoder. Closer to the bottom left, the better.")
 	var entries []struct{ color, label string }
 	for _, eng := range engines {
 		entries = append(entries, struct{ color, label string }{color(eng), names[eng]})
@@ -511,7 +510,7 @@ func minMax(vs []float64) (float64, float64) {
 
 // axisTicks picks gridlines for a log axis, using whichever set of round
 // multiples lands 4 to 9 lines in the range. Evenly spaced values are wrong
-// here: the lossless panel runs 13 to 62 MiB, where a step of 10 puts one line
+// here: on a panel running 13 to 62 MiB, a step of 10 puts one line
 // under 20 and leaves the band every engine but ours sits in unlabelled, while
 // 1-1.5-2-3-5-7 spaces the lines the way the axis does.
 func axisTicks(lo, hi float64) []float64 {
@@ -561,20 +560,29 @@ func evenTicks(lo, hi float64) []float64 {
 	return out
 }
 
+// formatMiB keeps enough decimals that two neighbouring gridlines cannot print
+// the same number. A corpus totalling under a megabyte puts its whole axis
+// inside one decimal place, where %.1f would label six gridlines "0.5".
 func formatMiB(v float64) string {
-	if v >= 10 {
+	switch {
+	case v >= 10:
 		return fmt.Sprintf("%.0f", v)
+	case v >= 1:
+		return fmt.Sprintf("%.1f", v)
+	default:
+		return fmt.Sprintf("%.3f", v)
 	}
-	return fmt.Sprintf("%.1f", v)
 }
 
 func formatSeconds(v float64) string {
 	switch {
-	case v >= 10:
-		return fmt.Sprintf("%.0f s", v)
 	case v >= 1:
 		return fmt.Sprintf("%.0f s", v)
-	default:
+	case v >= 0.1:
 		return fmt.Sprintf("%.1f s", v)
+	default:
+		// A corpus that encodes in tens of milliseconds would otherwise label its
+		// leftmost gridlines "0.0 s".
+		return fmt.Sprintf("%.2f s", v)
 	}
 }

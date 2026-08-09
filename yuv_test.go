@@ -183,16 +183,16 @@ func TestEncodeLossyYUVRoundTripsWithoutDrift(t *testing.T) {
 	}
 }
 
-func TestEncodeLossyYUVRejectsAlpha(t *testing.T) {
+func TestEncodeLossyYUVRejectsShortAlphaPlane(t *testing.T) {
 	img := YUVImage{
 		Width: 2, Height: 2,
 		Y: make([]byte, 4), U: make([]byte, 1), V: make([]byte, 1),
 		YStride: 2, UVStride: 1,
-		A: make([]byte, 4), AStride: 2,
+		A: make([]byte, 3), AStride: 2,
 	}
 	_, err := EncodeLossyYUV(&img, nil)
-	if !errors.Is(err, ErrLossyAlpha) {
-		t.Fatalf("expected ErrLossyAlpha, got %v", err)
+	if !errors.Is(err, ErrInvalidParam) {
+		t.Fatalf("expected ErrInvalidParam, got %v", err)
 	}
 }
 

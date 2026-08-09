@@ -11,13 +11,19 @@
 #
 # Requirements: as run.sh (Go toolchain, cgo, libwebp + pkg-config).
 #
-# Usage: benchmark/run-decode.sh [budget_ms]   (default 2000)
+# Corpus selection: pass a name as the second argument or set CORPUS, and it
+# resolves under testdata/. Set IMAGES_DIR to point somewhere else entirely.
+#   photos      - the default: six JPEG photographs plus one PNG, all opaque
+#   transparent - five PNGs with an alpha channel, flat-graphics content
+# Usage: benchmark/run-decode.sh [budget_ms] [corpus]   (defaults 2000, photos)
 set -euo pipefail
 
 BUDGET_MS="${1:-2000}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IMAGES_DIR="$REPO_ROOT/testdata/photos"
+CORPUS="${2:-${CORPUS:-photos}}"
+IMAGES_DIR="${IMAGES_DIR:-$REPO_ROOT/testdata/$CORPUS}"
+[ -d "$IMAGES_DIR" ] || { echo "no such corpus: $IMAGES_DIR" >&2; exit 1; }
 RESULTS="$(mktemp)"
 trap 'rm -f "$RESULTS"' EXIT
 
@@ -29,7 +35,7 @@ echo ">> Go engines (ours + libwebp + wasm + x/image)..." >&2
 
 
 echo
-echo "Decode results (budget ${BUDGET_MS}ms/measurement, inputs encoded by libwebp):"
+echo "Decode results ($CORPUS corpus, budget ${BUDGET_MS}ms/measurement, inputs encoded by libwebp):"
 echo
 {
   echo "file,mode,engine,width,height,bytes,psnr_db,iters,ms_per_op"

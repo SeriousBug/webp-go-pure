@@ -32,10 +32,13 @@ const (
 	elosslessMatchChainDepthLevel3                = 16
 	elosslessMatchChainDepthLevel4                = 32
 	elosslessMaxFallbackDistance                  = (1 << 20) - 120
-	elosslessApproxLiteralCostBits                = 32
-	elosslessApproxCacheCostBits                  = 8
-	elosslessApproxCopyLengthSymbolBits           = 8
-	elosslessApproxCopyDistanceSymbolBits         = 8
+	// Match scoring works in elosslessCostScale-ths of a bit so that costs read
+	// off a histogram keep their fractional part through the parse.
+	elosslessCostScale                    = 16
+	elosslessApproxLiteralCostBits        = 32
+	elosslessApproxCacheCostBits          = 8
+	elosslessApproxCopyLengthSymbolBits   = 8
+	elosslessApproxCopyDistanceSymbolBits = 8
 
 	elosslessIntMax = int(^uint(0) >> 1)
 )
@@ -59,16 +62,34 @@ const (
 	elosslessTokCopy
 )
 
-// Field types are sized to the VP8L limits rather than to int: the token stream
-// is allocated at one token per pixel, so every byte here costs 4 MB per
-// megapixel of source.
+// The token stream is allocated at one token per pixel, so every byte here costs
+// 4 MB per megapixel of source and the encoder holds more than one stream at a
+// time. Fields are therefore both sized to the VP8L limits and overlapped: a
+// token is exactly one of a literal, a cache reference or a copy, so the pixel
+// value and the copy distance share a word, and the copy length and the cache
+// key share a half-word. That packs a token into 8 bytes instead of 16.
 type elosslessToken struct {
-	argb     uint32
-	distance int32
-	length   uint16
-	key      uint16
-	kind     uint8
+	value uint32
+	aux   uint16
+	kind  uint8
 }
+
+func elosslessLiteralToken(argb uint32) elosslessToken {
+	return elosslessToken{kind: elosslessTokLiteral, value: argb}
+}
+
+func elosslessCacheToken(key uint16) elosslessToken {
+	return elosslessToken{kind: elosslessTokCache, aux: key}
+}
+
+func elosslessCopyToken(distance int32, length uint16) elosslessToken {
+	return elosslessToken{kind: elosslessTokCopy, value: uint32(distance), aux: length}
+}
+
+func (t elosslessToken) argb() uint32    { return t.value }
+func (t elosslessToken) distance() int32 { return int32(t.value) }
+func (t elosslessToken) length() uint16  { return t.aux }
+func (t elosslessToken) key() uint16     { return t.aux }
 
 type elosslessPrefixCode struct {
 	symbol     int
@@ -107,7 +128,15 @@ type elosslessPaletteCandidate struct {
 }
 
 type elosslessTokenBuildOptions struct {
-	colorCacheBits    int
+	colorCacheBits int
+	// costCacheBits is the color cache size the match cost model assumes when
+	// the cache is applied to the token stream after the parse instead of during
+	// it. It only affects scoring, never what the tokenizer emits.
+	costCacheBits int
+	// symbolCosts, when set, replaces the flat per-symbol cost constants in the
+	// match scoring with code lengths measured from a previous tokenization of
+	// the same image.
+	symbolCosts       *elosslessSymbolCosts
 	matchChainDepth   int
 	useWindowOffsets  bool
 	windowOffsetLimit int
@@ -138,12 +167,45 @@ type elosslessHistogramCandidate struct {
 }
 
 type elosslessLosslessSearchProfile struct {
-	transformSearchLevel  uint8
+	transformSearchLevel uint8
+	// matchSearchLevel widens the LZ77 match search from the row and previous-row
+	// matches at level 0 up to deep hash chains with lazy matching at level 4.
+	// Every effort sits at 0: once the parse scores matches against measured
+	// symbol costs, the extra matches the deeper levels find are ones a greedy
+	// parse cannot spend well, and they cost size on both graphics and photos.
 	matchSearchLevel      uint8
 	entropySearchLevel    uint8
 	useColorCache         bool
 	shortlistKeep         int
 	earlyStopRatioPercent int
+	// fixedColorCacheBits, when non-zero, uses a color cache of exactly this
+	// many bits instead of running elosslessSelectBestColorCacheBits. The search
+	// costs one estimate pass per candidate size and, up to effort 5, picks a
+	// size no better than the largest one for the time it spends.
+	fixedColorCacheBits int
+	// tokenCostPasses is how many times the LZ77 parse is re-run against
+	// per-symbol costs measured from the previous parse's own token stream. Each
+	// pass costs roughly one tokenization; zero leaves the parse on the flat cost
+	// constants.
+	tokenCostPasses int
+	// predictorTileBits lists the tile sizes to build tiled predictor plans at.
+	// The lowest profiles use it for the one pre-picked plan that stands in for
+	// the transform search they do not run; the highest profiles search every
+	// listed size, because the best tile size is content-dependent.
+	predictorTileBits []int
+}
+
+// Predictor tile sizes each effort tries. Sharing one scorer makes each extra
+// size cheap to score, and only the best-scoring size is encoded, so the higher
+// efforts widen the range rather than replacing it.
+var elosslessPredictorTileBitsByEffort = [][]int{
+	{6},
+	{5, 6},
+	{5, 6},
+	{5, 6},
+	{4, 5, 6},
+	{3, 4, 5, 6},
+	{3, 4, 5, 6},
 }
 
 func elosslessDefaultOptions() LosslessOptions {
@@ -212,19 +274,19 @@ func elosslessValidateOptions(options *LosslessOptions) error {
 func elosslessSearchProfile(optimizationLevel uint8) elosslessLosslessSearchProfile {
 	switch optimizationLevel {
 	case 0:
-		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100}
+		return elosslessLosslessSearchProfile{0, 0, 0, false, 1, 100, elosslessMaxCacheBits, 0, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 1:
-		return elosslessLosslessSearchProfile{1, 1, 0, false, 2, 100}
+		return elosslessLosslessSearchProfile{1, 0, 0, false, 2, 101, elosslessMaxCacheBits, 0, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 2:
-		return elosslessLosslessSearchProfile{2, 2, 1, true, 2, 100}
+		return elosslessLosslessSearchProfile{2, 0, 1, true, 2, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 3:
-		return elosslessLosslessSearchProfile{3, 2, 1, true, 3, 101}
+		return elosslessLosslessSearchProfile{3, 0, 2, true, 3, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 4:
-		return elosslessLosslessSearchProfile{4, 3, 2, true, 3, 101}
+		return elosslessLosslessSearchProfile{4, 0, 2, true, 3, 101, elosslessMaxCacheBits, 2, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	case 5:
-		return elosslessLosslessSearchProfile{5, 4, 2, true, 4, 101}
+		return elosslessLosslessSearchProfile{5, 0, 2, true, 4, 101, elosslessMaxCacheBits, 3, elosslessPredictorTileBitsByEffort[optimizationLevel]}
 	default:
-		return elosslessLosslessSearchProfile{6, 4, 3, true, 4, 101}
+		return elosslessLosslessSearchProfile{6, 0, 3, true, 4, 101, 0, 3, elosslessPredictorTileBitsByEffort[elosslessMaxOptimizationLevel]}
 	}
 }
 
@@ -310,7 +372,7 @@ func elosslessCloneHistogramSet(src *elosslessHistogramSet) elosslessHistogramSe
 
 func elosslessTokenLen(token elosslessToken) int {
 	if token.kind == elosslessTokCopy {
-		return int(token.length)
+		return int(token.length())
 	}
 	return 1
 }

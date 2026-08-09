@@ -36,8 +36,7 @@ type YUVImage struct {
 	Range ColorRange
 	// A, when non-nil, is a full-resolution straight-alpha plane of Height rows
 	// at AStride bytes per row. [DecodeYUV] sets it when the container carries
-	// an ALPH chunk. The lossy encoder does not support alpha, so
-	// [EncodeLossyYUV] rejects input that sets it.
+	// an ALPH chunk, and [EncodeLossyYUV] stores it as one.
 	A []byte
 	// AStride is the byte offset between successive rows of A.
 	AStride int
@@ -95,8 +94,8 @@ func DecodeYUV(data []byte) (YUVImage, error) {
 // container, skipping the RGBA to YUV conversion [EncodeLossy] performs. A nil
 // opts uses the defaults (quality 90, effort 0).
 //
-// The lossy encoder does not support alpha, so a non-nil [YUVImage.A] is
-// rejected with an error matching [ErrLossyAlpha].
+// A non-nil [YUVImage.A] is compressed losslessly into an ALPH chunk alongside
+// the lossy color planes.
 func EncodeLossyYUV(img *YUVImage, opts *LossyOptions) ([]byte, error) {
 	o := elossyDefaultOptions()
 	if opts != nil {
@@ -116,11 +115,20 @@ func EncodeLossyYUV(img *YUVImage, opts *LossyOptions) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	var plane []byte
+	if img.A != nil {
+		plane = elossyAlphaPlaneFromStrided(img.Width, img.Height, img.A, img.AStride)
+	}
+	alpha, err := elossyBuildAlphaChunk(img.Width, img.Height, plane, o.Effort)
+	if err != nil {
+		return nil, err
+	}
 	return wrapStillWebp(stillImageChunk{
 		fourcc:   [4]byte{'V', 'P', '8', ' '},
 		payload:  vp8,
 		width:    img.Width,
 		height:   img.Height,
-		hasAlpha: false,
+		alpha:    alpha,
+		hasAlpha: alpha != nil,
 	}, o.EXIF)
 }

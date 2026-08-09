@@ -531,7 +531,9 @@ func buildElossyEntropyCost() [256]uint16 {
 		if pp < 1 {
 			pp = 1
 		}
-		table[p] = uint16((-math.Log2(float64(pp)/256.0))*256.0 + 0.5)
+		// The conversion keeps the product out of a fused multiply-add. See
+		// enc_fma_test.go.
+		table[p] = uint16(float64((-math.Log2(float64(pp)/256.0))*256.0) + 0.5)
 	}
 	return table
 }

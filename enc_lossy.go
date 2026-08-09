@@ -150,11 +150,6 @@ func elossyValidateRgba(width, height int, rgba []byte) error {
 	if len(rgba) != expectedLen {
 		return encInvalidParam("RGBA buffer length does not match dimensions")
 	}
-	for i := 0; i+4 <= len(rgba); i += 4 {
-		if rgba[i+3] != 0xff {
-			return encAlphaUnsupported("lossy encoder does not support alpha yet")
-		}
-	}
 	return nil
 }
 

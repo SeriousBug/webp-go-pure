@@ -4,10 +4,25 @@ Compares this pure-Go library against other WebP codecs for output size, encode
 speed and decode speed. Re-runnable:
 
 ```sh
-benchmark/run.sh        [budget_ms]   # encoding, default budget 2000ms per measurement
-benchmark/run-decode.sh [budget_ms]   # decoding
-benchmark/run-sweep.sh  [budget_ms]   # encoding at every effort setting, default 1000ms
+benchmark/run.sh        [budget_ms] [corpus]   # encoding, default budget 2000ms per measurement
+benchmark/run-mem.sh    [corpus]               # the peak-RSS pass on its own
+benchmark/run-decode.sh [budget_ms] [corpus]   # decoding
+benchmark/run-sweep.sh  [budget_ms] [corpus]   # encoding at every effort setting, default 1000ms
 ```
+
+## Corpora
+
+`corpus` names a directory under `testdata/` and defaults to `photos`; `CORPUS`
+does the same as an environment variable, and `IMAGES_DIR` points somewhere else
+entirely.
+
+| Corpus | What it is |
+| --- | --- |
+| `photos` | six JPEG photographs and one PNG, 0.81-6.29 MP, fully opaque |
+| `transparent` | five PNGs from Google's WebP alpha gallery, 0.05-0.48 MP, flat graphics, 18-75% fully transparent |
+
+The two are different encoding problems, and an engine that wins on one can lose
+on the other, so results are reported per corpus rather than pooled.
 
 ## Engines
 
@@ -98,15 +113,26 @@ budget elapses, reporting mean ms/op and the output size. Encodes that already
 exceed the budget in a single call are reported as one iteration. Timings are
 wall-clock and machine-dependent; treat them as relative, not absolute.
 
+Every engine is handed the same buffer: straight, non-premultiplied RGBA,
+un-premultiplied through `image/draw` when the source decodes to a premultiplied
+type. A premultiplied buffer would hand every engine black under the transparent
+regions, which is both wrong and easier to compress than the real image.
+
 For the lossy modes each engine's own output is decoded back and scored against
 the pixels that engine was handed, reported as `psnr_db` over RGB (lossless is
 exact, so it shows `-`). Size alone would rank an encoder that quantizes harder
 as the winner, so the two columns have to be read together.
 
+Each pixel's squared error is weighted by its source alpha. RGB under a fully
+transparent pixel is invisible, and libwebp rewrites it to shrink the VP8 chunk;
+scoring it compares bytes no viewer can see, and an unweighted metric reports
+libwebp 20 dB below a Go encoder that left those pixels alone. On a fully opaque
+image every weight is 1, so the metric is a plain RGB PSNR there.
+
 ### Decoding
 
 The decode pass times the same loop over `run-decode.sh`'s inputs, and every
-engine has to end at packed 8-bit RGBA. That conversion is inside the timed
+engine has to end at straight, non-premultiplied 8-bit RGBA. That conversion is inside the timed
 call, because the engines do not return the same thing: `libwebp` hands back an
 `*image.NRGBA`, but `x/image` returns an `*image.YCbCr` for lossy files and
 `wasm` an `*image.NYCbCrA` for everything, and a decoder that stops at YCbCr
@@ -118,7 +144,8 @@ decode call alone costs.
 reads `-` when the two agree pixel for pixel. A number means two decoders
 resolved one file to different pixels: the YCbCr-returning engines land there,
 because converting their planes through the standard library treats limited-range
-samples as full-range ones.
+samples as full-range ones. `wasm` lands there even on lossless files, since
+gen2brain/webp returns `*image.NYCbCrA` for those too.
 
 ### Memory
 
@@ -136,8 +163,9 @@ engine: a fixed runtime floor spread over a small image inflates it.
 
 ## Results
 
-See `benchmark/results.md` for captured runs on arm64 and amd64 (machines and
-date noted there). Regenerate with `benchmark/run.sh`.
+See `benchmark/results.md` for captured runs on arm64 and amd64 over both
+corpora (machines, commit and date noted there). Regenerate with
+`benchmark/run.sh` and its siblings, once per corpus.
 
 The figures in `results.md` are generated from the tables in that same file, so
 they cannot drift from the numbers:

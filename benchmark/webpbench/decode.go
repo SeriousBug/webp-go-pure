@@ -83,21 +83,15 @@ func decodeCases(data []byte) []decodeCase {
 // the two look comparable when they are not. It is free for a decoder that
 // already returns packed RGBA.
 //
-// The test corpus is opaque, so the premultiplied and straight-alpha packings
-// hold the same bytes and the reference comparison stays valid across engines.
+// Every engine is normalised to straight (non-premultiplied) RGBA, so a decoder
+// handing back premultiplied *image.RGBA pays for the un-premultiply. On a
+// corpus with alpha the two packings hold different bytes, and skipping the
+// conversion would score that decoder against a reference in another colour
+// space.
 func toRGBA(img image.Image) rgbaImage {
 	b := img.Bounds()
-	if b.Min == (image.Point{}) {
-		switch p := img.(type) {
-		case *image.NRGBA:
-			if p.Stride == b.Dx()*4 {
-				return rgbaImage{b.Dx(), b.Dy(), p.Pix}
-			}
-		case *image.RGBA:
-			if p.Stride == b.Dx()*4 {
-				return rgbaImage{b.Dx(), b.Dy(), p.Pix}
-			}
-		}
+	if p, ok := img.(*image.NRGBA); ok && b.Min == (image.Point{}) && p.Stride == b.Dx()*4 {
+		return rgbaImage{b.Dx(), b.Dy(), p.Pix}
 	}
 	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Src)

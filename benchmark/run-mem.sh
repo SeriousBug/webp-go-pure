@@ -2,12 +2,18 @@
 # Peak-RSS pass only: the memory half of run.sh, for re-capturing the memory
 # table without paying for the timing table again.
 #
-# Usage: benchmark/run-mem.sh
+# Corpus selection: pass a name as the second argument or set CORPUS, and it
+# resolves under testdata/. Set IMAGES_DIR to point somewhere else entirely.
+#   photos      - the default: six JPEG photographs plus one PNG, all opaque
+#   transparent - five PNGs with an alpha channel, flat-graphics content
+# Usage: benchmark/run-mem.sh [corpus]   (default photos)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IMAGES_DIR="$REPO_ROOT/testdata/photos"
+CORPUS="${1:-${CORPUS:-photos}}"
+IMAGES_DIR="${IMAGES_DIR:-$REPO_ROOT/testdata/$CORPUS}"
+[ -d "$IMAGES_DIR" ] || { echo "no such corpus: $IMAGES_DIR" >&2; exit 1; }
 MEM="$(mktemp)"
 trap 'rm -f "$MEM"' EXIT
 
@@ -19,7 +25,7 @@ echo ">> Go engines, peak RSS..." >&2
 
 
 echo
-echo "Peak RSS (one encode per process, quality 90 for lossy):"
+echo "Peak RSS ($CORPUS corpus, one encode per process, quality 90 for lossy):"
 echo
 {
   echo "file,mode,engine,width,height,megapixels,peak_rss_mib,mib_per_mp"

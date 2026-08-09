@@ -19,7 +19,6 @@ import (
 package webp_test
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -101,8 +100,7 @@ func decodeAsNRGBA(path string) (string, error) {
 `Encode` looks for the types it can feed to the encoder without converting:
 
 - `*image.YCbCr` at 4:2:0 goes straight through as planes.
-- `*image.NYCbCrA` at 4:2:0 goes straight through when it is opaque. The lossy
-  encoder has no alpha channel, so a transparent one is rejected instead.
+- `*image.NYCbCrA` at 4:2:0 goes straight through, its alpha plane included.
 - `*image.NRGBA` is already the layout the byte-oriented API takes.
 
 `Encode` takes any `image.Image`. Anything not on that list, including
@@ -155,9 +153,9 @@ lossy at quality 90.
 
 ## Alpha
 
-The lossy encoder cannot store transparency. Encoding an image that is not fully
-opaque fails with an error matching `webp.ErrLossyAlpha`, rather than silently
-flattening it:
+Both encoders keep transparency. Lossy stores the color channels in a `VP8 `
+chunk and the alpha channel losslessly in an `ALPH` chunk, so alpha survives a
+lossy encode unchanged while the color is quantized:
 
 <!-- glitterate append=6 file="docs_std_test.go" -->
 ```go
@@ -165,16 +163,22 @@ func encodeTransparent() string {
 	src := image.NewNRGBA(image.Rect(0, 0, 4, 4))
 	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 128})
 
-	_, err := webp.EncodeBytes(src, nil)
-	if errors.Is(err, webp.ErrLossyAlpha) {
-		return "needs lossless"
+	data, err := webp.EncodeBytes(src, nil)
+	if err != nil {
+		return fmt.Sprint(err)
 	}
-	return fmt.Sprint(err)
+	decoded, err := webp.DecodeBytes(data)
+	if err != nil {
+		return fmt.Sprint(err)
+	}
+	_, _, _, a := decoded.At(0, 0).RGBA()
+	return fmt.Sprint(a >> 8)
 }
 ```
 
-Set `Lossless` to keep the alpha channel. Decoding transparency works either
-way: lossy files carrying an `ALPH` chunk decode to `*image.NYCbCrA`.
+An image that is fully opaque encodes without an `ALPH` chunk at all. Decoding
+transparency works either way: lossy files carrying an `ALPH` chunk decode to
+`*image.NYCbCrA`.
 
 ## Animations
 
@@ -264,7 +268,7 @@ func Example_encodeLossless() {
 
 func Example_encodeTransparent() {
 	fmt.Println(encodeTransparent())
-	// Output: needs lossless
+	// Output: 128
 }
 
 func Example_summarizeAnimation() {

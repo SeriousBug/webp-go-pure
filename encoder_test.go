@@ -462,15 +462,25 @@ func TestEncodeLossyImageToWebpAcceptsOpaqueImageBuffer(t *testing.T) {
 	}
 }
 
-func TestEncodeLossyRgbaToWebpRejectsAlphaInput(t *testing.T) {
+func TestEncodeLossyRgbaToWebpKeepsAlphaInput(t *testing.T) {
 	options := elossyDefaultOptions()
-	_, err := encodeLossyRgbaToWebpWithOptions(1, 1, []byte{0, 0, 0, 0x7f}, &options)
-	var encErr *EncoderError
-	if !errors.As(err, &encErr) || encErr.Kind != EncErrAlphaUnsupported {
-		t.Fatalf("expected EncErrAlphaUnsupported, got %v", err)
+	webp, err := encodeLossyRgbaToWebpWithOptions(1, 1, []byte{0, 0, 0, 0x7f}, &options)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
 	}
-	if !errors.Is(err, ErrLossyAlpha) || !errors.Is(err, ErrInvalidParam) {
-		t.Fatalf("expected ErrLossyAlpha and ErrInvalidParam, got %v", err)
+	features, err := Features(webp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !features.HasAlpha {
+		t.Fatal("encoded file does not report alpha")
+	}
+	decoded, err := Decode(webp)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if decoded.RGBA[3] != 0x7f {
+		t.Fatalf("alpha round-tripped as %d, want 127", decoded.RGBA[3])
 	}
 }
 

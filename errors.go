@@ -12,8 +12,9 @@ var (
 	// ErrAnimated reports that a still-image entry point was given animated
 	// input. Use DecodeAnimation instead.
 	ErrAnimated = errors.New("webp: animated input requires the animation decoder")
-	// ErrLossyAlpha reports that the lossy encoder was given input with alpha,
-	// which it does not support.
+	// ErrLossyAlpha reported that the lossy encoder was given input with alpha.
+	// The lossy encoder now stores alpha in an ALPH chunk, so nothing returns
+	// this; it stays for callers still matching on it.
 	ErrLossyAlpha = errors.New("webp: lossy encoder does not support alpha")
 )
 

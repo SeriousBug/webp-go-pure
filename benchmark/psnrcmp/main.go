@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
 	"math"
@@ -78,39 +79,38 @@ func load(path string) (webp.Image, *image.NRGBA) {
 	must(err)
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
+	// Straight (non-premultiplied) RGBA, which is what both encoders want, and
+	// what keeps the alpha channel intact for sources that have one.
 	nrgba := image.NewNRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(nrgba, nrgba.Bounds(), img, b.Min, draw.Src)
 	rgba := make([]byte, w*h*4)
-	i := 0
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			r, g, bl, _ := img.At(x, y).RGBA()
-			rgba[i], rgba[i+1], rgba[i+2], rgba[i+3] = byte(r>>8), byte(g>>8), byte(bl>>8), 0xff
-			o := nrgba.PixOffset(x-b.Min.X, y-b.Min.Y)
-			nrgba.Pix[o], nrgba.Pix[o+1], nrgba.Pix[o+2], nrgba.Pix[o+3] = byte(r>>8), byte(g>>8), byte(bl>>8), 0xff
-			i += 4
-		}
-	}
+	copy(rgba, nrgba.Pix)
 	return webp.Image{Width: w, Height: h, RGBA: rgba}, nrgba
 }
 
+// psnr scores RGB weighted by the reference alpha, matching webpbench. RGB under
+// a transparent pixel is invisible and encoders are free to rewrite it, so
+// scoring it would report a difference no viewer can see.
 func psnr(a, b []byte) float64 {
 	if len(a) != len(b) {
 		return -1
 	}
-	var sum float64
-	n := 0
-	for i := range a {
-		if i%4 == 3 {
+	var sum, n float64
+	for i := 0; i+3 < len(a); i += 4 {
+		w := float64(a[i+3]) / 255
+		if w == 0 {
 			continue
 		}
-		d := float64(a[i]) - float64(b[i])
-		sum += d * d
-		n++
+		for c := 0; c < 3; c++ {
+			d := float64(a[i+c]) - float64(b[i+c])
+			sum += w * d * d
+			n += w
+		}
 	}
-	if sum == 0 {
+	if n == 0 || sum == 0 {
 		return 99
 	}
-	return 10 * math.Log10(255*255/(sum/float64(n)))
+	return 10 * math.Log10(255*255/(sum/n))
 }
 
 func must(err error) {

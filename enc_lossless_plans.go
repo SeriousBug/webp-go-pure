@@ -281,7 +281,7 @@ func elosslessPredictorError(actual, predicted uint32) uint32 {
 		elosslessWrappedChannelError(actual, predicted, 0)
 }
 
-func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY, bits int) uint8 {
+func elosslessScorePredictorTile(width, height int, argb []uint32, tileX, tileY, bits int) elosslessPredictorTileCosts {
 	startX := tileX << bits
 	startY := tileY << bits
 	endX := (tileX + 1) << bits
@@ -297,7 +297,7 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 	// them, instead of re-reading neighbours per mode. Interior pixels (y>=1,
 	// x>=1, x+1<width) are scored by elosslessScorePredictorRow, which the
 	// arm64/amd64 builds vectorize; the borders are scored scalar here.
-	var costs [elosslessNumPredictorModes]uint64
+	var costs elosslessPredictorTileCosts
 	for y := startY; y < endY; y++ {
 		if y == 0 {
 			for x := startX; x < endX; x++ {
@@ -323,7 +323,7 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 			interiorEnd = width - 1
 		}
 		if x < interiorEnd {
-			elosslessScorePredictorRow(argb, width, y, x, interiorEnd, &costs)
+			elosslessScorePredictorRow(argb, width, y, x, interiorEnd, (*[elosslessNumPredictorModes]uint64)(&costs))
 			x = interiorEnd
 		}
 		for ; x < endX; x++ {
@@ -344,6 +344,16 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 		}
 	}
 
+	return costs
+}
+
+// elosslessPredictorTileCosts holds one tile's total predictor error per mode.
+// Costs are sums over pixels, so summing the costs of a 2x2 block of tiles gives
+// the costs of the one tile that covers them at the next larger tile size. That
+// is what lets a search over tile sizes score every pixel only once.
+type elosslessPredictorTileCosts [elosslessNumPredictorModes]uint64
+
+func (costs *elosslessPredictorTileCosts) bestMode() uint8 {
 	bestMode := uint8(11)
 	bestCost := ^uint64(0)
 	for mode := uint8(0); mode < elosslessNumPredictorModes; mode++ {
@@ -353,6 +363,64 @@ func elosslessChoosePredictorMode(width, height int, argb []uint32, tileX, tileY
 		}
 	}
 	return bestMode
+}
+
+// elosslessPredictorTileScorer serves predictor transform images at any tile
+// size at or above the one it was built for, scoring the pixels only once.
+type elosslessPredictorTileScorer struct {
+	bits  int
+	xsize int
+	ysize int
+	costs []elosslessPredictorTileCosts
+}
+
+func elosslessNewPredictorTileScorer(width, height int, argb []uint32, bits int) *elosslessPredictorTileScorer {
+	xsize := elosslessSubsampleSize(width, bits)
+	ysize := elosslessSubsampleSize(height, bits)
+	costs := make([]elosslessPredictorTileCosts, 0, xsize*ysize)
+	for tileY := 0; tileY < ysize; tileY++ {
+		for tileX := 0; tileX < xsize; tileX++ {
+			costs = append(costs, elosslessScorePredictorTile(width, height, argb, tileX, tileY, bits))
+		}
+	}
+	return &elosslessPredictorTileScorer{bits: bits, xsize: xsize, ysize: ysize, costs: costs}
+}
+
+// coarsen halves the tile grid resolution in place, advancing the scorer one
+// tile-size step. Requested sizes are served in increasing order, so each step
+// is taken at most once.
+func (s *elosslessPredictorTileScorer) coarsen() {
+	xsize := elosslessDivCeil(s.xsize, 2)
+	ysize := elosslessDivCeil(s.ysize, 2)
+	costs := make([]elosslessPredictorTileCosts, xsize*ysize)
+	for tileY := 0; tileY < s.ysize; tileY++ {
+		for tileX := 0; tileX < s.xsize; tileX++ {
+			dst := &costs[(tileY/2)*xsize+tileX/2]
+			src := &s.costs[tileY*s.xsize+tileX]
+			for mode := range dst {
+				dst[mode] += src[mode]
+			}
+		}
+	}
+	s.bits++
+	s.xsize, s.ysize, s.costs = xsize, ysize, costs
+}
+
+// transformImage returns the tile grid size, per-tile modes, and the packed
+// transform image for the given tile size, which must be at least the size the
+// scorer was built for and at least as large as any size requested before it.
+func (s *elosslessPredictorTileScorer) transformImage(bits int) (int, int, []uint8, []uint32) {
+	for s.bits < bits {
+		s.coarsen()
+	}
+	modes := make([]uint8, len(s.costs))
+	image := make([]uint32, len(s.costs))
+	for i := range s.costs {
+		mode := s.costs[i].bestMode()
+		modes[i] = mode
+		image[i] = uint32(mode) << 8
+	}
+	return s.xsize, s.ysize, modes, image
 }
 
 func elosslessApplyPredictorTransform(width, height int, argb []uint32, bits int, modes []uint8) []uint32 {
@@ -371,21 +439,6 @@ func elosslessApplyPredictorTransform(width, height int, argb []uint32, bits int
 
 func elosslessSubsampleSize(size, bits int) int {
 	return (size + (1 << bits) - 1) >> bits
-}
-
-func elosslessMakePredictorTransformImage(width, height int, argb []uint32) (int, int, []uint8, []uint32) {
-	xsize := elosslessSubsampleSize(width, elosslessPredictorTransformBits)
-	ysize := elosslessSubsampleSize(height, elosslessPredictorTransformBits)
-	modes := make([]uint8, 0, xsize*ysize)
-	image := make([]uint32, 0, xsize*ysize)
-	for tileY := 0; tileY < ysize; tileY++ {
-		for tileX := 0; tileX < xsize; tileX++ {
-			mode := elosslessChoosePredictorMode(width, height, argb, tileX, tileY, elosslessPredictorTransformBits)
-			modes = append(modes, mode)
-			image = append(image, uint32(mode)<<8)
-		}
-	}
-	return xsize, ysize, modes, image
 }
 
 func elosslessMakeUniformPredictorTransformImage(width, height, bits int, mode uint8) (int, int, []uint8, []uint32) {
@@ -537,18 +590,25 @@ func elosslessBuildGlobalPredictorPlan(width, height int, input []uint32, useSub
 	}
 }
 
+// elosslessBuildGlobalTransformPlan predicts first and fits the cross-color
+// transform on the prediction residual. Fitting it on the source instead and
+// predicting the recolored image, as this used to do, decorrelates channels that
+// prediction has already decorrelated and inflates the residual by about 20%,
+// which is why no combined plan ever won the ranking.
 func elosslessBuildGlobalTransformPlan(width, height int, input []uint32, useSubtractGreen bool) elosslessTransformPlan {
-	crossPlan := elosslessBuildGlobalCrossPlan(width, height, input, useSubtractGreen)
-	crossColored := crossPlan.predicted
 	predictorWidth, _, predictorModes, predictorImage := elosslessMakeUniformPredictorTransformImage(width, height, elosslessGlobalPredictorTransformBits, elosslessGlobalPredictorMode)
-	predicted := elosslessApplyPredictorTransform(width, height, crossColored, elosslessGlobalPredictorTransformBits, predictorModes)
+	residual := elosslessApplyPredictorTransform(width, height, input, elosslessGlobalPredictorTransformBits, predictorModes)
+
+	crossTransform := elosslessEstimateCrossColorTransform(residual)
+	crossWidth, _, crossTransforms, crossImage := elosslessMakeUniformCrossColorTransformImage(width, height, elosslessGlobalCrossColorTransformBits, crossTransform)
+	predicted := elosslessApplyCrossColorTransform(width, height, residual, elosslessGlobalCrossColorTransformBits, crossTransforms)
 
 	return elosslessTransformPlan{
 		useSubtractGreen: useSubtractGreen,
-		crossBits:        crossPlan.crossBits,
-		crossBitsSet:     crossPlan.crossBitsSet,
-		crossWidth:       crossPlan.crossWidth,
-		crossImage:       crossPlan.crossImage,
+		crossBits:        elosslessGlobalCrossColorTransformBits,
+		crossBitsSet:     true,
+		crossWidth:       crossWidth,
+		crossImage:       crossImage,
 		predictorBits:    elosslessGlobalPredictorTransformBits,
 		predictorBitsSet: true,
 		predictorWidth:   predictorWidth,
@@ -571,13 +631,17 @@ func elosslessBuildTiledCrossPlan(width, height int, input []uint32, useSubtract
 	}
 }
 
-func elosslessBuildTiledPredictorPlan(width, height int, input []uint32, useSubtractGreen bool) elosslessTransformPlan {
-	predictorWidth, _, predictorModes, predictorImage := elosslessMakePredictorTransformImage(width, height, input)
-	predicted := elosslessApplyPredictorTransform(width, height, input, elosslessPredictorTransformBits, predictorModes)
+func elosslessBuildTiledPredictorPlan(width, height int, input []uint32, useSubtractGreen bool, bits int) elosslessTransformPlan {
+	return elosslessBuildScoredTiledPredictorPlan(width, height, input, useSubtractGreen, elosslessNewPredictorTileScorer(width, height, input, bits), bits)
+}
+
+func elosslessBuildScoredTiledPredictorPlan(width, height int, input []uint32, useSubtractGreen bool, scorer *elosslessPredictorTileScorer, bits int) elosslessTransformPlan {
+	predictorWidth, _, predictorModes, predictorImage := scorer.transformImage(bits)
+	predicted := elosslessApplyPredictorTransform(width, height, input, bits, predictorModes)
 
 	return elosslessTransformPlan{
 		useSubtractGreen: useSubtractGreen,
-		predictorBits:    elosslessPredictorTransformBits,
+		predictorBits:    bits,
 		predictorBitsSet: true,
 		predictorWidth:   predictorWidth,
 		predictorImage:   predictorImage,
@@ -601,8 +665,8 @@ func elosslessEstimateTokenStreamCostBytes(width int, argb []uint32, options elo
 	extraBits := 0
 	for _, token := range tokens {
 		if token.kind == elosslessTokCopy {
-			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
-			extraBits += elosslessPrefixExtraBitCount(int(token.length)) + elosslessPrefixExtraBitCount(planeCode)
+			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance()))
+			extraBits += elosslessPrefixExtraBitCount(int(token.length())) + elosslessPrefixExtraBitCount(planeCode)
 		}
 	}
 	totalBits := elosslessHistogramCost(&histograms, &group) + extraBits + len(tokens)
@@ -652,49 +716,102 @@ func elosslessEstimateTransformPlanScore(width int, plan *elosslessTransformPlan
 	return score, nil
 }
 
-func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []func(width, height int) elosslessTransformPlan {
+// elosslessPlanBuilder builds one candidate transform plan. Builders sharing a
+// non-zero family are alternative parameterizations of the same transform rather
+// than genuinely different plans, so only the best-scoring one of a family
+// reaches the shortlist; without that they would crowd out every other plan.
+type elosslessPlanBuilder struct {
+	family int
+	build  func(width, height int) elosslessTransformPlan
+}
+
+const (
+	elosslessPlanFamilyNone = iota
+	elosslessPlanFamilyTiledPredictor
+	elosslessPlanFamilyTiledPredictorSubtractGreen
+	elosslessPlanFamilyGlobalPredictor
+	elosslessPlanFamilyGlobalPredictorSubtractGreen
+)
+
+func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) []elosslessPlanBuilder {
 	subtractIsDistinct := !elosslessSlicesEqualU32(subtractGreen, argb)
-	builders := []func(int, int) elosslessTransformPlan{
-		func(_, _ int) elosslessTransformPlan { return elosslessBuildRawPlan(argb) },
+	builders := []elosslessPlanBuilder{
+		{build: func(_, _ int) elosslessTransformPlan { return elosslessBuildRawPlan(argb) }},
 	}
 
 	if subtractIsDistinct && profile.transformSearchLevel >= 1 {
-		builders = append(builders, func(_, _ int) elosslessTransformPlan {
+		builders = append(builders, elosslessPlanBuilder{build: func(_, _ int) elosslessTransformPlan {
 			return elosslessBuildSubtractGreenPlan(subtractGreen)
-		})
+		}})
+	}
+	// Every profile gets a tiled predictor plan on the input it is most likely to
+	// want. Spatial prediction is worth more than anything else the transform
+	// search finds, so even the profiles that run no search get one. The levels
+	// that cover both inputs below are excluded here to avoid building the same
+	// plan twice.
+	if profile.transformSearchLevel < 5 || (subtractIsDistinct && profile.transformSearchLevel < 6) {
+		input, useSubtractGreen := argb, false
+		family := elosslessPlanFamilyTiledPredictor
+		if subtractIsDistinct {
+			input, useSubtractGreen = subtractGreen, true
+			family = elosslessPlanFamilyTiledPredictorSubtractGreen
+		}
+		builders = append(builders, elosslessTiledPredictorBuilders(input, useSubtractGreen, profile.predictorTileBits, family)...)
 	}
 	if profile.transformSearchLevel >= 2 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, argb, false) },
-			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalPredictorPlan(w, h, argb, false) })
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, argb, false) }},
+			elosslessPlanBuilder{family: elosslessPlanFamilyGlobalPredictor, build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalPredictorPlan(w, h, argb, false) }})
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 3 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, subtractGreen, true) },
-			func(w, h int) elosslessTransformPlan {
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalCrossPlan(w, h, subtractGreen, true) }},
+			elosslessPlanBuilder{family: elosslessPlanFamilyGlobalPredictorSubtractGreen, build: func(w, h int) elosslessTransformPlan {
 				return elosslessBuildGlobalPredictorPlan(w, h, subtractGreen, true)
-			})
+			}})
 	}
 	if profile.transformSearchLevel >= 4 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalTransformPlan(w, h, argb, false) })
+			elosslessPlanBuilder{family: elosslessPlanFamilyGlobalPredictor, build: func(w, h int) elosslessTransformPlan { return elosslessBuildGlobalTransformPlan(w, h, argb, false) }})
 		if subtractIsDistinct {
-			builders = append(builders, func(w, h int) elosslessTransformPlan {
+			builders = append(builders, elosslessPlanBuilder{family: elosslessPlanFamilyGlobalPredictorSubtractGreen, build: func(w, h int) elosslessTransformPlan {
 				return elosslessBuildGlobalTransformPlan(w, h, subtractGreen, true)
-			})
+			}})
 		}
 	}
 	if profile.transformSearchLevel >= 5 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, argb, false) },
-			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledPredictorPlan(w, h, argb, false) })
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, argb, false) }})
+		builders = append(builders, elosslessTiledPredictorBuilders(argb, false, profile.predictorTileBits, elosslessPlanFamilyTiledPredictor)...)
 	}
 	if subtractIsDistinct && profile.transformSearchLevel >= 6 {
 		builders = append(builders,
-			func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, subtractGreen, true) },
-			func(w, h int) elosslessTransformPlan {
-				return elosslessBuildTiledPredictorPlan(w, h, subtractGreen, true)
-			})
+			elosslessPlanBuilder{build: func(w, h int) elosslessTransformPlan { return elosslessBuildTiledCrossPlan(w, h, subtractGreen, true) }})
+		builders = append(builders, elosslessTiledPredictorBuilders(subtractGreen, true, profile.predictorTileBits, elosslessPlanFamilyTiledPredictorSubtractGreen)...)
+	}
+	return builders
+}
+
+// elosslessTiledPredictorBuilders builds one tiled predictor plan per requested
+// tile size, all off a single shared scorer so the per-pixel predictor mode
+// scoring runs once rather than once per tile size. The sizes are handed out in
+// increasing order because the scorer only coarsens.
+func elosslessTiledPredictorBuilders(input []uint32, useSubtractGreen bool, tileBits []int, family int) []elosslessPlanBuilder {
+	sorted := append([]int(nil), tileBits...)
+	sort.Ints(sorted)
+	if len(sorted) == 1 {
+		family = elosslessPlanFamilyNone
+	}
+	var scorer *elosslessPredictorTileScorer
+	builders := make([]elosslessPlanBuilder, 0, len(sorted))
+	for _, bits := range sorted {
+		bits := bits
+		builders = append(builders, elosslessPlanBuilder{family: family, build: func(w, h int) elosslessTransformPlan {
+			if scorer == nil {
+				scorer = elosslessNewPredictorTileScorer(w, h, input, sorted[0])
+			}
+			return elosslessBuildScoredTiledPredictorPlan(w, h, input, useSubtractGreen, scorer, bits)
+		}})
 	}
 	return builders
 }
@@ -707,13 +824,23 @@ func elosslessTransformPlanBuilders(argb, subtractGreen []uint32, profile *eloss
 func elosslessShortlistTransformPlans(width, height int, argb, subtractGreen []uint32, profile *elosslessLosslessSearchProfile) ([]elosslessRankedPlan, error) {
 	builders := elosslessTransformPlanBuilders(argb, subtractGreen, profile)
 	ranked := make([]elosslessRankedPlan, 0, len(builders))
-	for _, build := range builders {
-		plan := build(width, height)
+	bestOfFamily := make(map[int]int, len(builders))
+	for _, builder := range builders {
+		plan := builder.build(width, height)
 		score, err := elosslessEstimateTransformPlanScore(width, &plan, profile)
 		if err != nil {
 			return nil, err
 		}
 		plan.predicted = nil
+		if builder.family != elosslessPlanFamilyNone {
+			if at, seen := bestOfFamily[builder.family]; seen {
+				if score < ranked[at].score {
+					ranked[at] = elosslessRankedPlan{score: score, plan: plan}
+				}
+				continue
+			}
+			bestOfFamily[builder.family] = len(ranked)
+		}
 		ranked = append(ranked, elosslessRankedPlan{score: score, plan: plan})
 	}
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score < ranked[j].score })
@@ -735,6 +862,15 @@ func elosslessRematerializePlan(width, height int, argb, subtractGreen []uint32,
 	}
 	owned := false
 
+	if plan.predictorBitsSet {
+		modes := make([]uint8, len(plan.predictorImage))
+		for i, packed := range plan.predictorImage {
+			modes[i] = uint8((packed >> 8) & 0xff)
+		}
+		input = elosslessApplyPredictorTransform(width, height, input, plan.predictorBits, modes)
+		owned = true
+	}
+
 	if plan.crossBitsSet {
 		transforms := make([]elosslessCrossColorTransform, len(plan.crossImage))
 		for i, packed := range plan.crossImage {
@@ -745,15 +881,6 @@ func elosslessRematerializePlan(width, height int, argb, subtractGreen []uint32,
 			}
 		}
 		input = elosslessApplyCrossColorTransform(width, height, input, plan.crossBits, transforms)
-		owned = true
-	}
-
-	if plan.predictorBitsSet {
-		modes := make([]uint8, len(plan.predictorImage))
-		for i, packed := range plan.predictorImage {
-			modes[i] = uint8((packed >> 8) & 0xff)
-		}
-		input = elosslessApplyPredictorTransform(width, height, input, plan.predictorBits, modes)
 		owned = true
 	}
 
@@ -794,44 +921,112 @@ func elosslessShouldStopTransformSearch(bestEstimate, nextEstimate int, profile 
 		elosslessSatMul(nextEstimate, 100) >= elosslessSatMul(bestEstimate, profile.earlyStopRatioPercent)
 }
 
+// elosslessParseCostCacheBits reports the color cache size the parse should
+// score against. The cache is applied after tokenization, so the parse is told
+// how large it will be rather than which pixels land in it; the exact size the
+// later search settles on only shifts the hit rate slightly, and scoring against
+// the largest size the profile can pick is far closer than assuming no cache.
+func elosslessParseCostCacheBits(argb []uint32, profile *elosslessLosslessSearchProfile) int {
+	if len(argb) < 64 {
+		return 0
+	}
+	if profile.fixedColorCacheBits > 0 {
+		return profile.fixedColorCacheBits
+	}
+	if !profile.useColorCache {
+		return 0
+	}
+	return elosslessMaxColorCacheBitsForProfile(profile)
+}
+
 // elosslessEncodeTransformPlanToVp8l tokenizes the predicted image once (no color
 // cache) and derives every color-cache variant from that single token stream via
 // elosslessApplyColorCacheToTokens. The LZ77 match structure is identical with or
 // without a cache (the cache only reclassifies literals as cache references), so
 // this avoids re-running the expensive match search once per cache-size candidate.
+// elosslessSelectBestColorCacheBits already compares an estimated stream size for
+// no cache against every candidate size, so only its winner is written out; the
+// no-cache stream is not encoded again to be measured and thrown away.
 func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *elosslessTransformPlan, profile *elosslessLosslessSearchProfile) ([]byte, error) {
 	noCacheOptions := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, 0)
+	noCacheOptions.costCacheBits = elosslessParseCostCacheBits(plan.predicted, profile)
 	baseTokens, err := elosslessBuildTokens(width, plan.predicted, noCacheOptions)
 	if err != nil {
 		return nil, err
 	}
 
-	best, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, 0, profile.entropySearchLevel)
-	if err != nil {
-		return nil, err
-	}
-
-	if profile.useColorCache && len(plan.predicted) >= 64 {
-		bestCacheBits, err := elosslessSelectBestColorCacheBits(width, height, plan.predicted, baseTokens, profile)
+	cacheBits := 0
+	switch {
+	case len(plan.predicted) < 64:
+	case profile.fixedColorCacheBits > 0:
+		cacheBits = profile.fixedColorCacheBits
+	case profile.useColorCache:
+		cacheBits, err = elosslessSelectBestColorCacheBits(width, height, plan.predicted, baseTokens, profile)
 		if err != nil {
 			return nil, err
 		}
-		if bestCacheBits > 0 {
-			// baseTokens is dead past this point, so rewrite it in place rather
-			// than allocating a second stream of one token per pixel.
-			if err := elosslessApplyColorCacheToTokens(baseTokens, plan.predicted, baseTokens, bestCacheBits); err != nil {
-				return nil, err
-			}
-			withCache, err := elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, baseTokens, bestCacheBits, profile.entropySearchLevel)
-			if err != nil {
-				return nil, err
-			}
-			if len(withCache) < len(best) {
-				best = withCache
-			}
+	}
+
+	if cacheBits > 0 {
+		// baseTokens is dead past this point, so rewrite it in place rather than
+		// allocating a second stream of one token per pixel.
+		if err := elosslessApplyColorCacheToTokens(baseTokens, plan.predicted, baseTokens, cacheBits); err != nil {
+			return nil, err
 		}
 	}
-	return best, nil
+	tokens := baseTokens
+	if profile.tokenCostPasses > 0 {
+		tokens, err = elosslessRetokenizeWithMeasuredCosts(width, plan.predicted, tokens, cacheBits, profile)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, tokens, cacheBits, profile.entropySearchLevel)
+}
+
+// elosslessRetokenizeWithMeasuredCosts re-parses the image, scoring matches
+// against the code lengths the previous parse's own token stream implies instead
+// of against flat cost constants. A first parse cannot know what a literal, a
+// cache reference or a copy really costs on this image, and on flat graphics
+// those differ by several bits, which is enough to change which matches are
+// worth taking. Further passes re-measure because the first re-parse shifts the
+// distance distribution enough to make its own costs stale. It returns the
+// smallest stream it saw, which is the one it was handed when no pass beat it.
+//
+// A stream is one token per pixel at worst, so the passes ping-pong between two
+// buffers rather than allocating one each: once a pass has measured the stream
+// it was given, that stream's storage is dead unless it is the best so far, and
+// exactly one of the two buffers is not the best at any point.
+func elosslessRetokenizeWithMeasuredCosts(width int, argb []uint32, tokens []elosslessToken, cacheBits int, profile *elosslessLosslessSearchProfile) ([]elosslessToken, error) {
+	bestSize, err := elosslessEstimateSingleGroupSizeForTokens(width, tokens, cacheBits)
+	if err != nil {
+		return nil, err
+	}
+	slots := [2][]elosslessToken{tokens, nil}
+	bestSlot, measuredSlot := 0, 0
+	for pass := 0; pass < profile.tokenCostPasses; pass++ {
+		histograms, err := elosslessBuildHistograms(slots[measuredSlot], width, cacheBits)
+		if err != nil {
+			return nil, err
+		}
+		options := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, cacheBits)
+		options.symbolCosts = elosslessNewSymbolCosts(&histograms)
+		dst := 1 - bestSlot
+		refined, err := elosslessBuildTokensInto(slots[dst], width, argb, options)
+		if err != nil {
+			return nil, err
+		}
+		slots[dst] = refined
+		measuredSlot = dst
+		size, err := elosslessEstimateSingleGroupSizeForTokens(width, refined, cacheBits)
+		if err != nil {
+			return nil, err
+		}
+		if size < bestSize {
+			bestSize, bestSlot = size, dst
+		}
+	}
+	return slots[bestSlot], nil
 }
 
 // elosslessEncodeTransformPlanToVp8lWithTokens writes a full VP8L frame from an
@@ -860,20 +1055,6 @@ func elosslessEncodeTransformPlanToVp8lWithTokens(width, height int, rgba []byte
 			return nil, err
 		}
 	}
-	if plan.crossBitsSet {
-		if err := bw.putBits(1, 1); err != nil {
-			return nil, err
-		}
-		if err := bw.putBits(1, 2); err != nil {
-			return nil, err
-		}
-		if err := bw.putBits(uint32(plan.crossBits-elosslessMinTransformBits), 3); err != nil {
-			return nil, err
-		}
-		if err := elosslessWriteImageStream(bw, plan.crossWidth, plan.crossImage, false, 0, transformOptions); err != nil {
-			return nil, err
-		}
-	}
 	if plan.predictorBitsSet {
 		if err := bw.putBits(1, 1); err != nil {
 			return nil, err
@@ -885,6 +1066,20 @@ func elosslessEncodeTransformPlanToVp8lWithTokens(width, height int, rgba []byte
 			return nil, err
 		}
 		if err := elosslessWriteImageStream(bw, plan.predictorWidth, plan.predictorImage, false, 0, transformOptions); err != nil {
+			return nil, err
+		}
+	}
+	if plan.crossBitsSet {
+		if err := bw.putBits(1, 1); err != nil {
+			return nil, err
+		}
+		if err := bw.putBits(1, 2); err != nil {
+			return nil, err
+		}
+		if err := bw.putBits(uint32(plan.crossBits-elosslessMinTransformBits), 3); err != nil {
+			return nil, err
+		}
+		if err := elosslessWriteImageStream(bw, plan.crossWidth, plan.crossImage, false, 0, transformOptions); err != nil {
 			return nil, err
 		}
 	}
@@ -905,8 +1100,11 @@ func elosslessEncodeTransformPlanToVp8lWithTokens(width, height int, rgba []byte
 func elosslessEncodePaletteCandidateToVp8l(width, height int, rgba []byte, candidate *elosslessPaletteCandidate, profile *elosslessLosslessSearchProfile) ([]byte, error) {
 	transformOptions := elosslessTokenBuildOptions{}
 	noCacheOptions := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, 0)
+	noCacheOptions.costCacheBits = elosslessParseCostCacheBits(candidate.packedIndices, profile)
 	tokenOptions := noCacheOptions
-	if profile.useColorCache && len(candidate.packedIndices) >= 64 {
+	if profile.fixedColorCacheBits > 0 && len(candidate.packedIndices) >= 64 {
+		tokenOptions = elosslessTokenBuildOptionsFor(profile.matchSearchLevel, profile.fixedColorCacheBits)
+	} else if profile.useColorCache && len(candidate.packedIndices) >= 64 {
 		baseTokens, err := elosslessBuildTokens(candidate.packedWidth, candidate.packedIndices, noCacheOptions)
 		if err != nil {
 			return nil, err
