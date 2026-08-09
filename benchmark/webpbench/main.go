@@ -426,25 +426,37 @@ func psnrOf(src []byte, encoded []byte) (float64, error) {
 	return psnrBetween(src, dec.RGBA)
 }
 
-// psnrBetween scores two RGBA buffers against each other, over RGB only.
+// psnrBetween scores two RGBA buffers against each other over RGB, weighting
+// each pixel by its reference alpha.
+//
+// The weighting is what makes the score meaningful on images with alpha. RGB
+// under a fully transparent pixel is invisible, and libwebp deliberately
+// rewrites it to shrink the VP8/VP8L payload; scoring it compares bytes no
+// viewer can see and reports a difference that is not one. On a fully opaque
+// image every weight is 1, so the result is identical to a plain RGB PSNR.
 func psnrBetween(want, got []byte) (float64, error) {
 	if len(got) != len(want) {
 		return 0, fmt.Errorf("got %d bytes, want %d", len(got), len(want))
 	}
-	var sum float64
-	n := 0
-	for i := range want {
-		if i%4 == 3 {
+	var sum, n float64
+	for i := 0; i+3 < len(want); i += 4 {
+		w := float64(want[i+3]) / 255
+		if w == 0 {
 			continue
 		}
-		d := float64(want[i]) - float64(got[i])
-		sum += d * d
-		n++
+		for c := 0; c < 3; c++ {
+			d := float64(want[i+c]) - float64(got[i+c])
+			sum += w * d * d
+			n += w
+		}
+	}
+	if n == 0 {
+		return math.Inf(1), nil
 	}
 	if sum == 0 {
 		return math.Inf(1), nil
 	}
-	return 10 * math.Log10(255*255/(sum/float64(n))), nil
+	return 10 * math.Log10(255*255/(sum/n)), nil
 }
 
 func listImages(dir string) ([]string, error) {
