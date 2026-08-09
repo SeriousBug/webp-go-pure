@@ -279,14 +279,53 @@ func TestLibwebpDecodesOurLossyAlphaOutput(t *testing.T) {
 			t.Fatalf("alpha byte %d: libwebp=%d ours=%d", i, dst.Pix[i], src[i])
 		}
 	}
-	// Color under fully transparent pixels is not preserved by either codec, so
-	// compare only where the pixel is visible.
-	for i := 3; i < w*h*4; i += 4 {
-		if src[i] == 0 {
-			copy(dst.Pix[i-3:i], src[i-3:i])
+	assertMeanAbsDiffSmall(t, maskInvisibleColor(dst.Pix, src), src, w, h, 16, 80)
+}
+
+// The alpha plane takes a different path per effort the way the color plane
+// does: elossyAlphaFilterCandidates trial-encodes every filter at the top
+// efforts and shortlists by entropy below them, and elossyAlphaLosslessEffort
+// hands the survivor to a different lossless effort. Each of those has to
+// produce an ALPH chunk the reference decoder reads back exactly.
+func TestLibwebpDecodesOurLossyAlphaOutputAtEveryEffort(t *testing.T) {
+	const w, h = 160, 144
+	src := makeAlphaRGBA(w, h)
+	// Structure in the alpha plane itself, so the filters rank differently from
+	// each other and a flat plane cannot hide a filter bug.
+	for y := 0; y < h; y++ {
+		for x := w / 2; x < w; x++ {
+			o := (y*w + x) * 4
+			v := byte((x*31 ^ y*17) & 0xff)
+			src[o], src[o+1], src[o+2] = v, v, v
+			src[o+3] = byte((x*13 + y*7) & 0xff)
 		}
 	}
-	assertMeanAbsDiffSmall(t, dst.Pix, src, w, h, 16, 80)
+
+	for effort := uint8(0); effort <= 9; effort++ {
+		encoded, err := webp.EncodeLossy(&webp.Image{Width: w, Height: h, RGBA: src},
+			&webp.LossyOptions{Quality: 90, Effort: effort})
+		if err != nil {
+			t.Fatalf("effort %d: %v", effort, err)
+		}
+		reference := libwebpDecodeToNRGBA(t, encoded)
+		if reference.Rect.Dx() != w || reference.Rect.Dy() != h {
+			t.Fatalf("effort %d: dims %dx%d", effort, reference.Rect.Dx(), reference.Rect.Dy())
+		}
+		ours, err := webp.Decode(encoded)
+		if err != nil {
+			t.Fatalf("effort %d: %v", effort, err)
+		}
+		if !bytes.Equal(reference.Pix, ours.RGBA) {
+			t.Fatalf("effort %d: our decode differs from libwebp's on our own output", effort)
+		}
+		for i := 3; i < w*h*4; i += 4 {
+			if reference.Pix[i] != src[i] {
+				t.Fatalf("effort %d: alpha byte %d: libwebp=%d ours=%d",
+					effort, i, reference.Pix[i], src[i])
+			}
+		}
+		assertMeanAbsDiffSmall(t, maskInvisibleColor(reference.Pix, src), src, w, h, 16, 80)
+	}
 }
 
 func TestOurDecoderReadsLibwebpLossyAlphaOutput(t *testing.T) {
@@ -315,4 +354,26 @@ func TestOurDecoderReadsLibwebpLossyAlphaOutput(t *testing.T) {
 			t.Fatalf("alpha byte %d: ours=%d src=%d", i, decoded.RGBA[i], src[i])
 		}
 	}
+	assertMeanAbsDiffSmall(t, maskInvisibleColor(decoded.RGBA, src), src, w, h, 16, 80)
+
+	// Our color plane has to be the one libwebp reads out of the same
+	// bitstream, not merely close to the input: the checks above pass on a
+	// decoder that gets alpha right and the RGB under it wrong by a few steps.
+	reference := libwebpDecodeToNRGBA(t, buf.Bytes())
+	if !bytes.Equal(reference.Pix, decoded.RGBA) {
+		t.Fatal("our decode of libwebp's lossy alpha output differs from libwebp's own")
+	}
+}
+
+// maskInvisibleColor returns a copy of decoded with the color under fully
+// transparent pixels replaced by the source's. Neither codec preserves it, so
+// comparing it measures nothing.
+func maskInvisibleColor(decoded, src []byte) []byte {
+	masked := bytes.Clone(decoded)
+	for i := 3; i < len(masked); i += 4 {
+		if src[i] == 0 {
+			copy(masked[i-3:i], src[i-3:i])
+		}
+	}
+	return masked
 }
