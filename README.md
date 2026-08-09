@@ -16,40 +16,66 @@ root package is the codec itself, working on plain byte buffers.
 
 ## Performance
 
-If you can use cgo, use libwebp itself. It encodes faster than webp-go-pure at
-slightly better quality per byte.
+If you can use cgo, use libwebp itself. It is the faster encoder in most modes
+and the faster decoder in all of them.
 
 Without cgo, the alternative is libwebp compiled to WebAssembly and run through
 wazero, such as [gen2brain/webp](https://github.com/gen2brain/webp). That costs
-both time and memory, and webp-go-pure comes out ahead of it:
+both time and memory, and webp-go-pure comes out ahead of it on photographs:
 
-- **Lossy:** 1.1-3.4x faster, at 1.7-3.8x lower peak memory.
-- **Lossless:** roughly even on time (0.9-2.3x), at 1.2-1.8x lower peak memory.
+- **Lossy:** 1.2-3.4x faster, at 1.6-3.8x lower peak memory.
+- **Lossless:** 1.7-2.9x faster, at roughly the same peak memory.
+
+Against libwebp itself on photographs, lossless is now a close match on size: our
+effort 6 writes 1.66 MB per image on the geometric mean against libwebp's
+1.65 MB, half a percent apart, and lands under the WASM engine's 1.66 MB. Time is
+where we still trail, and by how much depends on the machine: 1.07x libwebp's on
+an M4 Pro, 1.68x on a Ryzen 7 5700G. On lossy, our effort 8 writes 1.7% more than
+libwebp's method 6 at the same PSNR, for 1.17x the time on the M4 Pro and 1.03x
+on the Ryzen.
 
 For lossless encoding only, there is another pure Go encoder,
-[nativewebp](https://github.com/HugoSmits86/nativewebp). Its compression level
-does almost nothing (its fastest and slowest settings differ by 0.06% in output
-size), so it sits at one point rather than on a curve. At the effort where we
-match its speed, our effort 3, we write files 8% smaller than it does. It does
-use less than half our peak memory.
+[nativewebp](https://github.com/HugoSmits86/nativewebp). We are smaller and
+faster than it at once, at more than one setting:
+
+- **Photographs:** our effort 0 writes 15.69 MiB of the test corpus where its
+  best setting writes 17.39 MiB, 9.8% smaller, in a fifth of the time. Our
+  efforts 0 through 4 all beat its best setting on both size and time.
+- **Flat graphics with alpha:** our effort 0 is 0.5% smaller than its best
+  setting and 3.4% smaller than its fastest, at 3-4x the speed of that fastest
+  setting.
+
+It still uses far less memory than we do for lossless, 0.23-0.40x our peak on
+photographs, and that gap is the reason to reach for it.
+
+Lossy encoding now keeps alpha, in an `ALPH` chunk, where it used to refuse any
+input with an alpha channel. On the alpha corpus a lossy encode lands within
+0.4 dB of libwebp at matched settings.
+
+Peak memory is the number to check before using lossless on large images: we cost
+2.4-3.8x libwebp's peak there, 659-821 MiB to encode a 5.5 megapixel image
+against libwebp's 201-219 MiB. The lossy modes are the other way around, and we
+are the lightest of the three.
 
 Effort is the knob to reach for either way. The figure below is every setting of
 every encoder: pick the time and size you want, then read the setting off the
 point.
 
-![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-light.svg#gh-light-mode-only)
-![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-dark.svg#gh-dark-mode-only)
-![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](benchmark/charts/peak-memory-light.svg#gh-light-mode-only)
-![Peak memory per megapixel for each engine, one panel per mode and machine, on the same bar layout as the encode time figure](benchmark/charts/peak-memory-dark.svg#gh-dark-mode-only)
+![What effort buys on photographs: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-light.svg#gh-light-mode-only)
+![What effort buys on photographs: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)
+![What effort buys on flat graphics with alpha: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-transparent-light.svg#gh-light-mode-only)
+![What effort buys on flat graphics with alpha: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-transparent-dark.svg#gh-dark-mode-only)
+![Peak memory per megapixel for each engine on photographs, one panel per mode and machine](benchmark/charts/peak-memory-photos-light.svg#gh-light-mode-only)
+![Peak memory per megapixel for each engine on photographs, one panel per mode and machine](benchmark/charts/peak-memory-photos-dark.svg#gh-dark-mode-only)
 
 Those figures are for encoding. For decoding, the comparison to make is
 `golang.org/x/image/webp`, which decodes but does not encode. We are faster than
-it in every mode on both machines, by 1% to 18% on the geometric mean; on arm64
-lossless the per-image results go either way. Against libwebp we are 2.4-5.8x
-slower on lossy and 1.5-2.9x on lossless.
+it in every mode on both machines and both corpora, by 2% to 21% on the geometric
+mean; on arm64 lossless the per-image results go either way. Against libwebp we
+are 2.1-5.8x slower on lossy and 1.5-2.9x on lossless.
 
-Full tables, PSNR and peak-memory figures, the test corpus and the method are in
-[benchmark/results.md](benchmark/results.md).
+Full tables, PSNR and peak-memory figures, both test corpora and the method are
+in [benchmark/results.md](benchmark/results.md).
 
 ## Library API
 
