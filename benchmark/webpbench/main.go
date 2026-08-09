@@ -166,7 +166,7 @@ func sweepCases(buf *webp.Image) []sweepCase {
 }
 
 func main() {
-	dir := flag.String("dir", "testdata/photos-jpeg", "directory of source images (jpg/png)")
+	dir := flag.String("dir", "testdata/photos", "directory of source images (jpg/png)")
 	budgetMs := flag.Int("budget-ms", 2000, "per-measurement time budget in ms")
 	minIters := flag.Int("min-iters", 1, "minimum iterations per measurement")
 	maxIters := flag.Int("max-iters", 500, "maximum iterations per measurement")

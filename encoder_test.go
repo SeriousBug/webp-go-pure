@@ -23,7 +23,7 @@ func sampleRGBA() (int, int, []byte) {
 // synthetic gradients and noise do not reproduce it.
 func lossyPhotoCropRGBA(t *testing.T, side int) Image {
 	t.Helper()
-	file, err := os.Open("testdata/lena_crop_512.png")
+	file, err := os.Open("testdata/photos/Lena_512.png")
 	if err != nil {
 		t.Skipf("sample photo unavailable: %v", err)
 	}

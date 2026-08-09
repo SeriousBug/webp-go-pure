@@ -5,7 +5,7 @@ Porting it to Go and testing the result turned up a bug in the original that its
 own test suite did not catch: at effort 0, the fastest lossy setting, it can
 write WebP files that no decoder can read back correctly.
 
-Three of the seven images in `benchmark/testdata/photos-jpeg` hit it. The figures are PSNR
+Three of the seven images in `testdata/photos` hit it. The figures are PSNR
 against the source image, from a run at quality 90:
 
 | image | webp-rust | ours | libwebp |

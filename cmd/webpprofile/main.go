@@ -1,7 +1,7 @@
 // webpprofile runs a single "ours" encoder repeatedly under CPU/mem profiling.
 // Pure Go, no cgo, so it profiles only this library's hot paths.
 //
-//	go run ./cmd/webpprofile -img benchmark/testdata/photos-jpeg/Lena_512.png -mode lossy-slow -n 3 -cpu cpu.prof
+//	go run ./cmd/webpprofile -img testdata/photos/Lena_512.png -mode lossy-slow -n 3 -cpu cpu.prof
 //	go tool pprof -http=:0 cpu.prof
 package main
 
@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	img := flag.String("img", "benchmark/testdata/photos-jpeg/Lena_512.png", "source image")
+	img := flag.String("img", "testdata/photos/Lena_512.png", "source image")
 	mode := flag.String("mode", "lossy-slow", "lossless|lossy-fast|lossy-slow")
 	n := flag.Int("n", 1, "iterations")
 	effort := flag.Int("effort", -1, "override lossy effort")
