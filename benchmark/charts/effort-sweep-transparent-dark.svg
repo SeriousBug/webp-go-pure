@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1158" viewBox="0 0 1320 1158" role="img">
-<rect width="1320" height="1158" fill="#1a1a19"/>
-<text x="40.0" y="34.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="19" fill="#ffffff" text-anchor="start" font-weight="600">What effort buys</text>
-<text x="40.0" y="56.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="13" fill="#c3c2b7" text-anchor="start">Every effort setting of every engine, encoding the same corpus. Pick the tradeoff you want, then read the setting off the point.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1110" viewBox="0 0 1320 1110" role="img">
+<rect width="1320" height="1110" fill="#1a1a19"/>
+<text x="40.0" y="34.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="19" fill="#ffffff" text-anchor="start" font-weight="600">Time vs file size at each effort level</text>
+<text x="40.0" y="56.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="13" fill="#c3c2b7" text-anchor="start">Effort setting of every encoder. Closer to the bottom left, the better.</text>
 <circle cx="45.0" cy="80.0" r="5.0" fill="#3987e5"/>
 <text x="56.0" y="84.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#c3c2b7" text-anchor="start">webp-go-pure</text>
 <circle cx="169.5" cy="80.0" r="5.0" fill="#898781"/>
@@ -448,10 +448,7 @@
 <circle cx="1086.6" cy="667.6" r="10.0" fill="#1a1a19" stroke="#199e70" stroke-width="2"/>
 <text x="1086.6" y="671.7" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="11.5" fill="#199e70" text-anchor="middle" style="font-variant-numeric:tabular-nums">3</text>
 <text x="660.0" y="1024.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="13" fill="#c3c2b7" text-anchor="middle">encode time for the whole corpus, log scale (left = faster)</text>
-<text x="40.0" y="1064.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless preset level 0-9, and nativewebp's three compression levels. Time</text>
-<text x="40.0" y="1080.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">and size are totals over the whole corpus and PSNR is the mean over it; time and size are on log scales. Faster is left, smaller is down, higher quality is up. Both machines share each panel's</text>
-<text x="40.0" y="1096.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">axes, so a curve sitting further right is that machine being slower, not a different scale. A triangle on a panel's top edge is a setting whose value is off the axis, labelled setting and value</text>
-<text x="40.0" y="1112.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">and reached by a dashed segment; scaling the panel to those would flatten every other engine into one band. A setting is labelled only where it moves the panel's value (1% of size, 0.1 dB of</text>
-<text x="40.0" y="1128.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">PSNR), so an unlabelled point is a setting that costs time and changes nothing: read the nearest label to its left. The lossy panels have to be read together, since an encoder can spend effort on</text>
-<text x="40.0" y="1144.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">either one: the same quality 90 request lands at a different PSNR for each engine and setting.</text>
+<text x="40.0" y="1064.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">Each point is labelled with the effort number used to get that data point. Time and size are totals over the whole set of images, PSNR is the mean. Time and size are on log scales. An arrow at the</text>
+<text x="40.0" y="1080.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">top of a panel indicates a value that is off the chart. Any effort setting that did not produce a significant change in file size or PSNR compared to the previous effort level for that encoder is</text>
+<text x="40.0" y="1096.0" font-family='system-ui, -apple-system, "Segoe UI", sans-serif' font-size="12" fill="#898781" text-anchor="start">not labelled.</text>
 </svg>

@@ -101,14 +101,13 @@ func effortSweep(sets []dataset, th theme) string {
 		x += panelWs[i] + colGap
 	}
 
-	note := "Each point is one effort setting, labelled with its own number: our Effort 0-9, libwebp's method 0-6 for lossy and its lossless preset level 0-9, and nativewebp's three compression levels. Time and size are totals over the whole corpus and PSNR is the mean over it; time and size are on log scales. Faster is left, smaller is down, higher quality is up. Both machines share each panel's axes, so a curve sitting further right is that machine being slower, not a different scale. A triangle on a panel's top edge is a setting whose value is off the axis, labelled setting and value and reached by a dashed segment; scaling the panel to those would flatten every other engine into one band. A setting is labelled only where it moves the panel's value (1% of size, 0.1 dB of PSNR), so an unlabelled point is a setting that costs time and changes nothing: read the nearest label to its left. " +
-		"The lossy panels have to be read together, since an encoder can spend effort on either one: the same quality 90 request lands at a different PSNR for each engine and setting."
+	note := "Each point is labelled with the effort number used to get that data point. Time and size are totals over the whole set of images, PSNR is the mean. Time and size are on log scales. An arrow at the top of a panel indicates a value that is off the chart. Any effort setting that did not produce a significant change in file size or PSNR compared to the previous effort level for that encoder is not labelled."
 	footTop := row0Top + rowStrid + rowH + 92
 	h := footTop + footLineH*float64(len(footnoteWrap(note))) - 2
 
 	c := &canvas{}
-	header(c, th, h, "What effort buys",
-		"Every effort setting of every engine, encoding the same corpus. Pick the tradeoff you want, then read the setting off the point.")
+	header(c, th, h, "Time vs file size at each effort level",
+		"Effort setting of every encoder. Closer to the bottom left, the better.")
 	var entries []struct{ color, label string }
 	for _, eng := range engines {
 		entries = append(entries, struct{ color, label string }{color(eng), names[eng]})

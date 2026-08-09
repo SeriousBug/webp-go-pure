@@ -48,8 +48,8 @@ Effort is the knob to reach for either way. The figure below is every setting of
 every encoder: pick the time and size you want, then read the setting off the
 point.
 
-![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-light.svg#gh-light-mode-only)
-![What effort buys: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)
+![Time vs file size at each effort level: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-light.svg#gh-light-mode-only)
+![Time vs file size at each effort level: one line per encoder through its effort settings, with encode time on the x axis and output size or PSNR on the y axis](benchmark/charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)
 ![Peak memory per megapixel for each engine, one panel per mode and machine](benchmark/charts/peak-memory-photos-light.svg#gh-light-mode-only)
 ![Peak memory per megapixel for each engine, one panel per mode and machine](benchmark/charts/peak-memory-photos-dark.svg#gh-dark-mode-only)
 

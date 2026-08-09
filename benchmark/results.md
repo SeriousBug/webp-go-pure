@@ -282,8 +282,8 @@ One set of figures per corpus, regenerated from the tables below with
 
 ### photos
 
-![What effort buys on the photos corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-photos-light.svg#gh-light-mode-only)
-![What effort buys on the photos corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)
+![Time vs file size at each effort level, photos corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-photos-light.svg#gh-light-mode-only)
+![Time vs file size at each effort level, photos corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine and settings that are off the size axis marked on the frame](charts/effort-sweep-photos-dark.svg#gh-dark-mode-only)
 
 ![Size and quality against libwebp on the photos corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-photos-light.svg#gh-light-mode-only)
 ![Size and quality against libwebp on the photos corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-photos-dark.svg#gh-dark-mode-only)
@@ -299,8 +299,8 @@ One set of figures per corpus, regenerated from the tables below with
 
 ### transparent
 
-![What effort buys on the alpha corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine](charts/effort-sweep-transparent-light.svg#gh-light-mode-only)
-![What effort buys on the alpha corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine](charts/effort-sweep-transparent-dark.svg#gh-dark-mode-only)
+![Time vs file size at each effort level, alpha corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine](charts/effort-sweep-transparent-light.svg#gh-light-mode-only)
+![Time vs file size at each effort level, alpha corpus: one line per engine through its effort settings, with encode time on the x axis and output size or mean PSNR on the y axis, three panels per machine](charts/effort-sweep-transparent-dark.svg#gh-dark-mode-only)
 
 ![Size and quality against libwebp on the alpha corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-transparent-light.svg#gh-light-mode-only)
 ![Size and quality against libwebp on the alpha corpus: one point per test image, with output size relative to libwebp on the x axis and PSNR difference on the y axis, faceted by lossy mode](charts/rate-distortion-transparent-dark.svg#gh-dark-mode-only)
