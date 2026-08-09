@@ -19,7 +19,6 @@ import (
 package webp_test
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -269,7 +268,7 @@ func Example_encodeLossless() {
 
 func Example_encodeTransparent() {
 	fmt.Println(encodeTransparent())
-	// Output: needs lossless
+	// Output: 128
 }
 
 func Example_summarizeAnimation() {
