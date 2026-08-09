@@ -665,8 +665,8 @@ func elosslessEstimateTokenStreamCostBytes(width int, argb []uint32, options elo
 	extraBits := 0
 	for _, token := range tokens {
 		if token.kind == elosslessTokCopy {
-			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance))
-			extraBits += elosslessPrefixExtraBitCount(int(token.length)) + elosslessPrefixExtraBitCount(planeCode)
+			planeCode := elosslessDistanceToPlaneCode(width, int(token.distance()))
+			extraBits += elosslessPrefixExtraBitCount(int(token.length())) + elosslessPrefixExtraBitCount(planeCode)
 		}
 	}
 	totalBits := elosslessHistogramCost(&histograms, &group) + extraBits + len(tokens)
@@ -976,12 +976,9 @@ func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *el
 	}
 	tokens := baseTokens
 	if profile.tokenCostPasses > 0 {
-		refined, err := elosslessRetokenizeWithMeasuredCosts(width, plan.predicted, tokens, cacheBits, profile)
+		tokens, err = elosslessRetokenizeWithMeasuredCosts(width, plan.predicted, tokens, cacheBits, profile)
 		if err != nil {
 			return nil, err
-		}
-		if refined != nil {
-			tokens = refined
 		}
 	}
 	return elosslessEncodeTransformPlanToVp8lWithTokens(width, height, rgba, plan, tokens, cacheBits, profile.entropySearchLevel)
@@ -993,36 +990,43 @@ func elosslessEncodeTransformPlanToVp8l(width, height int, rgba []byte, plan *el
 // cache reference or a copy really costs on this image, and on flat graphics
 // those differ by several bits, which is enough to change which matches are
 // worth taking. Further passes re-measure because the first re-parse shifts the
-// distance distribution enough to make its own costs stale. It returns nil when
-// no pass beats the stream it was handed, so the extra work can only cost time.
+// distance distribution enough to make its own costs stale. It returns the
+// smallest stream it saw, which is the one it was handed when no pass beat it.
+//
+// A stream is one token per pixel at worst, so the passes ping-pong between two
+// buffers rather than allocating one each: once a pass has measured the stream
+// it was given, that stream's storage is dead unless it is the best so far, and
+// exactly one of the two buffers is not the best at any point.
 func elosslessRetokenizeWithMeasuredCosts(width int, argb []uint32, tokens []elosslessToken, cacheBits int, profile *elosslessLosslessSearchProfile) ([]elosslessToken, error) {
 	bestSize, err := elosslessEstimateSingleGroupSizeForTokens(width, tokens, cacheBits)
 	if err != nil {
 		return nil, err
 	}
-	var best []elosslessToken
-	measured := tokens
+	slots := [2][]elosslessToken{tokens, nil}
+	bestSlot, measuredSlot := 0, 0
 	for pass := 0; pass < profile.tokenCostPasses; pass++ {
-		histograms, err := elosslessBuildHistograms(measured, width, cacheBits)
+		histograms, err := elosslessBuildHistograms(slots[measuredSlot], width, cacheBits)
 		if err != nil {
 			return nil, err
 		}
 		options := elosslessTokenBuildOptionsFor(profile.matchSearchLevel, cacheBits)
 		options.symbolCosts = elosslessNewSymbolCosts(&histograms)
-		refined, err := elosslessBuildTokens(width, argb, options)
+		dst := 1 - bestSlot
+		refined, err := elosslessBuildTokensInto(slots[dst], width, argb, options)
 		if err != nil {
 			return nil, err
 		}
+		slots[dst] = refined
+		measuredSlot = dst
 		size, err := elosslessEstimateSingleGroupSizeForTokens(width, refined, cacheBits)
 		if err != nil {
 			return nil, err
 		}
 		if size < bestSize {
-			bestSize, best = size, refined
+			bestSize, bestSlot = size, dst
 		}
-		measured = refined
 	}
-	return best, nil
+	return slots[bestSlot], nil
 }
 
 // elosslessEncodeTransformPlanToVp8lWithTokens writes a full VP8L frame from an

@@ -43,6 +43,19 @@ func elosslessBorrowZeroedU32Buf(n int) *[]uint32 {
 
 func elosslessReturnU32Buf(buf *[]uint32) { elosslessU32BufPool.Put(buf) }
 
+var elosslessInt32BufPool = sync.Pool{New: func() any { return new([]int32) }}
+
+func elosslessBorrowInt32Buf(n int) *[]int32 {
+	buf := elosslessInt32BufPool.Get().(*[]int32)
+	if cap(*buf) < n {
+		*buf = make([]int32, n)
+	}
+	*buf = (*buf)[:n]
+	return buf
+}
+
+func elosslessReturnInt32Buf(buf *[]int32) { elosslessInt32BufPool.Put(buf) }
+
 type elosslessMatch struct {
 	distance int
 	length   int
@@ -322,16 +335,16 @@ func elosslessPrefixSymbolExtra(value int) (symbol, extraBits int) {
 // Sums are taken over spans of at most elosslessMaxLength pixels, so the int32
 // accumulator wrapping on huge images does not affect any difference read out of
 // it.
-func elosslessLiteralCostPrefix(argb []uint32, cacheBits int, symbols *elosslessSymbolCosts) ([]int32, error) {
+func elosslessLiteralCostPrefix(prefix []int32, argb []uint32, cacheBits int, symbols *elosslessSymbolCosts) error {
 	var cache elosslessColorCache
 	if cacheBits > 0 {
 		c, err := elosslessColorCacheNew(cacheBits)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		cache = c
 	}
-	prefix := make([]int32, len(argb)+1)
+	prefix[0] = 0
 	for i, pixel := range argb {
 		var cost int32
 		key, hit := 0, false
@@ -353,7 +366,7 @@ func elosslessLiteralCostPrefix(argb []uint32, cacheBits int, symbols *elossless
 			cache.insert(pixel)
 		}
 	}
-	return prefix, nil
+	return nil
 }
 
 // elosslessMatchCosts scores a candidate match against the real alternative of
@@ -423,7 +436,7 @@ type elosslessPreview struct {
 }
 
 func elosslessPreviewUpdateMatchChain(argb []uint32, index int, heads, prev []int, hashShift uint32) elosslessPreview {
-	if index+elosslessMinLength > len(argb) {
+	if prev == nil || index+elosslessMinLength > len(argb) {
 		return elosslessPreview{}
 	}
 	hash := elosslessHashMatchPixels(argb, index, hashShift)
@@ -464,7 +477,7 @@ func elosslessHashMatchPixels(argb []uint32, index int, hashShift uint32) int {
 }
 
 func elosslessUpdateMatchChain(argb []uint32, index int, heads, prev []int, hashShift uint32) {
-	if index+elosslessMinLength > len(argb) {
+	if prev == nil || index+elosslessMinLength > len(argb) {
 		return
 	}
 	hash := elosslessHashMatchPixels(argb, index, hashShift)
@@ -567,11 +580,22 @@ func elosslessFillInt(s []int, v int) {
 }
 
 func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildOptions) ([]elosslessToken, error) {
+	return elosslessBuildTokensInto(nil, width, argb, options)
+}
+
+// elosslessBuildTokensInto tokenizes into dst's storage when it is large enough.
+// The token stream is one token per pixel at worst, so re-parsing an image
+// allocates tens of megabytes per pass unless the caller hands back a stream it
+// has finished with.
+func elosslessBuildTokensInto(dst []elosslessToken, width int, argb []uint32, options elosslessTokenBuildOptions) ([]elosslessToken, error) {
 	if len(argb) == 0 {
 		return nil, nil
 	}
 
-	tokens := make([]elosslessToken, 0, len(argb))
+	tokens := dst[:0]
+	if cap(tokens) < len(argb) {
+		tokens = make([]elosslessToken, 0, len(argb))
+	}
 	var cache *elosslessColorCache
 	if options.colorCacheBits > 0 {
 		c, err := elosslessColorCacheNew(options.colorCacheBits)
@@ -580,15 +604,22 @@ func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildO
 		}
 		cache = &c
 	}
-	headSize, hashShift := elosslessMatchHashParams(len(argb))
-	headsBuf := elosslessBorrowIntBuf(headSize)
-	defer elosslessReturnIntBuf(headsBuf)
-	heads := *headsBuf
-	elosslessFillInt(heads, elosslessIntMax)
-	prevBuf := elosslessBorrowIntBuf(len(argb))
-	defer elosslessReturnIntBuf(prevBuf)
-	prev := *prevBuf
-	elosslessFillInt(prev, elosslessIntMax)
+	// The hash chain is one int per pixel plus a head table; at match search
+	// level 0 nothing reads it, so neither is allocated or maintained.
+	var heads, prev []int
+	var hashShift uint32
+	if options.matchChainDepth > 0 {
+		var headSize int
+		headSize, hashShift = elosslessMatchHashParams(len(argb))
+		headsBuf := elosslessBorrowIntBuf(headSize)
+		defer elosslessReturnIntBuf(headsBuf)
+		heads = *headsBuf
+		elosslessFillInt(heads, elosslessIntMax)
+		prevBuf := elosslessBorrowIntBuf(len(argb))
+		defer elosslessReturnIntBuf(prevBuf)
+		prev = *prevBuf
+		elosslessFillInt(prev, elosslessIntMax)
+	}
 	var windowOffsets []int
 	if options.useWindowOffsets {
 		windowOffsets = elosslessBuildWindowOffsets(width, options.windowOffsetLimit)
@@ -596,11 +627,12 @@ func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildO
 	costs := elosslessMatchCosts{width: width, symbols: options.symbolCosts}
 	costCacheBits := options.parseCostCacheBits()
 	if costCacheBits > 0 || options.symbolCosts != nil {
-		prefix, err := elosslessLiteralCostPrefix(argb, costCacheBits, options.symbolCosts)
-		if err != nil {
+		prefixBuf := elosslessBorrowInt32Buf(len(argb) + 1)
+		defer elosslessReturnInt32Buf(prefixBuf)
+		if err := elosslessLiteralCostPrefix(*prefixBuf, argb, costCacheBits, options.symbolCosts); err != nil {
 			return nil, err
 		}
-		costs.literalPrefix = prefix
+		costs.literalPrefix = *prefixBuf
 	}
 
 	index := 0
@@ -642,7 +674,7 @@ func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildO
 		if bestMatch.set {
 			distance := bestMatch.distance
 			length := bestMatch.length
-			tokens = append(tokens, elosslessToken{kind: elosslessTokCopy, distance: int32(distance), length: uint16(length)})
+			tokens = append(tokens, elosslessCopyToken(int32(distance), uint16(length)))
 			if cache != nil {
 				for _, pixel := range argb[index : index+length] {
 					cache.insert(pixel)
@@ -653,14 +685,14 @@ func elosslessBuildTokens(width int, argb []uint32, options elosslessTokenBuildO
 			}
 			index += length
 		} else if cacheHit {
-			tokens = append(tokens, elosslessToken{kind: elosslessTokCache, key: uint16(cacheKey)})
+			tokens = append(tokens, elosslessCacheToken(uint16(cacheKey)))
 			if cache != nil {
 				cache.insert(argb[index])
 			}
 			elosslessUpdateMatchChain(argb, index, heads, prev, hashShift)
 			index++
 		} else {
-			tokens = append(tokens, elosslessToken{kind: elosslessTokLiteral, argb: argb[index]})
+			tokens = append(tokens, elosslessLiteralToken(argb[index]))
 			if cache != nil {
 				cache.insert(argb[index])
 			}
