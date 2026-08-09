@@ -97,7 +97,7 @@ memory table as MiB, not as MiB per megapixel.
   size, geometric mean 0.998x, at 0.34-0.60x its time. `wasm` exposes only
   libwebp's `Method` for lossless, not the preset level, which is why the same C
   encoder lands slightly larger there than in the `libwebp` rows.
-- **vs `nativewebp`, lossless: 8-23% smaller files.** Geometric mean 0.835x its
+- **vs `nativewebp`, lossless: 9-23% smaller files.** Geometric mean 0.835x its
   size, for 1.25-1.88x its time on arm64 and 1.07-1.60x on amd64 at the fixed
   settings. The effort sweep is the fairer comparison and it is not close; see
   below. `nativewebp` has no lossy mode, so the choice only exists for VP8L.
@@ -154,8 +154,8 @@ On memory:
 
 - **Lossy, we are the lightest of the three Go options:** 0.74-0.96x libwebp's
   peak on arm64 and 0.82-0.93x on amd64, 15-19 MiB per megapixel on the
-  geometric mean. On the 5.5+ MP images that is 69-78 MiB against libwebp's
-  92-106 MiB. Encoding a 4K frame costs on the order of 150-190 MiB.
+  geometric mean. On the 5.5+ MP images that is 69-96 MiB against libwebp's
+  91-106 MiB. Encoding a 4K frame costs on the order of 150-190 MiB.
 - **`wasm` costs 1.4-2.5x libwebp's peak in the lossy modes:** it carries a
   WebAssembly runtime and its own linear memory on top of the encode. That is the
   memory half of the cgo-free tradeoff, next to the 2.3-4.8x on time.
@@ -189,7 +189,7 @@ inside the measurement, as an application would:
 - **The `psnr_db` column in the decode tables is not zero, and that is about the
   other engines' output format.** `gen2brain/webp` hands back `*image.NYCbCrA`
   even for a lossless VP8L file, so its RGB differs from libwebp's own decode of
-  the same bytes by up to 35/255 on a channel, 25-32 dB. `x/image` is exact on
+  the same bytes by up to 35/255 on a channel, 24-32 dB. `x/image` is exact on
   lossless and shows the same YUV-to-RGB rounding difference on lossy. Our decode
   agrees with libwebp byte for byte in every row of every table here.
 
