@@ -4,12 +4,12 @@ Pure Go WebP decoder and encoder. No cgo, no external dependencies.
 
     go get github.com/SeriousBug/webp-go-pure
 
-Decodes lossy `VP8` and lossless `VP8L` still images, decodes animated WebP into
-a composited frame sequence, and encodes still images as lossy or lossless.
-Alpha comes through `ALPH` chunks on lossy still images and on lossy animation
-frames. Both encoders keep transparency: lossless reproduces the whole image
-exactly, and lossy stores the alpha channel losslessly next to the quantized
-color. Encoder output is byte-identical on amd64 and arm64.
+Decodes any WebP still image and decodes animated WebP into a composited frame
+sequence, ready to display. Encodes still images, lossy or lossless.
+
+Transparency works in every mode, including lossy: your alpha channel comes back
+exactly as you gave it, and only the color is compressed with loss. Encoder
+output is byte-identical on amd64 and arm64.
 
 The `std` subpackage implements the standard library's codec interfaces, so
 `image.Image` goes in and comes out and `image.Decode` works. Underneath it, the
